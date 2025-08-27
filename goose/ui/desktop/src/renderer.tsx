@@ -9,6 +9,12 @@ import { ErrorBoundary } from './components/ErrorBoundary';
 import { patchConsoleLogging } from './utils';
 import SuspenseLoader from './suspense-loader';
 
+// Import styles
+import './styles/main.css';
+
+// Import browser mocks for development
+import './browser-mock';
+
 patchConsoleLogging();
 
 const App = lazy(() => import('./App'));
