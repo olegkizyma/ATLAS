@@ -62,3 +62,10 @@ model.pth
 *.npz
 *.ark
 *.glb
+
+# TTS virtual environment and audio files
+mcp_tts_ukrainian/tts_venv/
+mcp_tts_ukrainian/data/
+mcp_tts_ukrainian/*.wav
+mcp_tts_ukrainian/test_audio.wav
+mcp_tts_ukrainian/demo_*.wav

@@ -208,7 +208,7 @@ feats_extract_conf:
     n_mels: 80
 normalize: global_mvn
 normalize_conf:
-    stats_file: ../data/feats_stats.npz
+    stats_file: ./feats_stats.npz
 tts: joint_text2wav
 tts_conf:
     text2mel_type: tacotron2
