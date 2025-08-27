@@ -329,6 +329,21 @@ class MCPTTSServer:
             }
         }
     
+    def call_tool_sync(self, tool_name: str, args: Dict[str, Any]) -> str:
+        """Синхронна версія call_tool для виклику з Rust"""
+        try:
+            # Запускаємо async метод в новому event loop
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                result = loop.run_until_complete(self.call_tool(tool_name, args))
+                return json.dumps(result, ensure_ascii=False)
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Error in call_tool_sync: {e}")
+            return json.dumps({"status": "error", "message": f"Sync call error: {str(e)}"}, ensure_ascii=False)
+
     async def call_tool(self, tool_name: str, args: Dict[str, Any]) -> Dict[str, Any]:
         """Виклик інструменту"""
         try:

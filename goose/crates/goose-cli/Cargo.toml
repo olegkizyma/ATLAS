@@ -21,6 +21,7 @@ goose-mcp = { path = "../goose-mcp" }
 mcp-client = { path = "../mcp-client" }
 mcp-server = { path = "../mcp-server" }
 mcp-core = { path = "../mcp-core" }
+mcp-tts-ukrainian = { path = "../mcp-tts-ukrainian" }
 rmcp = { workspace = true }
 clap = { version = "4.4", features = ["derive"] }
 cliclack = "0.3.5"

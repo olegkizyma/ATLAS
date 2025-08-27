@@ -4,6 +4,7 @@ use goose_mcp::{
 };
 use mcp_server::router::RouterService;
 use mcp_server::{BoundedService, ByteTransport, Server};
+use mcp_tts_ukrainian::UkrainianTTSRouter;
 use tokio::io::{stdin, stdout};
 
 use std::sync::Arc;
@@ -33,6 +34,7 @@ pub async fn run_server(name: &str) -> Result<()> {
         "autovisualiser" => Some(Box::new(RouterService(AutoVisualiserRouter::new()))),
         "memory" => Some(Box::new(RouterService(MemoryRouter::new()))),
         "tutorial" => Some(Box::new(RouterService(TutorialRouter::new()))),
+        "ukrainian-tts" => Some(Box::new(RouterService(UkrainianTTSRouter::new()))),
         _ => None,
     };
 
