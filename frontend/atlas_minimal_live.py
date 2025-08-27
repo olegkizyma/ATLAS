@@ -10,6 +10,7 @@ import time
 import subprocess
 import threading
 import queue
+import re
 from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
@@ -31,15 +32,21 @@ class LiveLogStreamer:
         self.log_queue = queue.Queue()
         self.is_running = False
         # Читаємо URL з env або fallback на localhost
-        self.mcp_proxy_url = os.getenv("ATLAS_MCP_PROXY_URL", "http://localhost:9090")
-        self.atlas_core_url = os.getenv("ATLAS_CORE_URL", "http://localhost:8000")
-        self.mcp_proxy_enabled = os.getenv("ATLAS_MCP_PROXY_MODE", "false").lower() == "true"
+        self.atlas_core_url = os.getenv("ATLAS_CORE_URL", "http://localhost:3000")  # Goose сервер на порту 3000
+        
+        # Стан всіх процесів для передачі
+        self.system_status = {
+            "processes": {},
+            "services": {},
+            "network": {},
+            "resources": {},
+            "timestamp": None
+        }
         
     def start_streaming(self):
         """Запуск стрімінгу логів"""
         self.is_running = True
         threading.Thread(target=self._system_monitor, daemon=True).start()
-        threading.Thread(target=self._mcp_monitor, daemon=True).start()
         threading.Thread(target=self._atlas_monitor, daemon=True).start()
         print("🟢 Live log streaming started")
         
@@ -57,6 +64,15 @@ class LiveLogStreamer:
             except queue.Empty:
                 break
         return logs
+    
+    def get_system_status(self):
+        """Отримання поточного стану системи"""
+        return self.system_status.copy()
+        
+    def update_system_status(self, category, key, value):
+        """Оновлення стану системи"""
+        self.system_status[category][key] = value
+        self.system_status["timestamp"] = datetime.now().isoformat()
         
     def _add_log(self, message, level="info"):
         """Додавання логу до черги"""
@@ -71,7 +87,7 @@ class LiveLogStreamer:
             })
             
     def _system_monitor(self):
-        """Моніторинг системи"""
+        """Моніторинг системи та збереження стану процесів"""
         while self.is_running:
             try:
                 # Процеси Atlas
@@ -83,60 +99,101 @@ class LiveLogStreamer:
                 
                 if result.returncode == 0:
                     lines = result.stdout.split('\n')
-                    atlas_processes = [line for line in lines if 'atlas' in line.lower() and 'grep' not in line]
-                    mcp_processes = [line for line in lines if 'mcp' in line and 'grep' not in line]
                     
-                    if atlas_processes:
-                        self._add_log(f"[ATLAS] {len(atlas_processes)} processes running")
+                    # Пошук процесів Atlas
+                    atlas_processes = []
+                    goose_processes = []
+                    mcp_processes = []
+                    python_processes = []
                     
-                    if mcp_processes:
-                        self._add_log(f"[MCP] {len(mcp_processes)} services active")
+                    for line in lines:
+                        if line.strip() and 'grep' not in line:
+                            if 'atlas' in line.lower():
+                                atlas_processes.append(self._parse_process_line(line))
+                            elif 'goose' in line.lower():
+                                goose_processes.append(self._parse_process_line(line))
+                            elif 'mcp' in line.lower():
+                                mcp_processes.append(self._parse_process_line(line))
+                            elif 'python' in line and ('atlas' in line or 'mcp' in line):
+                                python_processes.append(self._parse_process_line(line))
+                    
+                    # Оновлення стану процесів
+                    self.update_system_status("processes", "atlas", {
+                        "count": len(atlas_processes),
+                        "details": atlas_processes
+                    })
+                    self.update_system_status("processes", "goose", {
+                        "count": len(goose_processes), 
+                        "details": goose_processes
+                    })
+                    self.update_system_status("processes", "mcp", {
+                        "count": len(mcp_processes),
+                        "details": mcp_processes
+                    })
+                    self.update_system_status("processes", "python", {
+                        "count": len(python_processes),
+                        "details": python_processes
+                    })
+                    
+                    # Логування
+                    total_processes = len(atlas_processes) + len(goose_processes) + len(mcp_processes)
+                    if total_processes > 0:
+                        self._add_log(f"[SYSTEM] {total_processes} Atlas-related processes active")
                 
-                # Порти
+                # Мережеві підключення  
                 try:
                     result = subprocess.run(
-                        ["lsof", "-i", ":8000", "-i", ":9090", "-i", ":8080"], 
+                        ["lsof", "-i", ":3000", "-i", ":8080"], 
                         capture_output=True, 
                         text=True
                     )
                     if result.returncode == 0:
                         lines = result.stdout.split('\n')[1:]  # Skip header
-                        active_ports = [line for line in lines if line.strip()]
-                        if active_ports:
-                            self._add_log(f"[NET] {len(active_ports)} active connections")
-                except:
-                    pass
+                        active_connections = []
+                        for line in lines:
+                            if line.strip():
+                                active_connections.append(self._parse_network_line(line))
+                        
+                        self.update_system_status("network", "connections", {
+                            "count": len(active_connections),
+                            "details": active_connections
+                        })
+                        
+                        if active_connections:
+                            self._add_log(f"[NET] {len(active_connections)} active connections on Atlas ports")
+                except Exception as e:
+                    self._add_log(f"[NET] Network check failed: {str(e)[:30]}...", "warning")
+                
+                # Використання ресурсів
+                try:
+                    # CPU та Memory
+                    result = subprocess.run(
+                        ["top", "-l", "1", "-n", "0"], 
+                        capture_output=True, 
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        cpu_info = self._parse_cpu_info(result.stdout)
+                        self.update_system_status("resources", "cpu", cpu_info)
+                        
+                        # Disk space
+                        result = subprocess.run(
+                            ["df", "-h", "/"], 
+                            capture_output=True, 
+                            text=True
+                        )
+                        if result.returncode == 0:
+                            disk_info = self._parse_disk_info(result.stdout)
+                            self.update_system_status("resources", "disk", disk_info)
+                            
+                except Exception as e:
+                    self._add_log(f"[RESOURCES] Resource check failed: {str(e)[:30]}...", "warning")
                     
                 time.sleep(3)
                 
             except Exception as e:
                 self._add_log(f"[ERROR] System monitor: {str(e)[:30]}...", "error")
                 time.sleep(5)
-                
-    def _mcp_monitor(self):
-        """Моніторинг MCP сервісів"""
-        while self.is_running:
-            try:
-                if not self.mcp_proxy_enabled:
-                    # Якщо proxy вимкнено, пропускаємо моніторинг
-                    time.sleep(10)
-                    continue
-                    
-                response = requests.get(f"{self.mcp_proxy_url}/health", timeout=3)
-                if response.status_code == 200:
-                    self._add_log("[MCP] Proxy operational")
-                elif response.status_code == 404:
-                    self._add_log("[MCP] Proxy running (404 expected)")
-                else:
-                    self._add_log(f"[MCP] Proxy status: {response.status_code}", "warning")
-                    
-            except requests.exceptions.ConnectionError:
-                if self.mcp_proxy_enabled:
-                    self._add_log("[MCP] Proxy offline", "warning")
-            except Exception as e:
-                self._add_log(f"[MCP] Error: {str(e)[:40]}...", "error")
-                
-            time.sleep(5)
             
     def _atlas_monitor(self):
         """Моніторинг Atlas Core"""
@@ -145,22 +202,105 @@ class LiveLogStreamer:
                 response = requests.get(f"{self.atlas_core_url}/", timeout=3)
                 if response.status_code == 200:
                     self._add_log("[ATLAS] Core online")
+                    self.update_system_status("services", "atlas_core", {
+                        "status": "online",
+                        "status_code": 200,
+                        "last_check": datetime.now().isoformat()
+                    })
                 else:
                     self._add_log(f"[ATLAS] Core status: {response.status_code}", "warning")
+                    self.update_system_status("services", "atlas_core", {
+                        "status": "warning", 
+                        "status_code": response.status_code,
+                        "last_check": datetime.now().isoformat()
+                    })
                     
             except requests.exceptions.ConnectionError:
                 self._add_log("[ATLAS] Core offline", "warning")
+                self.update_system_status("services", "atlas_core", {
+                    "status": "offline",
+                    "error": "Connection refused",
+                    "last_check": datetime.now().isoformat()
+                })
             except Exception as e:
                 self._add_log(f"[ATLAS] Error: {str(e)[:40]}...", "error")
+                self.update_system_status("services", "atlas_core", {
+                    "status": "error",
+                    "error": str(e)[:100],
+                    "last_check": datetime.now().isoformat()
+                })
                 
             time.sleep(6)
+    
+    def _parse_process_line(self, line):
+        """Парсинг рядка процесу з ps aux"""
+        try:
+            parts = line.split()
+            if len(parts) >= 11:
+                return {
+                    "user": parts[0],
+                    "pid": parts[1],
+                    "cpu": parts[2],
+                    "mem": parts[3],
+                    "command": " ".join(parts[10:])[:50] + "..." if len(" ".join(parts[10:])) > 50 else " ".join(parts[10:])
+                }
+        except:
+            return {"raw": line[:50] + "..." if len(line) > 50 else line}
+        return {}
+    
+    def _parse_network_line(self, line):
+        """Парсинг рядка мережевого підключення з lsof"""
+        try:
+            parts = line.split()
+            if len(parts) >= 9:
+                return {
+                    "command": parts[0],
+                    "pid": parts[1],
+                    "user": parts[2],
+                    "type": parts[4],
+                    "node": parts[7],
+                    "name": parts[8] if len(parts) > 8 else ""
+                }
+        except:
+            return {"raw": line[:50] + "..." if len(line) > 50 else line}
+        return {}
+    
+    def _parse_cpu_info(self, top_output):
+        """Парсинг інформації про CPU з top"""
+        try:
+            lines = top_output.split('\n')
+            for line in lines:
+                if 'CPU usage' in line:
+                    # Приклад: CPU usage: 12.34% user, 5.67% sys, 82.01% idle
+                    parts = line.split(':')[1] if ':' in line else line
+                    return {"usage_line": parts.strip()[:100]}
+            return {"usage_line": "CPU info not found"}
+        except:
+            return {"usage_line": "CPU parsing failed"}
+    
+    def _parse_disk_info(self, df_output):
+        """Парсинг інформації про диск з df"""
+        try:
+            lines = df_output.split('\n')
+            if len(lines) > 1:
+                parts = lines[1].split()
+                if len(parts) >= 5:
+                    return {
+                        "filesystem": parts[0],
+                        "size": parts[1],
+                        "used": parts[2],
+                        "available": parts[3],
+                        "usage_percent": parts[4]
+                    }
+            return {"info": "Disk parsing failed"}
+        except:
+            return {"info": "Disk info unavailable"}
 
 class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     live_streamer = None
     
     def __init__(self, *args, **kwargs):
-        self.mcp_proxy_url = "http://localhost:9090"
-        self.atlas_core_url = "http://localhost:8000"
+        self.atlas_core_url = "http://localhost:3000"
         super().__init__(*args, **kwargs)
 
     @classmethod
@@ -182,6 +322,79 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
+    def _clean_ansi_codes(self, text):
+        """Видаляє ANSI escape коди з тексту"""
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        return ansi_escape.sub('', text)
+    
+    def _parse_log_line(self, line):
+        """Парсить лог лінію, витягуючи тільки рівень та повідомлення"""
+        # Видаляємо ANSI коди
+        clean_line = self._clean_ansi_codes(line)
+        
+        # Шаблон для парсингу логів у форматі:
+        # [2025-08-27T21:39:23.655482] [DEBUG] goose: 2025-08-27T18:32:28.162604Z  INFO goose::scheduler_factory: Creating legacy scheduler
+        # Результат: INFO goose::scheduler_factory: Creating legacy scheduler
+        
+        # Перший варіант - складний формат з подвійною датою і префіксом "goose:"
+        pattern1 = r'\[[\d\-T:.]+\]\s+\[(\w+)\]\s+\w+:\s*[\d\-T:.Z]+\s+(\w+)\s+(.+)'
+        match = re.search(pattern1, clean_line)
+        if match:
+            level = match.group(2)  # Використовуємо другий рівень (INFO, DEBUG, тощо)
+            message = match.group(3)
+            return f"{level} {message}"
+        
+        # Другий варіант - формат [DEBUG] goose: INFO message
+        pattern2 = r'\[[\d\-T:.]+\]\s+\[(\w+)\]\s+\w+:\s+(\w+)\s+(.+)'
+        match = re.search(pattern2, clean_line)
+        if match:
+            level = match.group(2)  # Використовуємо другий рівень
+            message = match.group(3)
+            return f"{level} {message}"
+        
+        # Третій варіант - звичайний формат з однією датою
+        pattern3 = r'\[[\d\-T:.]+\]\s+\[(\w+)\]\s+(.+)'
+        match = re.search(pattern3, clean_line)
+        if match:
+            level = match.group(1)
+            message = match.group(2)
+            
+            # Обробляємо різні варіанти message
+            if message.startswith('goose: '):
+                # Видаляємо префікс "goose: "
+                message = message[7:]
+                
+                # Видаляємо рядки типу "at crates/..."
+                if message.startswith('at crates/'):
+                    return None  # Пропускаємо такі рядки
+                
+                # Перевіряємо чи не є це лог з рівнем всередині
+                inner_level_match = re.match(r'(\w+)\s+(.+)', message)
+                if inner_level_match and inner_level_match.group(1) in ['INFO', 'DEBUG', 'WARN', 'ERROR', 'TRACE']:
+                    # Використовуємо внутрішній рівень
+                    level = inner_level_match.group(1)
+                    message = inner_level_match.group(2)
+            else:
+                # Для звичайних повідомлень без goose: залишаємо рівень як є
+                # Але прибираємо джерело типу "atlas_frontend:"
+                if ': ' in message:
+                    parts = message.split(': ', 1)
+                    if len(parts) == 2:
+                        message = parts[1]
+                    
+            return f"{level} {message}"
+        
+        # Четвертий варіант - тільки timestamp та повідомлення
+        pattern4 = r'[\d\-T:.Z]+\s+(\w+)\s+(.+)'
+        match = re.search(pattern4, clean_line)
+        if match:
+            level = match.group(1)
+            message = match.group(2)
+            return f"{level} {message}"
+        
+        # Якщо нічого не знайдено, повертаємо очищену лінію
+        return clean_line
+
     def do_GET(self):
         """Обробка GET запитів"""
         if self.path == "/" or self.path == "/index.html":
@@ -192,6 +405,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.serve_health()
         elif self.path == "/api/logs":
             self.serve_live_logs()
+        elif self.path == "/logs/stream":
+            self.serve_log_stream()
+        elif self.path == "/api/status":
+            self.serve_system_status()
         else:
             super().do_GET()
 
@@ -244,8 +461,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         try:
             services = {
                 "atlas_minimal": True,
-                "mcp_proxy": self.check_service(self.mcp_proxy_url),
-                "atlas_core": self.check_service(self.atlas_core_url),
+                "atlas_core": "unknown",  # Тимчасово не перевіряємо
                 "live_logs": self.live_streamer is not None,
                 "timestamp": datetime.now().isoformat()
             }
@@ -289,14 +505,97 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             logger.error(f"Live logs error: {e}")
             self.send_error(500, str(e))
 
+    def serve_log_stream(self):
+        """Server-Sent Events стрім логів"""
+        try:
+            # Встановлюємо заголовки для SSE
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            # Відправляємо повідомлення про статус підключення
+            status_data = {
+                "timestamp": datetime.now().isoformat(),
+                "level": "INFO", 
+                "source": "atlas_frontend",
+                "message": "Log stream connected successfully"
+            }
+            self.wfile.write(f"data: {json.dumps(status_data)}\n\n".encode())
+            
+            # Читаємо останні логи з /tmp/goose.log (якщо є)
+            try:
+                if Path("/tmp/goose.log").exists():
+                    with open("/tmp/goose.log", 'r') as f:
+                        lines = f.readlines()
+                        for line in lines[-10:]:  # Останні 10 рядків
+                            if line.strip():
+                                # Парсимо лог лінію (видаляє дати та залишає тільки рівень + повідомлення)
+                                parsed_line = self._parse_log_line(line.strip())
+                                # Пропускаємо None значення (наприклад, рядки "at crates/...")
+                                if parsed_line is not None:
+                                    event_data = {
+                                        "timestamp": datetime.now().isoformat(),
+                                        "level": "DEBUG",  # Тьмяніший рівень
+                                        "source": "goose",
+                                        "message": parsed_line
+                                    }
+                                    self.wfile.write(f"data: {json.dumps(event_data)}\n\n".encode())
+                                    self.wfile.flush()  # Примусово відправляємо дані
+            except Exception as e:
+                logger.error(f"Error reading goose logs: {e}")
+            
+            # Відправляємо кінцеве повідомлення
+            end_data = {
+                "timestamp": datetime.now().isoformat(),
+                "level": "INFO",
+                "source": "atlas_frontend", 
+                "message": "Initial log data sent"
+            }
+            self.wfile.write(f"data: {json.dumps(end_data)}\n\n".encode())
+            self.wfile.flush()
+            
+        except Exception as e:
+            logger.error(f"Log stream error: {e}")
+            # Не викликаємо send_error після send_response
+            return
+
+    def serve_system_status(self):
+        """Отримання повного стану системи"""
+        try:
+            if self.live_streamer is None:
+                status = {
+                    "error": "System monitor not initialized",
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                status = self.live_streamer.get_system_status()
+                if not status.get("timestamp"):
+                    status["timestamp"] = datetime.now().isoformat()
+            
+            response = json.dumps(status, indent=2).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+        except Exception as e:
+            logger.error(f"System status error: {e}")
+            self.send_error(500, str(e))
+
     def handle_chat(self):
-        """Обробка чат запитів"""
+        """Обробка чат запитів з контекстом поточного стану системи"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
             message = data.get("message", "")
+            include_status = data.get("include_status", True)  # За замовчуванням включаємо стан
+            
             if not message:
                 self.send_json_response({"error": "Message is required"}, 400)
                 return
@@ -305,8 +604,17 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             if self.live_streamer:
                 self.live_streamer._add_log(f"[CHAT] User: {message[:30]}...")
             
+            # Підготовка повідомлення з контекстом системи
+            enhanced_message = message
+            if include_status and self.live_streamer:
+                system_status = self.live_streamer.get_system_status()
+                if system_status and system_status.get("timestamp"):
+                    # Додаємо стислий звіт про систему до повідомлення
+                    status_context = self._format_status_for_ai(system_status)
+                    enhanced_message = f"{message}\n\n[SYSTEM STATUS CONTEXT]\n{status_context}"
+            
             # Спочатку пробуємо Atlas Core (пріоритет)
-            response = self.send_to_atlas_core(message)
+            response = self.send_to_atlas_core(enhanced_message)
             if response:
                 if self.live_streamer:
                     self.live_streamer._add_log(f"[CHAT] Atlas response: {response[:30]}...")
@@ -317,23 +625,54 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 self.send_json_response({"response": response})
                 return
             
-            # Fallback на MCP proxy 
-            response = self.send_to_mcp_proxy(message)
-            if response:
-                if self.live_streamer:
-                    self.live_streamer._add_log(f"[CHAT] Atlas response: {response[:30]}...")
-                
-                # Автоматичне TTS для відповідей Atlas
-                self.send_tts_to_atlas(response)
-                
-                self.send_json_response({"response": response})
-                return
-            
-            self.send_json_response({"response": "Всі сервіси недоступні"})
+            self.send_json_response({"response": "Atlas Core сервіс недоступний"})
             
         except Exception as e:
             logger.error(f"Chat error: {e}")
             self.send_json_response({"error": str(e)}, 500)
+    
+    def _format_status_for_ai(self, status):
+        """Форматування стану системи для передачі AI"""
+        try:
+            lines = []
+            
+            # Процеси
+            if status.get("processes"):
+                total_proc = sum(p.get("count", 0) for p in status["processes"].values())
+                lines.append(f"Processes: {total_proc} Atlas-related running")
+                
+                for proc_type, proc_info in status["processes"].items():
+                    if proc_info.get("count", 0) > 0:
+                        lines.append(f"  - {proc_type}: {proc_info['count']} active")
+            
+            # Сервіси
+            if status.get("services"):
+                lines.append("Services:")
+                for service, service_info in status["services"].items():
+                    service_status = service_info.get("status", "unknown")
+                    lines.append(f"  - {service}: {service_status}")
+            
+            # Мережа
+            if status.get("network", {}).get("connections"):
+                conn_count = status["network"]["connections"].get("count", 0)
+                lines.append(f"Network: {conn_count} active connections")
+            
+            # Ресурси
+            if status.get("resources"):
+                if status["resources"].get("cpu"):
+                    cpu_info = status["resources"]["cpu"].get("usage_line", "")
+                    if cpu_info:
+                        lines.append(f"CPU: {cpu_info}")
+                        
+                if status["resources"].get("disk"):
+                    disk_info = status["resources"]["disk"]
+                    if disk_info.get("usage_percent"):
+                        lines.append(f"Disk: {disk_info['usage_percent']} used")
+            
+            return "\n".join(lines) if lines else "System status unavailable"
+            
+        except Exception as e:
+            return f"Status formatting error: {str(e)}"
 
     def handle_tts(self):
         """Обробка TTS запитів"""
@@ -369,21 +708,6 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(response)
 
-    def send_to_mcp_proxy(self, message):
-        """Відправлення повідомлення через MCP proxy"""
-        try:
-            response = requests.post(
-                f"{self.mcp_proxy_url}/api/chat",
-                json={"message": message},
-                timeout=30
-            )
-            if response.status_code == 200:
-                data = response.json()
-                return data.get("response", data.get("message"))
-        except Exception as e:
-            logger.debug(f"MCP proxy request failed: {e}")
-        return None
-
     def send_to_atlas_core(self, message):
         """Відправлення повідомлення до Atlas Core"""
         try:
@@ -400,11 +724,11 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         return None
 
     def send_tts_request(self, text):
-        """TTS запит через MCP proxy"""
+        """TTS запит безпосередньо до MCP серверу"""
         try:
             response = requests.post(
-                f"{self.mcp_proxy_url}/api/tts",
-                json={"text": text},
+                "http://localhost:3001/tts",
+                json={"text": text, "language": "uk"},
                 timeout=10
             )
             return response.status_code == 200
@@ -443,14 +767,18 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     def check_service(self, url):
         """Перевірка доступності сервісу"""
         try:
-            if url.endswith(':8000'):
+            if url.endswith(':3000'):
+                # Goose сервер має /status ендпоінт
+                response = requests.get(f"{url}/status", timeout=2)
+            elif url.endswith(':8000'):
                 # Atlas Core використовує головну сторінку замість /health
-                response = requests.get(url, timeout=5)
+                response = requests.get(url, timeout=2)
             else:
                 # Для інших сервісів використовуємо /health
-                response = requests.get(f"{url}/health", timeout=5)
+                response = requests.get(f"{url}/health", timeout=2)
             return response.status_code < 500
-        except:
+        except Exception as e:
+            logger.debug(f"Service check failed for {url}: {e}")
             return False
 
 def main():

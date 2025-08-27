@@ -55,7 +55,7 @@
             position: absolute;
             left: 0;
             top: 0;
-            width: 33.333%;
+            width: 30%;
             height: 100%;
             background: rgba(0, 0, 0, 0.4);
             padding: 8px; /* рівномірно; текст відступимо всередині контейнера */
@@ -78,27 +78,33 @@
         }
 
         .log-line {
-            color: #00ff41;
+            color: #4a9c5a;
             margin: 0;
             padding: 2px 0 1px 0; /* трохи більше вертикального відступу для більшого шрифту */
             word-wrap: break-word;
             font-size: 11px; /* було 10px */
             line-height: 1.28; /* підлаштовано для читабельності */
             font-family: 'Courier New', monospace;
+            font-weight: normal; /* не жирний шрифт */
             white-space: pre-wrap;
             letter-spacing: 0.3px; /* легке розрідження для хакерського вигляду */
         }
 
         .log-line.error {
-            color: #00ff41;
+            color: #d16969;
         }
 
         .log-line.warning {
-            color: #00ff41;
+            color: #d19a66;
         }
 
         .log-line.info {
-            color: #178d35;
+            color: #5c9e5c;
+        }
+
+        .log-line.debug {
+            color: #4a7a5a;
+            opacity: 0.7;
         }
 
         /* Right Panel - Chat */
@@ -106,7 +112,7 @@
             position: absolute;
             right: 0;
             top: 0;
-            width: 33.333%;
+            width: 50%;
             height: 100%;
             background: rgba(0, 0, 0, 0.4);
             padding: 8px;
@@ -114,6 +120,59 @@
             border-left: 1px solid rgba(0, 255, 65, 0.1);
             display: flex;
             flex-direction: column;
+        }
+
+        /* Status Panel - System Status */
+        .status-panel {
+            position: absolute;
+            left: 30%;
+            top: 0;
+            width: 20%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px;
+            pointer-events: auto;
+            font-size: 10px;
+            border-left: 1px solid rgba(0, 255, 65, 0.1);
+        }
+
+        .status-container {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-right: 8px;
+        }
+
+        .status-section {
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            padding-bottom: 6px;
+        }
+
+        .status-title {
+            color: #00ff41;
+            font-weight: bold;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .status-item {
+            color: #00ff41;
+            margin: 1px 0;
+            font-size: 9px;
+            opacity: 0.8;
+        }
+
+        .status-item.online {
+            color: #00ff41;
+        }
+
+        .status-item.warning {
+            color: #ffff41;
+        }
+
+        .status-item.error {
+            color: #ff4141;
         }
 
         .chat-messages {
@@ -243,11 +302,47 @@
         <!-- Left Panel - MCP Logs -->
         <div class="logs-panel">
             <div class="logs-container" id="logsContainer">
-                <div class="log-line">[05:21:07] [ATLAS] System initializing...</div>
-                <div class="log-line">[05:21:08] [MCP] Proxy connecting...</div>
-                <div class="log-line">[05:21:09] [TTS] Service ready</div>
-                <div class="log-line">[05:21:10] [AUTO] Automation ready</div>
-                <div class="log-line">[05:21:11] [NET] Ports listening</div>
+                <div class="log-line debug">[05:21:07] [ATLAS] System initializing...</div>
+                <div class="log-line debug">[05:21:09] [TTS] Service ready</div>
+                <div class="log-line debug">[05:21:10] [AUTO] Automation ready</div>
+                <div class="log-line debug">[05:21:11] [NET] Ports listening</div>
+            </div>
+        </div>
+
+        <!-- Status Panel - System Status -->
+        <div class="status-panel">
+            <div class="status-container" id="statusContainer">
+                <div class="status-section">
+                    <div class="status-title">PROCESSES</div>
+                    <div id="processStatus">
+                        <div class="status-item">Atlas: 0</div>
+                        <div class="status-item">Goose: 0</div>
+                        <div class="status-item">MCP: 0</div>
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-title">SERVICES</div>
+                    <div id="serviceStatus">
+                        <div class="status-item">Core: offline</div>
+                        <div class="status-item">MCP: offline</div>
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-title">NETWORK</div>
+                    <div id="networkStatus">
+                        <div class="status-item">Connections: 0</div>
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-title">RESOURCES</div>
+                    <div id="resourceStatus">
+                        <div class="status-item">CPU: --</div>
+                        <div class="status-item">Disk: --</div>
+                    </div>
+                </div>
             </div>
         </div>
 
@@ -289,6 +384,7 @@
                 this.initializeElements();
                 this.initializeVoiceRecognition();
                 this.startMCPLogging();
+                this.startStatusMonitoring();
                 this.bindEvents();
             }
 
@@ -297,6 +393,11 @@
                 this.chatMessages = document.getElementById('chatMessages');
                 this.voiceButton = document.getElementById('voiceButton');
                 this.logsContainer = document.getElementById('logsContainer');
+                this.statusContainer = document.getElementById('statusContainer');
+                this.processStatus = document.getElementById('processStatus');
+                this.serviceStatus = document.getElementById('serviceStatus');
+                this.networkStatus = document.getElementById('networkStatus');
+                this.resourceStatus = document.getElementById('resourceStatus');
             }
 
             initializeVoiceRecognition() {
@@ -486,7 +587,7 @@
             }
 
             async sendToAtlas(message) {
-                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8000').replace(/\/$/, '');
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
                 const url = `${baseUrl}/chat`;
                 try {
                     const response = await fetch(url, {
@@ -547,8 +648,8 @@
             }
 
             startMCPLogging() {
-                // Підключення через Server-Sent Events до /logs/stream
-                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8000').replace(/\/$/, '');
+                // Підключення через Server-Sent Events до /logs/stream на frontend сервері
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
                 const streamUrl = `${baseUrl}/logs/stream`;
                 this.logMessage(`[INIT] Підключення до потоку логів: ${streamUrl}`);
                 let retryDelay = 2000;
@@ -596,7 +697,7 @@
             async pollLiveLogs(initial = false) {
                 // Одноразове завантаження backlog для випадку якщо SSE підключається із затримкою
                 if (!initial) return;
-                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8000').replace(/\/$/, '');
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
                 const url = `${baseUrl}/logs?limit=200`;
                 try {
                     const response = await fetch(url);
@@ -631,6 +732,97 @@
                         this.updateVoiceButton();
                     }
                 }, approxSeconds * 1000);
+            }
+
+            startStatusMonitoring() {
+                // Запуск моніторингу статусу системи
+                this.updateSystemStatus();
+                // Оновлення кожні 5 секунд
+                setInterval(() => {
+                    this.updateSystemStatus();
+                }, 5000);
+            }
+
+            async updateSystemStatus() {
+                try {
+                    const response = await fetch('/api/status');
+                    if (response.ok) {
+                        const status = await response.json();
+                        this.renderSystemStatus(status);
+                    } else {
+                        this.renderSystemStatus({
+                            error: "Status unavailable",
+                            timestamp: new Date().toISOString()
+                        });
+                    }
+                } catch (error) {
+                    this.renderSystemStatus({
+                        error: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+
+            renderSystemStatus(status) {
+                try {
+                    // Процеси
+                    if (status.processes) {
+                        const processHTML = Object.entries(status.processes).map(([type, info]) => {
+                            const count = info.count || 0;
+                            const statusClass = count > 0 ? 'online' : 'warning';
+                            return `<div class="status-item ${statusClass}">${type}: ${count}</div>`;
+                        }).join('');
+                        this.processStatus.innerHTML = processHTML;
+                    }
+
+                    // Сервіси
+                    if (status.services) {
+                        const serviceHTML = Object.entries(status.services).map(([name, info]) => {
+                            const serviceStatus = info.status || 'unknown';
+                            let statusClass = 'warning';
+                            if (serviceStatus === 'online' || serviceStatus === 'operational' || serviceStatus === 'running') {
+                                statusClass = 'online';
+                            } else if (serviceStatus === 'offline' || serviceStatus === 'error') {
+                                statusClass = 'error';
+                            }
+                            return `<div class="status-item ${statusClass}">${name}: ${serviceStatus}</div>`;
+                        }).join('');
+                        this.serviceStatus.innerHTML = serviceHTML;
+                    }
+
+                    // Мережа
+                    if (status.network && status.network.connections) {
+                        const connCount = status.network.connections.count || 0;
+                        const statusClass = connCount > 0 ? 'online' : 'warning';
+                        this.networkStatus.innerHTML = `<div class="status-item ${statusClass}">Connections: ${connCount}</div>`;
+                    }
+
+                    // Ресурси
+                    if (status.resources) {
+                        let resourceHTML = '';
+                        
+                        if (status.resources.cpu && status.resources.cpu.usage_line) {
+                            const cpuInfo = status.resources.cpu.usage_line;
+                            resourceHTML += `<div class="status-item online">CPU: ${cpuInfo.substring(0, 30)}...</div>`;
+                        } else {
+                            resourceHTML += `<div class="status-item warning">CPU: --</div>`;
+                        }
+                        
+                        if (status.resources.disk && status.resources.disk.usage_percent) {
+                            const diskUsage = status.resources.disk.usage_percent;
+                            const usageNum = parseInt(diskUsage);
+                            const statusClass = usageNum > 90 ? 'error' : usageNum > 70 ? 'warning' : 'online';
+                            resourceHTML += `<div class="status-item ${statusClass}">Disk: ${diskUsage}</div>`;
+                        } else {
+                            resourceHTML += `<div class="status-item warning">Disk: --</div>`;
+                        }
+                        
+                        this.resourceStatus.innerHTML = resourceHTML;
+                    }
+
+                } catch (error) {
+                    console.error('Status rendering error:', error);
+                }
             }
         }
 
