@@ -1,0 +1,26 @@
+{
+  "mcpServers": {
+    "ukrainian-tts-fixed": {
+      "command": "/bin/bash",
+      "args": [
+        "/Users/dev/Documents/Atlas-mcp/mcp_tts_ukrainian/start_fixed.sh"
+      ],
+      "description": "Fixed Ukrainian Text-to-Speech MCP Server with improved stability",
+      "transport": {
+        "type": "stdio"
+      },
+      "tools": [
+        "ukrainian_tts"
+      ],
+      "capabilities": {
+        "audio": true,
+        "ukrainian": true,
+        "english": true,
+        "tts": true,
+        "fallback": "google-tts",
+        "timeout_handling": true,
+        "error_recovery": true
+      }
+    }
+  }
+}

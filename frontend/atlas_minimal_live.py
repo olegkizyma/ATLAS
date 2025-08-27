@@ -207,7 +207,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     def serve_frontend(self):
         """Головна сторінка"""
         try:
-            html_path = Path(__file__).parent / "atlas_minimal_frontend.html"
+            html_path = Path(__file__).parent / "index.html"
             with open(html_path, 'r', encoding='utf-8') as f:
                 content = f.read()
             

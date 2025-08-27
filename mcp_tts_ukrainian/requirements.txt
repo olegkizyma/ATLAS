@@ -1,0 +1,15 @@
+# Ukrainian TTS dependencies
+ukrainian-tts>=0.4.0
+torch>=1.9.0
+torchaudio>=0.9.0
+gtts>=2.3.2
+pygame>=2.1.0
+
+# MCP dependencies
+mcp>=1.0.0
+requests>=2.25.0
+aiofiles>=0.8.0
+
+# Additional dependencies
+numpy
+soundfile
