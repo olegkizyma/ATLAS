@@ -33,9 +33,9 @@ echo "Goose server PID: $GOOSE_PID"
 # Переход в frontend
 cd /Users/dev/Documents/GitHub/ATLAS/frontend
 
-# Запуск frontend
+# Запуск frontend с виртуальным окружением
 echo "🌐 Запуск frontend интерфейса..."
-python3 atlas_minimal_live.py &
+./start_frontend.sh --background &
 FRONTEND_PID=$!
 echo "Frontend PID: $FRONTEND_PID"
 

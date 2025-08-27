@@ -56,3 +56,9 @@ coverage/
 *.swo
 *~
 .DS_Store
+
+# Large model files and data
+model.pth
+*.npz
+*.ark
+*.glb
