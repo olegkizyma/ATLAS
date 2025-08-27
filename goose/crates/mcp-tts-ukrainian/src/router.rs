@@ -53,8 +53,8 @@ impl UkrainianTTSRouter {
                     },
                     "lang": {
                         "type": "string",
-                        "description": "Language code (uk for Ukrainian, en for English, auto for auto-detect)",
-                        "default": "auto"
+                        "description": "Language code (uk for Ukrainian, en for English)",
+                        "default": "uk"
                     }
                 },
                 "required": ["text"]
@@ -83,7 +83,7 @@ impl UkrainianTTSRouter {
 
         Self {
             tools: vec![say_tts, list_voices, tts_status],
-            instructions: "Ukrainian TTS (Text-to-Speech) MCP server. Supports Ukrainian and English text-to-speech with multiple voice options including high-quality Ukrainian voices (mykyta, oleksa, tetiana, lada) and Google TTS as fallback.".to_string(),
+            instructions: "Ukrainian TTS (Text-to-Speech) MCP server. Supports Ukrainian and English text-to-speech with multiple voice options including high-quality Ukrainian voices (tetiana (default), mykyta, oleksa, lada) and Google TTS as fallback.".to_string(),
         }
     }
 
@@ -328,7 +328,7 @@ impl Router for UkrainianTTSRouter {
                     let lang = arguments
                         .get("lang")
                         .and_then(|v| v.as_str())
-                        .unwrap_or("auto");
+                        .unwrap_or("uk");
 
                     match this.call_tts(text, voice, lang).await {
                         Ok(result) => Ok(vec![Content::text(result)]),
