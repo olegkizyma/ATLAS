@@ -38,7 +38,7 @@ impl UkrainianTTSRouter {
 
         let say_tts = Tool::new(
             "say_tts",
-            "Converts text to speech using Ukrainian TTS engine with voice and language selection",
+            "Синтезує український або англійський текст у мовлення (перевага локального українського рушія)",
             object!({
                 "type": "object",
                 "properties": {
@@ -48,12 +48,12 @@ impl UkrainianTTSRouter {
                     },
                     "voice": {
                         "type": "string",
-                        "description": "Voice to use (mykyta, oleksa, tetiana, lada, google)",
+                        "description": "Український голос (tetiana, mykyta, oleksa, lada)",
                         "default": "tetiana"
                     },
                     "lang": {
                         "type": "string",
-                        "description": "Language code (uk for Ukrainian, en for English)",
+                        "description": "Код мови (uk або en). Для en виконується спроба спростити текст для українського рушія.",
                         "default": "uk"
                     }
                 },
@@ -83,11 +83,22 @@ impl UkrainianTTSRouter {
 
         Self {
             tools: vec![say_tts, list_voices, tts_status],
-            instructions: "Ukrainian TTS (Text-to-Speech) MCP server. Supports Ukrainian and English text-to-speech with multiple voice options including high-quality Ukrainian voices (tetiana (default), mykyta, oleksa, lada) and Google TTS as fallback.".to_string(),
+            instructions: "Ukrainian TTS (локальний синтез) з кількома високоякісними голосами (tetiana (default), mykyta, oleksa, lada). Без зовнішнього Google fallback.".to_string(),
         }
     }
 
     fn init_python() -> Result<(), ErrorData> {
+        // Set up environment variables and working directory
+        std::env::set_var("PYGAME_HIDE_SUPPORT_PROMPT", "1");
+        std::env::set_var("SESSION_WORKING_DIR", "/Users/dev/Documents/GitHub/ATLAS");
+        
+        // Change working directory to ATLAS root
+        if let Err(e) = std::env::set_current_dir("/Users/dev/Documents/GitHub/ATLAS") {
+            tracing::warn!("Failed to change working directory: {}", e);
+        } else {
+            tracing::info!("Working directory set to: /Users/dev/Documents/GitHub/ATLAS");
+        }
+
         Python::with_gil(|py| {
             let sys = py.import_bound("sys").map_err(|e| ErrorData {
                 code: ErrorCode::INTERNAL_ERROR,
@@ -101,12 +112,41 @@ impl UkrainianTTSRouter {
                 data: None,
             })?;
 
+            // Set PYTHONPATH environment variable in Python
+            let os_module = py.import_bound("os").map_err(|e| ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: format!("Failed to import os: {}", e).into(),
+                data: None,
+            })?;
+            
+            let environ = os_module.getattr("environ").map_err(|e| ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: format!("Failed to get os.environ: {}", e).into(),
+                data: None,
+            })?;
+            
+            // Set PYTHONPATH
+            let pythonpath = "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.11/site-packages:/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian:/Users/dev/Documents/GitHub/ATLAS/goose/crates/mcp-tts-ukrainian";
+            environ.set_item("PYTHONPATH", pythonpath).map_err(|e| ErrorData {
+                code: ErrorCode::INTERNAL_ERROR,
+                message: format!("Failed to set PYTHONPATH: {}", e).into(),
+                data: None,
+            })?;
+            tracing::info!("Set PYTHONPATH: {}", pythonpath);
+
             // Add multiple possible TTS paths for better compatibility
+            // Use the prepared tts_venv environment with all dependencies
             let possible_paths = vec![
                 "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.11/site-packages",
-                "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.12/site-packages", 
+                "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.12/site-packages",
                 "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian",
                 "/Users/dev/Documents/GitHub/ATLAS/goose/crates/mcp-tts-ukrainian",
+                "../../../../mcp_tts_ukrainian/tts_venv/lib/python3.11/site-packages",
+                "../../../../mcp_tts_ukrainian/tts_venv/lib/python3.12/site-packages",
+                "../../../../mcp_tts_ukrainian",
+                "../../../mcp_tts_ukrainian/tts_venv/lib/python3.11/site-packages",
+                "../../../mcp_tts_ukrainian",
+                "./mcp-tts-ukrainian",
                 "."
             ];
 
@@ -126,11 +166,6 @@ impl UkrainianTTSRouter {
             match py.import_bound("pygame") {
                 Ok(_) => tracing::info!("pygame imported successfully"),
                 Err(e) => tracing::warn!("pygame not available: {}", e),
-            }
-
-            match py.import_bound("gtts") {
-                Ok(_) => tracing::info!("gtts imported successfully"),
-                Err(e) => tracing::warn!("gtts not available: {}", e),
             }
 
             // Try to import our TTS module
@@ -276,7 +311,7 @@ impl UkrainianTTSRouter {
     async fn get_voices(&self) -> Result<String, ErrorData> {
         let result = tokio::task::spawn_blocking(move || {
             Python::with_gil(|py| -> Result<String, ErrorData> {
-                let tts_module = py.import_bound("mcp_tts_server").map_err(|e| ErrorData {
+                let tts_module = py.import_bound("mcp_tts_fixed").or_else(|_| py.import_bound("mcp_tts_server")).map_err(|e| ErrorData {
                     code: ErrorCode::INTERNAL_ERROR,
                     message: format!("Failed to import TTS server: {}", e).into(),
                     data: None,
@@ -317,7 +352,7 @@ impl UkrainianTTSRouter {
     async fn get_status(&self) -> Result<String, ErrorData> {
         let result = tokio::task::spawn_blocking(move || {
             Python::with_gil(|py| -> Result<String, ErrorData> {
-                let tts_module = py.import_bound("mcp_tts_server").map_err(|e| ErrorData {
+                let tts_module = py.import_bound("mcp_tts_fixed").or_else(|_| py.import_bound("mcp_tts_server")).map_err(|e| ErrorData {
                     code: ErrorCode::INTERNAL_ERROR,
                     message: format!("Failed to import TTS server: {}", e).into(),
                     data: None,

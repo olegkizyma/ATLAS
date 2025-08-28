@@ -66,11 +66,23 @@ class FixedTTSEngine:
             
         try:
             from ukrainian_tts.tts import TTS
+            # Ініціалізація без параметрів - stress буде передано в tts() методі
             self.ukrainian_tts = TTS()
             return True
         except Exception as e:
             logger.error(f"Ukrainian TTS init failed: {e}")
             return False
+    
+    def _init_pygame(self):
+        """Ініціалізація pygame для відтворення аудіо"""
+        try:
+            import pygame
+            pygame.mixer.pre_init(frequency=22050, size=-16, channels=2, buffer=512)
+            pygame.mixer.init()
+            self.pygame_ready = True
+        except Exception as e:
+            logger.error(f"Pygame init failed: {e}")
+            self.pygame_ready = False
     
     async def speak(self, text: str, voice: str = "mykyta", lang: str = "uk"):
         """Озвучка тексту з fallback варіантами"""
@@ -84,11 +96,16 @@ class FixedTTSEngine:
             try:
                 if self._init_ukrainian_tts():
                     with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tmp_file:
-                        self.ukrainian_tts.tts(text, voice, tmp_file.name)
+                        # Правильний виклик: text, voice, stress, output_file_object
+                        self.ukrainian_tts.tts(text, voice, "dictionary", tmp_file)
+                        tmp_file.flush()  # Забезпечення запису на диск
+                        # Ініціалізуємо pygame перед відтворенням
+                        if not self.pygame_ready:
+                            self._init_pygame()
                         if self.pygame_ready:
                             await self._play_audio_async(tmp_file.name)
-                            Path(tmp_file.name).unlink(missing_ok=True)
-                            return {"success": True, "engine": "ukrainian-tts", "voice": voice}
+                        Path(tmp_file.name).unlink(missing_ok=True)
+                        return {"success": True, "engine": "ukrainian-tts", "voice": voice}
             except Exception as e:
                 logger.error(f"Ukrainian TTS error: {e}")
         
@@ -144,6 +161,50 @@ class FixedTTSEngine:
 
 # Глобальний екземпляр TTS движка
 tts_engine = FixedTTSEngine()
+
+class MCPTTSServer:
+    """Клас-обгортка для сумісності з Rust кодом"""
+    
+    def __init__(self):
+        self.tts_engine = tts_engine
+    
+    def call_tool_sync(self, tool_name, args):
+        """Синхронний виклик TTS з обробкою у стилі MCP"""
+        if tool_name == "say_tts":
+            text = args.get("text", "")
+            voice = args.get("voice", "tetiana") 
+            lang = args.get("lang", "uk")
+            
+            # Запускаємо асинхронний метод через новий event loop
+            try:
+                result = asyncio.run(self.tts_engine.speak(text, voice, lang))
+                return json.dumps(result, ensure_ascii=False, indent=2)
+            except Exception as e:
+                return json.dumps({"success": False, "error": str(e)})
+        
+        elif tool_name == "list_voices":
+            voices = {
+                "ukrainian_voices": ["tetiana", "mykyta", "oleksa", "lada"],
+                "supported_languages": ["uk", "en"],
+                "default": "tetiana"
+            }
+            return json.dumps(voices, ensure_ascii=False, indent=2)
+        
+        elif tool_name == "tts_status":
+            status = {
+                "engine": "ukrainian-tts",
+                "pygame_ready": self.tts_engine.pygame_ready,
+                "ukrainian_tts_loaded": self.tts_engine.ukrainian_tts is not None,
+                "fallback_disabled": True
+            }
+            return json.dumps(status, ensure_ascii=False, indent=2)
+        
+        else:
+            return json.dumps({"error": f"Unknown tool: {tool_name}"})
+
+# Aliases для сумісності
+TTSServer = MCPTTSServer
+UkrainianTTSServer = MCPTTSServer
 
 async def handle_request(request):
     """Обробка MCP запитів з таймаутом"""

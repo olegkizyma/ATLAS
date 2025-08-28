@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ukrainian-tts": {
+      "command": "/Users/dev/Documents/GitHub/ATLAS/goose/target/release/mcp-tts-ukrainian",
+      "args": [],
+      "description": "Native Ukrainian TTS with embedded environment",
+      "session_working_dir": "/Users/dev/Documents/GitHub/ATLAS"
+    }
+  }
+}

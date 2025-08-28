@@ -23,7 +23,10 @@ pub async fn run(name: &str) -> Result<()> {
         "autovisualiser" => Some(Box::new(RouterService(AutoVisualiserRouter::new()))),
         "memory" => Some(Box::new(RouterService(MemoryRouter::new()))),
         "tutorial" => Some(Box::new(RouterService(TutorialRouter::new()))),
-        "ukrainian-tts" => Some(Box::new(RouterService(UkrainianTTSRouter::new()))),
+        // Aliases supported for Ukrainian TTS
+        "ukrainian-tts" | "ukrainiantts" | "ukrainian_tts" | "ukraine-tts" => {
+            Some(Box::new(RouterService(UkrainianTTSRouter::new())))
+        }
         _ => None,
     };
 
