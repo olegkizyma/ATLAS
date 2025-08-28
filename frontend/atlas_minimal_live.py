@@ -309,10 +309,25 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         """Додаємо CORS заголовки до всіх відповідей"""
-        self.send_header('Access-Control-Allow-Origin', '*')
-        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
-        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
-        super().end_headers()
+        try:
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+            self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+            super().end_headers()
+        except (BrokenPipeError, ConnectionResetError):
+            # Клієнт закрив з'єднання - це нормально
+            pass
+
+    def safe_write(self, data):
+        """Безпечний запис даних з обробкою розривів з'єднання"""
+        try:
+            if isinstance(data, str):
+                self.wfile.write(data.encode('utf-8'))
+            else:
+                self.wfile.write(data)
+        except (BrokenPipeError, ConnectionResetError):
+            # Клієнт закрив з'єднання - це нормально
+            pass
 
     def do_OPTIONS(self):
         """Обробка preflight CORS запитів"""
@@ -416,6 +431,22 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         """Обробка POST запитів"""
         if self.path == "/api/chat":
             self.handle_chat()
+        elif self.path == "/api/mode":
+            # Зміна режиму обробки чату під час роботи (POST {"mode": "cli"|"api"})
+            try:
+                content_length = int(self.headers.get('Content-Length', 0))
+                body = self.rfile.read(content_length) if content_length else b"{}"
+                data = json.loads(body.decode('utf-8') or '{}')
+                mode = data.get("mode")
+                if mode in ("cli", "api"):
+                    os.environ['CHAT_HANDLER_METHOD'] = mode
+                    if self.live_streamer:
+                        self.live_streamer._add_log(f"[MODE] Chat handler switched to '{mode}'")
+                    self.send_json_response({"mode": mode})
+                else:
+                    self.send_json_response({"error": "Invalid mode. Use 'cli' or 'api'"}, 400)
+            except Exception as e:
+                self.send_json_response({"error": str(e)}, 500)
         elif self.path == "/api/tts/speak":
             self.handle_tts()
         else:
@@ -624,75 +655,157 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-Length', str(len(response)))
             self.end_headers()
             self.wfile.write(response)
+        except (BrokenPipeError, ConnectionResetError):
+            # Клієнт закрив з'єднання - це нормально, просто ігноруємо
+            pass
         except Exception as e:
             logger.error(f"System status error: {e}")
-            self.send_error(500, str(e))
+            try:
+                self.send_error(500, str(e))
+            except (BrokenPipeError, ConnectionResetError):
+                # Клієнт закрив з'єднання під час відправки помилки
+                pass
 
     def handle_chat(self):
-        """Обробка чат запитів до Goose API"""
+        """Диспетчер чат-запитів (cli | api)"""
+        mode = os.getenv('CHAT_HANDLER_METHOD', os.environ.get('CHAT_HANDLER_METHOD', 'cli')).lower()
+        if mode not in ("cli", "api"):
+            mode = "cli"
+        if self.live_streamer:
+            self.live_streamer._add_log(f"[MODE] Handling chat via '{mode}' handler")
+        if mode == "api":
+            self.handle_chat_api()
+        else:
+            self.handle_chat_cli()
+
+    def _read_chat_payload(self):
+        content_length = int(self.headers.get('Content-Length', 0))
+        post_data = self.rfile.read(content_length)
+        data = json.loads(post_data.decode('utf-8')) if post_data else {}
+        prompt = data.get("prompt", "")
+        return prompt, data
+
+    def handle_chat_cli(self):
+        """Обробка чат запитів через Goose CLI (fallback / default)"""
         try:
-            content_length = int(self.headers.get('Content-Length', 0))
-            post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            prompt = data.get("prompt", "")
+            prompt, _raw = self._read_chat_payload()
             if not prompt:
                 self.send_json_response({"error": "Prompt is required"}, 400)
                 return
-            
-            # Логування чату
             if self.live_streamer:
-                self.live_streamer._add_log(f"[CHAT] User: {prompt[:50]}...")
-            
-            # Виклик Goose API
+                self.live_streamer._add_log(f"[CHAT][CLI] User: {prompt[:80]}...")
+            goose_wrapper_path = "/Users/dev/Documents/GitHub/ATLAS/frontend/run_goose_cli.sh"
+            command = [goose_wrapper_path, "run", "--json", prompt]
+            if self.live_streamer:
+                self.live_streamer._add_log(f"[CLI] Exec: {' '.join(command)}")
             try:
-                import subprocess
-                import tempfile
-                import os
-                
-                # Створюємо тимчасовий файл з запитом
-                with tempfile.NamedTemporaryFile(mode='w', suffix='.txt', delete=False) as f:
-                    f.write(prompt)
-                    temp_file = f.name
-                
-                # Запускаємо Goose з текстом
-                goose_path = "/Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose"
-                result = subprocess.run([
-                    goose_path, "run", 
-                    "--instructions", temp_file,
-                    "--quiet",
-                    "--no-session"
-                ], 
-                capture_output=True, 
-                text=True, 
-                timeout=30,
-                cwd="/Users/dev/Documents/GitHub/ATLAS/goose",
-                env={**os.environ, "PATH": "/Users/dev/Documents/GitHub/ATLAS/goose/bin:" + os.environ.get("PATH", "")}
+                result = subprocess.run(
+                    command,
+                    capture_output=True,
+                    text=True,
+                    timeout=90,
+                    cwd="/Users/dev/Documents/GitHub/ATLAS/goose"
                 )
-                
-                # Видаляємо тимчасовий файл
-                os.unlink(temp_file)
-                
-                if result.returncode == 0:
-                    answer = result.stdout.strip()
-                    if self.live_streamer:
-                        self.live_streamer._add_log(f"[CHAT] Goose: {answer[:50]}...")
-                    
-                    self.send_json_response({"answer": answer})
-                else:
-                    error_msg = result.stderr.strip() or "Goose command failed"
-                    if self.live_streamer:
-                        self.live_streamer._add_log(f"[CHAT] Error: {error_msg[:50]}...", "error")
-                    
-                    self.send_json_response({"answer": f"⚠️ Помилка: {error_msg}"})
-                    
             except subprocess.TimeoutExpired:
-                self.send_json_response({"answer": "⚠️ Час очікування відповіді закінчився"})
-            except Exception as e:
-                self.send_json_response({"answer": f"⚠️ Помилка виконання: {str(e)}"})
-                
+                self.send_json_response({"answer": "⚠️ CLI timeout (90s)"})
+                return
+            if result.returncode == 0:
+                stdout = result.stdout.strip()
+                # Проба JSON
+                answer = None
+                if stdout:
+                    try:
+                        parsed = json.loads(stdout)
+                        answer = parsed.get("response") or parsed.get("answer") or stdout
+                    except json.JSONDecodeError:
+                        answer = stdout
+                else:
+                    answer = "✅ CLI виконано без виводу"
+                if self.live_streamer:
+                    self.live_streamer._add_log(f"[CHAT][CLI] Goose: {str(answer)[:80]}...")
+                self.send_json_response({"answer": answer})
+            else:
+                err = (result.stderr or "Unknown CLI error").strip()
+                if self.live_streamer:
+                    self.live_streamer._add_log(f"[CHAT][CLI] Error: {err[:120]}...", "error")
+                self.send_json_response({"answer": f"⚠️ CLI error: {err}"}, 500)
         except Exception as e:
-            logger.error(f"Chat error: {e}")
+            logger.error(f"CLI chat handler error: {e}")
+            self.send_json_response({"error": str(e)}, 500)
+
+    def handle_chat_api(self):
+        """Обробка чат запитів напряму через /reply (SSE) Goose Server"""
+        try:
+            prompt, _raw = self._read_chat_payload()
+            if not prompt:
+                self.send_json_response({"error": "Prompt is required"}, 400)
+                return
+            if self.live_streamer:
+                self.live_streamer._add_log(f"[CHAT][API] User: {prompt[:80]}...")
+            secret = os.getenv('GOOSED_API_KEY', 'test')
+            goose_url = os.getenv('GOOSED_URL', 'http://localhost:3000')
+            session_id = f"frontend_{int(time.time())}"
+            payload = {
+                "messages": [{
+                    "role": "user",
+                    "created": int(time.time()),
+                    "content": [{"type": "text", "text": prompt}]
+                }],
+                "session_id": session_id,
+                "session_working_dir": "/tmp"
+            }
+            headers = {
+                "X-Secret-Key": secret,
+                "Accept": "text/event-stream",
+                "Content-Type": "application/json"
+            }
+            # Використовуємо requests з stream=True
+            try:
+                response = requests.post(f"{goose_url}/reply", headers=headers, json=payload, stream=True, timeout=120)
+            except requests.exceptions.RequestException as e:
+                self.send_json_response({"answer": f"⚠️ API request failed: {e}"}, 502)
+                return
+            if response.status_code == 401:
+                self.send_json_response({"answer": "❌ Unauthorized (check GOOSED_API_KEY)"}, 401)
+                return
+            if response.status_code >= 400:
+                self.send_json_response({"answer": f"⚠️ API error {response.status_code}"}, response.status_code)
+                return
+            collected_text = []
+            finish_received = False
+            start_time = time.time()
+            for raw_line in response.iter_lines(decode_unicode=True):
+                if raw_line is None:
+                    continue
+                line = raw_line.strip()
+                if not line:
+                    # heartbeat
+                    if time.time() - start_time > 110:
+                        break
+                    continue
+                if line.startswith('data: '):
+                    line = line[6:]
+                try:
+                    payload_line = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if payload_line.get('type') == 'Finish':
+                    finish_received = True
+                    break
+                msg = payload_line.get('message', {})
+                for content in msg.get('content', []):
+                    if content.get('type') == 'text':
+                        txt = content.get('text', '')
+                        if txt:
+                            collected_text.append(txt)
+                            if self.live_streamer:
+                                self.live_streamer._add_log(f"[CHAT][API][chunk] {txt[:60]}...")
+            answer = ''.join(collected_text).strip() or ("⚠️ No text received" if not finish_received else "")
+            if self.live_streamer:
+                self.live_streamer._add_log(f"[CHAT][API] Final: {answer[:100]}...")
+            self.send_json_response({"answer": answer, "mode": "api"})
+        except Exception as e:
+            logger.error(f"API chat handler error: {e}")
             self.send_json_response({"error": str(e)}, 500)
     
     def send_json_response(self, data, status_code=200):
@@ -859,7 +972,11 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
 
 def main():
     """Запуск сервера"""
-    port = 8080
+    # Порт фронтенду керується ATLAS_WEB_PORT (за замовчуванням 8080)
+    try:
+        port = int(os.getenv('ATLAS_WEB_PORT', '8080'))
+    except ValueError:
+        port = 8080
     server_address = ('', port)
     
     # Зміна робочої директорії
@@ -873,7 +990,9 @@ def main():
     httpd = HTTPServer(server_address, AtlasMinimalHandler)
     
     print("🚀 Starting Atlas Minimal Frontend Server...")
-    print(f"📱 Interface: http://localhost:{port}")
+    backend_url = os.getenv('GOOSED_URL', 'http://localhost:3000')
+    print(f"📱 Interface (frontend): http://localhost:{port}")
+    print(f"🧠 Backend (goosed): {backend_url}")
     print("💾 3D Viewer: Background layer")
     print("📋 MCP Logs: Left panel (LIVE GREEN)")
     print("💬 Chat: Right panel")
