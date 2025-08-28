@@ -633,7 +633,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     cmd,
                     capture_output=True, 
                     text=True, 
-                    timeout=30,  # Зменшуємо таймаут для стабільності
+                    timeout=300,  # Збільшуємо таймаут до 5 хвилин
                     cwd="/Users/dev/Documents/GitHub/ATLAS/goose",
                     env={
                         **os.environ, 
@@ -756,7 +756,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             response = requests.post(
                 f"{self.atlas_core_url}/chat",
                 json={"message": message},
-                timeout=30
+                timeout=60  # Збільшуємо таймаут до 1 хвилини
             )
             if response.status_code == 200:
                 data = response.json()
