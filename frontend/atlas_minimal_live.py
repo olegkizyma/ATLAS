@@ -633,7 +633,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     cmd,
                     capture_output=True, 
                     text=True, 
-                    timeout=300,  # Збільшуємо таймаут до 5 хвилин
+                    timeout=600,  # Збільшуємо таймаут до 5 хвилин
                     cwd="/Users/dev/Documents/GitHub/ATLAS/goose",
                     env={
                         **os.environ, 
