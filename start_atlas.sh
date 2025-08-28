@@ -29,25 +29,37 @@ cd /Users/dev/Documents/GitHub/ATLAS/goose
 echo "⚙️  Активация среды разработки Hermit..."
 source bin/activate-hermit
 
-# Проверка сборки goose
-if [ ! -f "target/release/goosed" ]; then
-    echo "🔨 Сборка AI Agent сервера..."
-    cargo build --release -p goose-server
-    if [ $? -ne 0 ]; then
-        echo "❌ Ошибка сборки AI Agent сервера"
-        exit 1
-    fi
+## ---------------- AI Agent (goosed) build & run ----------------
+# Режим сборки (можно переопределить: export GOOSE_BUILD_MODE=debug)
+BUILD_MODE=${GOOSE_BUILD_MODE:-release}
+[ "$BUILD_MODE" = "debug" ] && BUILD_FLAG="" || BUILD_FLAG="--release"
+GOOSED_PATH="target/${BUILD_MODE}/goosed"
+
+echo "🔍 Обрано build mode: ${BUILD_MODE} (бинарь: ${GOOSED_PATH})"
+
+# Строим всегда (быстрый no-op если ничего не менялось) чтобы гарантировать актуальность
+echo "🔨 Сборка AI Agent сервера (cargo build ${BUILD_FLAG} -p goose-server)..."
+cargo build ${BUILD_FLAG} -p goose-server
+if [ $? -ne 0 ]; then
+    echo "❌ Ошибка сборки AI Agent сервера"
+    exit 1
 fi
 
-echo "✅ AI Agent сервер готов"
+if [ ! -f "${GOOSED_PATH}" ]; then
+    echo "❌ Бинарь не знайдено після збірки: ${GOOSED_PATH}"
+    ls -al target/${BUILD_MODE} 2>/dev/null || true
+    exit 1
+fi
+
+chmod +x "${GOOSED_PATH}" 2>/dev/null || true
+echo "✅ AI Agent сервер готов (${GOOSED_PATH})"
 
 # Запуск goosed в фоне
 echo "🤖 Запуск AI Agent сервера (port 3000)..."
-# Сохраняем все переменные окружения в файл для запуска процесса
 env > /tmp/goose_env.txt
-./target/debug/goosed agent > /tmp/goose.log 2>&1 &
+"./${GOOSED_PATH}" agent > /tmp/goose.log 2>&1 &
 GOOSE_PID=$!
-echo "   PID: $GOOSE_PID"
+echo "   PID: $GOOSE_PID (cmd: ${GOOSED_PATH} agent)"
 
 # Перевірка чи процес запущено
 if ! kill -0 $GOOSE_PID 2>/dev/null; then
