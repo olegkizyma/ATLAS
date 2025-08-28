@@ -708,26 +708,6 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             logger.error(f"Error sending JSON response: {e}")
 
     def _format_status_for_ai(self, status):
-            
-            # Спочатку пробуємо Atlas Core (пріоритет)
-            response = self.send_to_atlas_core(enhanced_message)
-            if response:
-                if self.live_streamer:
-                    self.live_streamer._add_log(f"[CHAT] Atlas response: {response[:30]}...")
-                
-                # Автоматичне TTS для відповідей Atlas
-                self.send_tts_to_atlas(response)
-                
-                self.send_json_response({"response": response})
-                return
-            
-            self.send_json_response({"response": "Atlas Core сервіс недоступний"})
-            
-        except Exception as e:
-            logger.error(f"Chat error: {e}")
-            self.send_json_response({"error": str(e)}, 500)
-    
-    def _format_status_for_ai(self, status):
         """Форматування стану системи для передачі AI"""
         try:
             lines = []
