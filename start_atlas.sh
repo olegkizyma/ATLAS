@@ -8,8 +8,7 @@
 stop_processes() {
     echo "🛑 Зупиняємо попередні процеси..."
     pkill -f goosed && echo "   ✓ Зупинено AI Agent"
-    pkill -f atlas_minimal && echo "   ✓ Зупинено Frontend"
-    pkill -f mcp_tts && echo "   ✓ Зупинено TTS"
+    pkill -f atlas_minimal && echo "   ✓ Зупинено External Frontend"
     sleep 3
     echo "✅ Очищення завершено"
     echo ""
@@ -20,7 +19,7 @@ stop_processes
 
 echo "🚀 Запуск повної системи ATLAS..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-echo "🤖 AI Agent + 🌐 Frontend + 🗣️ Ukrainian TTS"
+echo "🤖 AI Agent + 🌐 External Frontend"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
 # Переход в директорию goose
@@ -46,7 +45,7 @@ echo "✅ AI Agent сервер готов"
 echo "🤖 Запуск AI Agent сервера (port 3000)..."
 # Сохраняем все переменные окружения в файл для запуска процесса
 env > /tmp/goose_env.txt
-./target/release/goosed agent > /tmp/goose.log 2>&1 &
+./target/debug/goosed agent > /tmp/goose.log 2>&1 &
 GOOSE_PID=$!
 echo "   PID: $GOOSE_PID"
 
@@ -57,110 +56,6 @@ if ! kill -0 $GOOSE_PID 2>/dev/null; then
 fi
 
 # Ожидание инициализации goose
-sleep 3
-
-# Переход в mcp_tts_ukrainian для запуска TTS
-cd /Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian
-
-# Проверка виртуального окружения TTS
-if [ ! -d "tts_venv" ]; then
-    echo "⚠️ TTS віртуальне середовище не знайдено, створюємо..."
-    python3 -m venv tts_venv
-    source tts_venv/bin/activate
-    
-    echo "📦 Встановлення необхідних пакетів для TTS..."
-    # Встановлюємо базові пакети спочатку
-    pip install -U pip wheel setuptools
-    
-    # Встановлюємо gtts та pygame
-    echo "   🔄 Встановлення pygame та gtts..."
-    pip install pygame gtts
-    
-    # Встановлюємо ukrainian-tts
-    echo "   🔄 Встановлення ukrainian-tts..."
-    pip install git+https://github.com/robinhad/ukrainian-tts.git
-    
-    # Перевірка успішності встановлення
-    if python3 -c "import pygame; import gtts; import ukrainian_tts" 2>/dev/null; then
-        echo "✅ TTS середовище створено та налаштовано успішно"
-    else
-        echo "⚠️ Деякі модулі не вдалося встановити. Можливі проблеми при роботі TTS."
-    fi
-else
-    # Активуємо існуюче середовище і перевіряємо наявність необхідних пакетів
-    source tts_venv/bin/activate
-    
-    # Перевіряємо наявність pygame
-    if ! python3 -c "import pygame" 2>/dev/null; then
-        echo "⚠️ Модуль pygame не знайдено, встановлюємо..."
-        pip install pygame
-        if python3 -c "import pygame" 2>/dev/null; then
-            echo "✅ Pygame встановлено успішно"
-        else
-            echo "❌ Не вдалося встановити pygame"
-        fi
-    fi
-    
-    # Перевіряємо наявність gtts
-    if ! python3 -c "import gtts" 2>/dev/null; then
-        echo "⚠️ Модуль gtts не знайдено, встановлюємо..."
-        pip install gtts
-        if python3 -c "import gtts" 2>/dev/null; then
-            echo "✅ gTTS встановлено успішно"
-        else
-            echo "❌ Не вдалося встановити gtts"
-        fi
-    fi
-    
-    # Перевіряємо наявність ukrainian_tts
-    if ! python3 -c "import ukrainian_tts" 2>/dev/null; then
-        echo "⚠️ Модуль ukrainian_tts не знайдено, встановлюємо..."
-        pip install git+https://github.com/robinhad/ukrainian-tts.git
-        if python3 -c "import ukrainian_tts" 2>/dev/null; then
-            echo "✅ Ukrainian TTS встановлено успішно"
-        else
-            echo "❌ Не вдалося встановити ukrainian_tts"
-        fi
-    fi
-fi
-
-echo "🗣️  Запуск Ukrainian TTS сервера..."
-# Проверка моделей TTS перед запуском сервера
-echo "   🔍 Проверка моделей TTS..."
-TTS_VENV_PYTHON="$(pwd)/tts_venv/bin/python3"
-$TTS_VENV_PYTHON check_tts_models.py > /tmp/tts_check.log 2>&1
-TTS_CHECK_RESULT=$?
-
-if [ $TTS_CHECK_RESULT -ne 0 ]; then
-    echo "   ⚠️ Обнаружены проблемы с моделями TTS. Подробности в логе: /tmp/tts_check.log"
-    echo "   🔄 Продолжаем запуск, будет использован fallback на Google TTS"
-else
-    echo "   ✅ Модели TTS проверены успешно"
-fi
-
-# Используем полный путь к Python из виртуального окружения для надежного запуска
-$TTS_VENV_PYTHON mcp_tts_server.py > /tmp/tts.log 2>&1 &
-TTS_PID=$!
-echo "   PID: $TTS_PID"
-
-# Перевірка чи процес запущено
-if ! kill -0 $TTS_PID 2>/dev/null; then
-    echo "❌ Не вдалося запустити TTS сервер. Перевірте логи: tail -f /tmp/tts.log"
-    kill $GOOSE_PID
-    exit 1
-fi
-
-# Почекаємо трохи, щоб побачити, чи не завершиться процес одразу після запуску
-sleep 2
-if ! kill -0 $TTS_PID 2>/dev/null; then
-    echo "❌ TTS сервер завершився одразу після запуску"
-    echo "📋 Останні рядки логу TTS сервера:"
-    tail -10 /tmp/tts.log
-    kill $GOOSE_PID
-    exit 1
-fi
-
-# Ожидание инициализации TTS
 sleep 3
 
 # Переход в frontend
@@ -202,7 +97,7 @@ else
 fi
 
 # Запуск frontend с виртуальным окружением
-echo "🌐 Запуск веб-интерфейса (port 8080)..."
+echo "🌐 Запуск зовнішнього веб-интерфейсу (port 8080)..."
 # Используем полный путь к Python из виртуального окружения для надежного запуска
 FRONTEND_VENV_PYTHON="$(pwd)/venv/bin/python3"
 $FRONTEND_VENV_PYTHON atlas_minimal_live.py > /tmp/frontend.log 2>&1 &
@@ -211,18 +106,18 @@ echo "   PID: $FRONTEND_PID"
 
 # Перевірка чи процес запущено
 if ! kill -0 $FRONTEND_PID 2>/dev/null; then
-    echo "❌ Не вдалося запустити Frontend. Перевірте логи: tail -f /tmp/frontend.log"
-    kill $GOOSE_PID $TTS_PID
+    echo "❌ Не вдалося запустити External Frontend. Перевірте логи: tail -f /tmp/frontend.log"
+    kill $GOOSE_PID
     exit 1
 fi
 
 # Почекаємо трохи, щоб побачити, чи не завершиться процес одразу після запуску
 sleep 2
 if ! kill -0 $FRONTEND_PID 2>/dev/null; then
-    echo "❌ Frontend завершився одразу після запуску"
-    echo "📋 Останні рядки логу Frontend:"
+    echo "❌ External Frontend завершився одразу після запуску"
+    echo "📋 Останні рядки логу External Frontend:"
     tail -10 /tmp/frontend.log
-    kill $GOOSE_PID $TTS_PID
+    kill $GOOSE_PID
     exit 1
 fi
 
@@ -276,14 +171,14 @@ wait_for_service() {
 # Перевірка AI Agent сервера
 wait_for_service "http://localhost:3000/health" "AI Agent" "$GOOSE_PID" "/tmp/goose.log" 20 || {
     echo "❌ Не вдалося запустити AI Agent. Зупиняємо всі процеси..."
-    kill $TTS_PID $FRONTEND_PID 2>/dev/null || true
+    kill $FRONTEND_PID 2>/dev/null || true
     exit 1
 }
 
-# Перевірка Frontend
-wait_for_service "http://localhost:8080" "Frontend" "$FRONTEND_PID" "/tmp/frontend.log" 15 || {
-    echo "❌ Не вдалося запустити Frontend. Зупиняємо всі процеси..."
-    kill $GOOSE_PID $TTS_PID 2>/dev/null || true
+# Перевірка External Frontend
+wait_for_service "http://localhost:8080" "External Frontend" "$FRONTEND_PID" "/tmp/frontend.log" 15 || {
+    echo "❌ Не вдалося запустити External Frontend. Зупиняємо всі процеси..."
+    kill $GOOSE_PID 2>/dev/null || true
     exit 1
 }
 
@@ -291,19 +186,20 @@ echo ""
 echo "🎉 СИСТЕМА ATLAS ПОЛНОСТЬЮ ЗАПУЩЕНА!"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "🤖 AI Agent Server:     http://localhost:3000   (PID: $GOOSE_PID)"
-echo "🌐 Web Interface:       http://localhost:8080   (PID: $FRONTEND_PID)"  
-echo "🗣️  Ukrainian TTS:       MCP Server Active      (PID: $TTS_PID)"
+echo "🌐 External Web UI:     http://localhost:8080   (PID: $FRONTEND_PID)"  
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo ""
 echo "📋 УПРАВЛЕНИЕ СИСТЕМОЙ:"
-echo "   ⏹️  Остановка:  kill $GOOSE_PID $FRONTEND_PID $TTS_PID"
+echo "   ⏹️  Остановка:  kill $GOOSE_PID $FRONTEND_PID"
 echo "   📊 Мониторинг: curl http://localhost:3000/health"
-echo "   🌐 Интерфейс:  открыть http://localhost:8080"
+echo "   🌐 Веб интерфейс:  открыть http://localhost:8080"
 echo ""
 echo "📄 ЛОГИ СИСТЕМЫ:"
 echo "   🤖 AI Agent:    tail -f /tmp/goose.log"
-echo "   🌐 Frontend:    tail -f /tmp/frontend.log"
-echo "   🗣️  TTS Server:  tail -f /tmp/tts.log"
+echo "   🌐 External Frontend: tail -f /tmp/frontend.log"
+echo ""
+echo "🖥️ DESKTOP UI (запуск опционально):"
+echo "   cd /Users/dev/Documents/GitHub/ATLAS/goose/ui/desktop && npm run start-gui"
 echo ""
 echo "💡 Система готова к работе! Откройте http://localhost:8080"
 echo ""
@@ -315,11 +211,10 @@ echo ""
 cleanup() {
     echo ""
     echo "🛑 Остановка системы ATLAS..."
-    kill $GOOSE_PID $FRONTEND_PID $TTS_PID 2>/dev/null || true
+    kill $GOOSE_PID $FRONTEND_PID 2>/dev/null || true
     # Додатково зупиняємо процеси за іменем (на випадок, якщо PID змінилися)
     pkill -f goosed 2>/dev/null || true
     pkill -f atlas_minimal 2>/dev/null || true
-    pkill -f mcp_tts 2>/dev/null || true
     echo "✅ Все компоненты остановлены"
     exit 0
 }
@@ -328,7 +223,7 @@ cleanup() {
 trap cleanup SIGINT SIGTERM
 
 echo "🔧 Скрипт запущен. Для остановки нажмите Ctrl+C или выполните:"
-echo "   kill $GOOSE_PID $FRONTEND_PID $TTS_PID"
+echo "   kill $GOOSE_PID $FRONTEND_PID"
 echo ""
 
 # Функція перевірки стану процесу та виведення логу у випадку помилки
@@ -354,8 +249,7 @@ while true; do
     
     # Перевіряємо кожен процес окремо
     check_process_status $GOOSE_PID "AI Agent" "/tmp/goose.log" || all_running=false
-    check_process_status $FRONTEND_PID "Frontend" "/tmp/frontend.log" || all_running=false
-    check_process_status $TTS_PID "TTS Server" "/tmp/tts.log" || all_running=false
+    check_process_status $FRONTEND_PID "External Frontend" "/tmp/frontend.log" || all_running=false
     
     # Якщо хоч один процес завершився - зупиняємо всю систему
     if [ "$all_running" = "false" ]; then

@@ -53,6 +53,7 @@
     "@radix-ui/react-slot": "^1.2.3",
     "@radix-ui/react-tabs": "^1.1.13",
     "@radix-ui/themes": "^3.2.1",
+    "@tailwindcss/postcss": "^4.1.12",
     "@types/react-router-dom": "^5.3.3",
     "ai": "^5.0.14",
     "class-variance-authority": "^0.7.1",

@@ -101,33 +101,55 @@ impl UkrainianTTSRouter {
                 data: None,
             })?;
 
-            // Add virtual environment site-packages path
-            path.call_method1("insert", (0, "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.11/site-packages"))
-                .map_err(|e| ErrorData {
-                    code: ErrorCode::INTERNAL_ERROR,
-                    message: format!("Failed to add venv site-packages path: {}", e).into(),
-                    data: None,
-                })?;
+            // Add multiple possible TTS paths for better compatibility
+            let possible_paths = vec![
+                "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.11/site-packages",
+                "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.12/site-packages", 
+                "/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian",
+                "/Users/dev/Documents/GitHub/ATLAS/goose/crates/mcp-tts-ukrainian",
+                "."
+            ];
 
-            path.call_method1("append", ("/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian",))
-                .map_err(|e| ErrorData {
-                    code: ErrorCode::INTERNAL_ERROR,
-                    message: format!("Failed to add TTS path: {}", e).into(),
-                    data: None,
-                })?;
+            for path_str in possible_paths {
+                if std::path::Path::new(path_str).exists() {
+                    path.call_method1("insert", (0, path_str))
+                        .map_err(|e| ErrorData {
+                            code: ErrorCode::INTERNAL_ERROR,
+                            message: format!("Failed to add path {}: {}", path_str, e).into(),
+                            data: None,
+                        })?;
+                    tracing::info!("Added Python path: {}", path_str);
+                }
+            }
 
-            // Try to import required modules to verify they're available
-            py.import_bound("pygame").map_err(|e| ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to import pygame: {}", e).into(),
-                data: None,
-            })?;
+            // Try to import required modules with better error handling
+            match py.import_bound("pygame") {
+                Ok(_) => tracing::info!("pygame imported successfully"),
+                Err(e) => tracing::warn!("pygame not available: {}", e),
+            }
 
-            py.import_bound("gtts").map_err(|e| ErrorData {
-                code: ErrorCode::INTERNAL_ERROR,
-                message: format!("Failed to import gtts: {}", e).into(),
-                data: None,
-            })?;
+            match py.import_bound("gtts") {
+                Ok(_) => tracing::info!("gtts imported successfully"),
+                Err(e) => tracing::warn!("gtts not available: {}", e),
+            }
+
+            // Try to import our TTS module
+            match py.import_bound("mcp_tts_fixed") {
+                Ok(_) => tracing::info!("mcp_tts_fixed imported successfully"),
+                Err(e) => {
+                    tracing::warn!("mcp_tts_fixed not available, trying alternatives: {}", e);
+                    // Try alternative module names
+                    for module_name in &["mcp_tts_server", "mcp_tts_simple"] {
+                        match py.import_bound(*module_name) {
+                            Ok(_) => {
+                                tracing::info!("{} imported successfully", module_name);
+                                break;
+                            },
+                            Err(e) => tracing::debug!("{} not available: {}", module_name, e),
+                        }
+                    }
+                }
+            }
 
             Ok(())
         })
@@ -138,17 +160,46 @@ impl UkrainianTTSRouter {
         let voice = voice.to_string();
         let lang = lang.to_string();
 
+        tracing::info!("TTS call: text='{}', voice='{}', lang='{}'", text, voice, lang);
+
         let result = tokio::task::spawn_blocking(move || {
             Python::with_gil(|py| -> Result<String, ErrorData> {
-                let tts_module = py.import_bound("mcp_tts_server").map_err(|e| ErrorData {
+                // Try different module names in order of preference
+                let module_names = vec!["mcp_tts_fixed", "mcp_tts_server", "mcp_tts_simple"];
+                let mut tts_module = None;
+                
+                for module_name in &module_names {
+                    match py.import_bound(*module_name) {
+                        Ok(module) => {
+                            tracing::info!("Successfully imported {}", module_name);
+                            tts_module = Some(module);
+                            break;
+                        },
+                        Err(e) => tracing::debug!("Failed to import {}: {}", module_name, e),
+                    }
+                }
+
+                let tts_module = tts_module.ok_or_else(|| ErrorData {
                     code: ErrorCode::INTERNAL_ERROR,
-                    message: format!("Failed to import TTS server: {}", e).into(),
+                    message: "Failed to import any TTS module. Please check if mcp_tts_fixed.py is available.".into(),
                     data: None,
                 })?;
 
-                let tts_class = tts_module.getattr("MCPTTSServer").map_err(|e| ErrorData {
+                // Try different class names
+                let class_names = vec!["MCPTTSServer", "TTSServer", "UkrainianTTSServer"];
+                let mut tts_class = None;
+                
+                for class_name in &class_names {
+                    if let Ok(class) = tts_module.getattr(*class_name) {
+                        tracing::info!("Found TTS class: {}", class_name);
+                        tts_class = Some(class);
+                        break;
+                    }
+                }
+
+                let tts_class = tts_class.ok_or_else(|| ErrorData {
                     code: ErrorCode::INTERNAL_ERROR,
-                    message: format!("Failed to get TTS server class: {}", e).into(),
+                    message: "Failed to find TTS server class".into(),
                     data: None,
                 })?;
 
@@ -175,16 +226,42 @@ impl UkrainianTTSRouter {
                     data: None,
                 })?;
 
-                let result = tts_instance
-                    .call_method1("call_tool_sync", ("say_tts", args))
-                    .map_err(|e| ErrorData {
-                        code: ErrorCode::INTERNAL_ERROR,
-                        message: format!("Failed to call TTS: {}", e).into(),
-                        data: None,
-                    })?;
+                // Try different method names for calling TTS
+                let method_names = vec!["call_tool_sync", "say_tts", "synthesize"];
+                let mut result = None;
+                
+                for method_name in &method_names {
+                    match tts_instance.call_method1(*method_name, ("say_tts", &args)) {
+                        Ok(res) => {
+                            tracing::info!("TTS call successful using method: {}", method_name);
+                            result = Some(res);
+                            break;
+                        },
+                        Err(e) => tracing::debug!("Method {} failed: {}", method_name, e),
+                    }
+                }
 
-                // Convert result to string
-                let result_str = result.extract::<String>().unwrap_or_else(|_| format!("{:?}", result));
+                let result = result.ok_or_else(|| ErrorData {
+                    code: ErrorCode::INTERNAL_ERROR,
+                    message: "Failed to call TTS with any available method".into(),
+                    data: None,
+                })?;
+
+                // Convert result to string with better handling
+                let result_str = if let Ok(s) = result.extract::<String>() {
+                    s
+                } else if let Ok(dict) = result.downcast::<PyDict>() {
+                    // Handle dictionary response
+                    if let Ok(content) = dict.get_item("content") {
+                        content.unwrap().extract::<String>().unwrap_or_else(|_| "TTS completed successfully".to_string())
+                    } else {
+                        "TTS completed successfully".to_string()
+                    }
+                } else {
+                    format!("TTS completed: {:?}", result)
+                };
+                
+                tracing::info!("TTS result: {}", result_str);
                 Ok(result_str)
             })
         }).await.map_err(|e| ErrorData {

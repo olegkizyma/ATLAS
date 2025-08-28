@@ -9,6 +9,8 @@
 //! - Google TTS fallback for other languages
 //! - Audio playback through pygame
 //! - Full MCP protocol compatibility
+//! - Robust error handling and fallback mechanisms
+//! - Multiple Python module compatibility
 //! 
 //! ## Usage
 //! 
@@ -20,12 +22,20 @@
 //! ## Voice Options
 //! 
 //! Ukrainian voices (ukrainian-tts):
-//! - mykyta (male, default)
-//! - oleksa (male)
-//! - tetiana (female)
-//! - lada (female)
+//! - tetiana (female, default) - high quality
+//! - mykyta (male) - clear pronunciation
+//! - oleksa (male) - natural sound
+//! - lada (female) - expressive
 //! 
 //! Other languages use Google TTS with automatic language detection.
+//! 
+//! ## Integration Notes
+//! 
+//! This Rust crate integrates with Python TTS implementations by:
+//! - Using PyO3 for Python interop
+//! - Supporting multiple module names (mcp_tts_fixed, mcp_tts_server, etc.)
+//! - Providing graceful fallbacks for missing dependencies
+//! - Maintaining full async compatibility with Goose
 
 pub mod router;
 

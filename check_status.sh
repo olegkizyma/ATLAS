@@ -37,11 +37,11 @@ fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 
-# Перевірка Frontend
+# Перевірка External Frontend
 FRONTEND_PID=$(pgrep -f "atlas_minimal_live.py" | head -1)
 if [ -n "$FRONTEND_PID" ]; then
-    echo "🌐 Frontend: ✅ RUNNING (PID: $FRONTEND_PID)"
-    
+    echo "🌐 External Frontend: ✅ RUNNING (PID: $FRONTEND_PID)"
+
     # Перевірка HTTP доступності
     HTTP_STATUS=$(curl -s -o /dev/null -w "%{http_code}" http://localhost:8080 2>/dev/null)
     if [ "$HTTP_STATUS" = "200" ]; then
@@ -58,32 +58,18 @@ if [ -n "$FRONTEND_PID" ]; then
         echo "   📋 Логи недоступні: Файл /tmp/frontend.log не існує"
     fi
 else
-    echo "🌐 Frontend: ❌ НЕ ЗАПУЩЕНО"
-fi
-
-echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-
-# Перевірка TTS
-TTS_PID=$(pgrep -f "mcp_tts_server.py" | head -1)
-if [ -n "$TTS_PID" ]; then
-    echo "🗣️  TTS Server: ✅ RUNNING (PID: $TTS_PID)"
-    
-    # Перевірка логів
-    if [ -f "/tmp/tts.log" ]; then
-        echo "   📋 Останні логи:"
-        tail -5 /tmp/tts.log | sed 's/^/      /'
-    else
-        echo "   📋 Логи недоступні: Файл /tmp/tts.log не існує"
-    fi
-else
-    echo "🗣️  TTS Server: ❌ НЕ ЗАПУЩЕНО"
+    echo "🌐 External Frontend: ❌ НЕ ЗАПУЩЕНО"
 fi
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
 echo "📌 Використання:"
-echo "   - Перевірка логів: tail -f /tmp/goose.log"
+echo "   - Перевірка логів AI Agent: tail -f /tmp/goose.log"
+echo "   - Перевірка логів Frontend: tail -f /tmp/frontend.log"
 echo "   - Перезапуск: ./start_atlas.sh"
-echo "   - Зупинка: pkill -f goosed && pkill -f atlas_minimal && pkill -f mcp_tts"
+echo "   - Зупинка: ./stop_atlas.sh"
 echo "   - Діагностика: ./diagnose.sh"
 echo "   - Автовідновлення: ./recover.sh"
+echo ""
+echo "🖥️ Desktop UI (опціонально):"
+echo "   cd /Users/dev/Documents/GitHub/ATLAS/goose/ui/desktop && npm run start-gui"
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"

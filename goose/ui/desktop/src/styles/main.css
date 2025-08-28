@@ -217,12 +217,10 @@
   }
 }
 
+/* Cash Sans fonts replaced with system fonts to avoid 403 errors */
 @font-face {
   font-family: 'Cash Sans';
-  src:
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff2/CashSans-Light.woff2)
-      format('woff2'),
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff/CashSans-Light.woff) format('woff');
+  src: local('Inter'), local('SF Pro Display'), local('Segoe UI'), sans-serif;
   font-weight: 300;
   font-style: normal;
   font-display: swap;
@@ -230,11 +228,7 @@
 
 @font-face {
   font-family: 'Cash Sans';
-  src:
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff2/CashSans-Regular.woff2)
-      format('woff2'),
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff/CashSans-Regular.woff)
-      format('woff');
+  src: local('Inter'), local('SF Pro Display'), local('Segoe UI'), sans-serif;
   font-weight: 400;
   font-style: normal;
   font-display: swap;
@@ -242,10 +236,7 @@
 
 @font-face {
   font-family: 'Cash Sans';
-  src:
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff2/CashSans-Medium.woff2)
-      format('woff2'),
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff/CashSans-Medium.woff) format('woff');
+  src: local('Inter'), local('SF Pro Display'), local('Segoe UI'), sans-serif;
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -253,10 +244,7 @@
 
 @font-face {
   font-family: 'Cash Sans';
-  src:
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff2/CashSans-Bold.woff2)
-      format('woff2'),
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff/CashSans-Bold.woff) format('woff');
+  src: local('Inter'), local('SF Pro Display'), local('Segoe UI'), sans-serif;
   font-weight: 700;
   font-style: normal;
   font-display: swap;
@@ -264,11 +252,7 @@
 
 @font-face {
   font-family: 'Cash Sans Mono';
-  src:
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff2/CashSansMono-Regular.woff2)
-      format('woff2'),
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff/CashSansMono-Regular.woff)
-      format('woff');
+  src: local('SF Mono'), local('Monaco'), local('Inconsolata'), local('Roboto Mono'), monospace;
   font-weight: 500;
   font-style: normal;
   font-display: swap;
@@ -276,11 +260,7 @@
 
 @font-face {
   font-family: 'Cash Sans Mono';
-  src:
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff2/CashSansMono-Light.woff2)
-      format('woff2'),
-    url(https://cash-f.squarecdn.com/static/fonts/cashsans/woff/CashSansMono-Light.woff)
-      format('woff');
+  src: local('SF Mono'), local('Monaco'), local('Inconsolata'), local('Roboto Mono'), monospace;
   font-weight: 300;
   font-style: normal;
   font-display: swap;
