@@ -477,6 +477,48 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.send_error(500, str(e))
 
     def serve_live_logs(self):
+        """Stream live logs via Server-Sent Events (SSE)."""
+        try:
+            # Set SSE headers
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+            
+            # Initial connection event
+            init_data = {
+                "timestamp": datetime.now().isoformat(),
+                "level": "INFO",
+                "source": "atlas_frontend",
+                "message": "Live log stream connected"
+            }
+            self.wfile.write(f"data: {json.dumps(init_data)}\n\n".encode())
+            self.wfile.flush()
+            
+            # Stream logs from the live streamer
+            while True:
+                logs = self.live_streamer.get_logs() if self.live_streamer else []
+                if not logs:
+                    # Send keep-alive comment every 15 seconds
+                    self.wfile.write(b": keep-alive \n\n")
+                    self.wfile.flush()
+                    time.sleep(5)
+                    continue
+                for log in logs:
+                    event_data = {
+                        "timestamp": log.get("timestamp"),
+                        "level": log.get("level"),
+                        "source": "atlas_frontend",
+                        "message": log.get("message")
+                    }
+                    self.wfile.write(f"data: {json.dumps(event_data)}\n\n".encode())
+                    self.wfile.flush()
+        except Exception as e:
+            logger.error(f"Live log stream error: {e}")
+            # No send_error after send_response
+            return
         """Отримання живих логів"""
         try:
             if self.live_streamer is None:
