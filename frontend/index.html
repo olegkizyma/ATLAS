@@ -587,8 +587,8 @@
             }
 
             async sendToAtlas(message) {
-                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
-                const url = `${baseUrl}/chat`;
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const url = `${baseUrl}/api/chat`;
                 try {
                     const response = await fetch(url, {
                         method: 'POST',
@@ -697,7 +697,7 @@
             async pollLiveLogs(initial = false) {
                 // Одноразове завантаження backlog для випадку якщо SSE підключається із затримкою
                 if (!initial) return;
-                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:3000').replace(/\/$/, '');
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
                 const url = `${baseUrl}/logs?limit=200`;
                 try {
                     const response = await fetch(url);
@@ -829,6 +829,89 @@
         // Initialize the interface when page loads
         document.addEventListener('DOMContentLoaded', () => {
             new AtlasMinimalInterface();
+        });
+    </script>
+
+    <!-- Goose Chat Integration Script -->
+    <script>
+        /**
+         * Appends a chat message to the chat panel.
+         *
+         * @param {string} text  - The message text.
+         * @param {boolean} isUser  - true if the message is from the user.
+         */
+        function addChatMessage(text, isUser) {
+            const container = document.getElementById('chatMessages');
+            const msgDiv = document.createElement('div');
+            msgDiv.className = 'message ' + (isUser ? 'user' : 'assistant');
+            const textDiv = document.createElement('div');
+            textDiv.className = 'message-text';
+            textDiv.textContent = text;
+            msgDiv.appendChild(textDiv);
+
+            // Optional: show a timestamp
+            const timeDiv = document.createElement('div');
+            timeDiv.className = 'message-time';
+            timeDiv.textContent = new Date().toLocaleTimeString();
+            msgDiv.appendChild(timeDiv);
+
+            container.appendChild(msgDiv);
+            container.scrollTop = container.scrollHeight;   // auto‑scroll to bottom
+        }
+
+        /**
+         * Sends the user's message to the Goose API and displays
+         * the assistant's reply.
+         */
+        async function sendMessage() {
+            const input = document.getElementById('chatInput');
+            const text = input.value.trim();
+            if (!text) return;          // nothing to send
+            addChatMessage(text, true);   // show user message
+            input.value = '';             // clear input
+
+            try {
+                const res = await fetch('/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ prompt: text })
+                });
+
+                if (!res.ok) {
+                    throw new Error(`Server returned ${res.status}`);
+                }
+
+                const data = await res.json();             // { answer: "..." }
+                const reply = data.answer ?? 'No response';
+                addChatMessage(reply, false);              // show assistant answer
+            } catch (e) {
+                console.error(e);
+                addChatMessage(`⚠️ Error: ${e.message}`, false);
+            }
+        }
+
+        /*** Bind chat events ***/
+        document.addEventListener('DOMContentLoaded', () => {
+            const chatInput = document.getElementById('chatInput');
+
+            // Handle "Enter" → send message (but allow Shift+Enter for newline)
+            chatInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault();          // prevent newline
+                    sendMessage();
+                }
+            });
+
+            // Optional: add click handler for voice button to also send message
+            const voiceButton = document.getElementById('voiceButton');
+            if (voiceButton) {
+                voiceButton.addEventListener('click', () => {
+                    // If not in voice mode, use as send button
+                    if (window.atlasInterface && window.atlasInterface.voiceMode === 'off') {
+                        sendMessage();
+                    }
+                });
+            }
         });
     </script>
 </body>
