@@ -1,24 +1,8 @@
 #!/usr/bin/env python3
 """
-Atlas Minimal Frontend Server - Simplified Version
-Мінімалістичний хакерський інтерфейс для Atlas
+Atlas Minimal Frontend Server - With Live Logs
+Мінімалістичний хакерський інтерфейс для Atlas з живими логами
 """
-
-import json
-import logging
-import time
-import subprocess
-import re
-from datetime import datetime
-from pathlib import Path
-from http.server import HTTPServer, SimpleHTTPRequestHandler
-import urllib.parse
-import requests
-import os
-
-# Налаштування логування
-logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
 
 import json
 import logging
@@ -313,7 +297,7 @@ class LiveLogStreamer:
             return {"info": "Disk info unavailable"}
 
 class AtlasMinimalHandler(SimpleHTTPRequestHandler):
-    """Спрощений HTTP обробник для Atlas"""
+    live_streamer = None
     
     def __init__(self, *args, **kwargs):
         self.atlas_core_url = "http://localhost:3000"
@@ -338,6 +322,79 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         self.send_header('Access-Control-Allow-Headers', 'Content-Type')
         self.end_headers()
 
+    def _clean_ansi_codes(self, text):
+        """Видаляє ANSI escape коди з тексту"""
+        ansi_escape = re.compile(r'\x1B(?:[@-Z\\-_]|\[[0-?]*[ -/]*[@-~])')
+        return ansi_escape.sub('', text)
+    
+    def _parse_log_line(self, line):
+        """Парсить лог лінію, витягуючи тільки рівень та повідомлення"""
+        # Видаляємо ANSI коди
+        clean_line = self._clean_ansi_codes(line)
+        
+        # Шаблон для парсингу логів у форматі:
+        # [2025-08-27T21:39:23.655482] [DEBUG] goose: 2025-08-27T18:32:28.162604Z  INFO goose::scheduler_factory: Creating legacy scheduler
+        # Результат: INFO goose::scheduler_factory: Creating legacy scheduler
+        
+        # Перший варіант - складний формат з подвійною датою і префіксом "goose:"
+        pattern1 = r'\[[\d\-T:.]+\]\s+\[(\w+)\]\s+\w+:\s*[\d\-T:.Z]+\s+(\w+)\s+(.+)'
+        match = re.search(pattern1, clean_line)
+        if match:
+            level = match.group(2)  # Використовуємо другий рівень (INFO, DEBUG, тощо)
+            message = match.group(3)
+            return f"{level} {message}"
+        
+        # Другий варіант - формат [DEBUG] goose: INFO message
+        pattern2 = r'\[[\d\-T:.]+\]\s+\[(\w+)\]\s+\w+:\s+(\w+)\s+(.+)'
+        match = re.search(pattern2, clean_line)
+        if match:
+            level = match.group(2)  # Використовуємо другий рівень
+            message = match.group(3)
+            return f"{level} {message}"
+        
+        # Третій варіант - звичайний формат з однією датою
+        pattern3 = r'\[[\d\-T:.]+\]\s+\[(\w+)\]\s+(.+)'
+        match = re.search(pattern3, clean_line)
+        if match:
+            level = match.group(1)
+            message = match.group(2)
+            
+            # Обробляємо різні варіанти message
+            if message.startswith('goose: '):
+                # Видаляємо префікс "goose: "
+                message = message[7:]
+                
+                # Видаляємо рядки типу "at crates/..."
+                if message.startswith('at crates/'):
+                    return None  # Пропускаємо такі рядки
+                
+                # Перевіряємо чи не є це лог з рівнем всередині
+                inner_level_match = re.match(r'(\w+)\s+(.+)', message)
+                if inner_level_match and inner_level_match.group(1) in ['INFO', 'DEBUG', 'WARN', 'ERROR', 'TRACE']:
+                    # Використовуємо внутрішній рівень
+                    level = inner_level_match.group(1)
+                    message = inner_level_match.group(2)
+            else:
+                # Для звичайних повідомлень без goose: залишаємо рівень як є
+                # Але прибираємо джерело типу "atlas_frontend:"
+                if ': ' in message:
+                    parts = message.split(': ', 1)
+                    if len(parts) == 2:
+                        message = parts[1]
+                    
+            return f"{level} {message}"
+        
+        # Четвертий варіант - тільки timestamp та повідомлення
+        pattern4 = r'[\d\-T:.Z]+\s+(\w+)\s+(.+)'
+        match = re.search(pattern4, clean_line)
+        if match:
+            level = match.group(1)
+            message = match.group(2)
+            return f"{level} {message}"
+        
+        # Якщо нічого не знайдено, повертаємо очищену лінію
+        return clean_line
+
     def do_GET(self):
         """Обробка GET запитів"""
         if self.path == "/" or self.path == "/index.html":
@@ -346,19 +403,17 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.serve_3d_model()
         elif self.path == "/favicon.ico":
             self.serve_favicon()
+        elif self.path == "/api/health":
+            self.serve_health()
         elif self.path.startswith("/logs"):
-            self.serve_live_logs()
+            if self.path == "/logs/stream":
+                self.serve_log_stream()
+            else:
+                self.serve_live_logs()
         elif self.path == "/api/status":
             self.serve_system_status()
         else:
             super().do_GET()
-
-    def do_POST(self):
-        """Обробка POST запитів"""
-        if self.path == "/api/chat":
-            self.handle_chat()
-        else:
-            self.send_error(404, "Not Found")
 
     def do_POST(self):
         """Обробка POST запитів"""
@@ -481,23 +536,32 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.send_error(500, str(e))
 
     def serve_live_logs(self):
-        """Отримання логів (спрощена версія)"""
+        """Отримання живих логів з підтримкою query параметрів"""
         try:
             # Парсимо query параметри
             parsed_path = urllib.parse.urlparse(self.path)
             query_params = urllib.parse.parse_qs(parsed_path.query)
             
-            # Отримуємо limit параметр (за замовчуванням 10)
-            limit = int(query_params.get('limit', ['10'])[0])
+            # Отримуємо limit параметр (за замовчуванням 100)
+            limit = int(query_params.get('limit', ['100'])[0])
             
-            # Повертаємо простий список логів
-            logs = []
-            for i in range(min(limit, 10)):
-                logs.append({
-                    "message": f"[{datetime.now().strftime('%H:%M:%S')}] System log {i+1}",
-                    "level": "info",
+            if self.live_streamer is None:
+                logs = [{
+                    "message": f"[{datetime.now().strftime('%H:%M:%S')}] [SYSTEM] Log streamer not initialized", 
+                    "level": "warning", 
                     "timestamp": datetime.now().strftime("%H:%M:%S")
-                })
+                }]
+            else:
+                all_logs = self.live_streamer.get_logs()
+                if not all_logs:
+                    logs = [{
+                        "message": f"[{datetime.now().strftime('%H:%M:%S')}] [SYSTEM] No new logs", 
+                        "level": "info", 
+                        "timestamp": datetime.now().strftime("%H:%M:%S")
+                    }]
+                else:
+                    # Обмежуємо кількість логів
+                    logs = all_logs[-limit:] if len(all_logs) > limit else all_logs
             
             response = json.dumps({"logs": logs}).encode('utf-8')
             self.send_response(200)
@@ -508,10 +572,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.wfile.write(response)
         except Exception as e:
             logger.error(f"Live logs error: {e}")
-            try:
-                self.send_error(500, str(e))
-            except:
-                pass
+            self.send_error(500, str(e))
 
     def serve_log_stream(self):
         """Server-Sent Events стрім логів"""
@@ -571,19 +632,19 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             return
 
     def serve_system_status(self):
-        """Отримання стану системи (спрощена версія)"""
+        """Отримання повного стану системи"""
         try:
-            status = {
-                "services": {
-                    "atlas_frontend": "running",
+            if self.live_streamer is None:
+                status = {
+                    "error": "System monitor not initialized",
                     "timestamp": datetime.now().isoformat()
-                },
-                "processes": {
-                    "atlas": {"count": 1, "status": "active"}
                 }
-            }
+            else:
+                status = self.live_streamer.get_system_status()
+                if not status.get("timestamp"):
+                    status["timestamp"] = datetime.now().isoformat()
             
-            response = json.dumps(status).encode('utf-8')
+            response = json.dumps(status, indent=2).encode('utf-8')
             self.send_response(200)
             self.send_header('Content-type', 'application/json')
             self.send_header('Access-Control-Allow-Origin', '*')
@@ -592,18 +653,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.wfile.write(response)
         except Exception as e:
             logger.error(f"System status error: {e}")
-            try:
-                self.send_error(500, str(e))
-            except:
-                pass
-            self.end_headers()
-            self.wfile.write(response)
-        except Exception as e:
-            logger.error(f"System status error: {e}")
             self.send_error(500, str(e))
 
     def handle_chat(self):
-        """Обробка чат запитів до Goose API (спрощена версія)"""
+        """Обробка чат запитів до Goose API"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
@@ -614,6 +667,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             if not prompt:
                 self.send_json_response({"error": "Message is required"}, 400)
                 return
+            
+            # Логування чату
+            if self.live_streamer:
+                self.live_streamer._add_log(f"[CHAT] User: {prompt[:50]}...")
             
             # Виклик Goose CLI з правильною командою
             try:
@@ -633,7 +690,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     cmd,
                     capture_output=True, 
                     text=True, 
-                    timeout=30,  # Зменшуємо таймаут для стабільності
+                    timeout=60,  # Збільшуємо таймаут
                     cwd="/Users/dev/Documents/GitHub/ATLAS/goose",
                     env={
                         **os.environ, 
@@ -647,9 +704,15 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     if not answer:
                         answer = "Goose відповів, але відповідь порожня"
                     
+                    if self.live_streamer:
+                        self.live_streamer._add_log(f"[CHAT] Goose: {answer[:50]}...")
+                    
                     self.send_json_response({"response": answer})
                 else:
                     error_msg = result.stderr.strip() or "Goose command failed"
+                    if self.live_streamer:
+                        self.live_streamer._add_log(f"[CHAT] Error: {error_msg[:50]}...", "error")
+                    
                     self.send_json_response({"response": f"⚠️ Помилка: {error_msg}"})
                     
             except subprocess.TimeoutExpired:
@@ -824,28 +887,37 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             return False
 
 def main():
-    """Запуск сервера (спрощена версія)"""
+    """Запуск сервера"""
     port = 8080
     server_address = ('', port)
     
     # Зміна робочої директорії
     os.chdir(Path(__file__).parent)
     
+    # Ініціалізація live streamer
+    live_streamer = LiveLogStreamer()
+    AtlasMinimalHandler.set_live_streamer(live_streamer)
+    live_streamer.start_streaming()
+    
     httpd = HTTPServer(server_address, AtlasMinimalHandler)
     
     print("🚀 Starting Atlas Minimal Frontend Server...")
     print(f"📱 Interface: http://localhost:{port}")
     print("💾 3D Viewer: Background layer")
-    print("📋 MCP Logs: Left panel")
+    print("📋 MCP Logs: Left panel (LIVE GREEN)")
     print("💬 Chat: Right panel")
+    print("🎤 Voice: Single/Double click modes")
     print(f"🎯 Server running on port {port}")
+    print("🟢 Live logs streaming enabled")
     
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
         print("\n🛑 Server stopping...")
-        httpd.shutdown()
+        if live_streamer:
+            live_streamer.stop_streaming()
         print("🛑 Server stopped")
+        httpd.shutdown()
 
 if __name__ == "__main__":
     main()

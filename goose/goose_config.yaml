@@ -1,0 +1,6 @@
+providers:
+  - name: ollama
+    model: gpt-oss:latest
+    base_url: http://localhost:11434
+    api_key: ""
+    stream: true
