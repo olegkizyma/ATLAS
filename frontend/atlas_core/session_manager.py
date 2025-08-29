@@ -11,9 +11,13 @@ import json
 import subprocess
 import os
 import re
+import logging
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
+
+# Налаштування логування
+logger = logging.getLogger(__name__)
 
 
 class SessionManager:
@@ -70,9 +74,15 @@ class SessionManager:
     def create_session(self, session_name: str, initial_message: str = None) -> Dict:
         """Створює нову сесію Goose"""
         try:
+            logger.info(f"🆕 SessionManager: Створюю нову сесію '{session_name}'")
+            
             if initial_message:
+                logger.info(f"📝 Початкове повідомлення: {initial_message}")
+                
                 # Створюємо сесію з початковим повідомленням
                 cmd = [self.goose_binary, "session", "--name", session_name]
+                
+                logger.info(f"🚀 Виконую команду: {' '.join(cmd)}")
                 
                 # Запускаємо в інтерактивному режимі
                 process = subprocess.Popen(
@@ -86,7 +96,15 @@ class SessionManager:
                 )
                 
                 # Відправляємо повідомлення і закриваємо
-                stdout, stderr = process.communicate(input=f"{initial_message}\nexit\n", timeout=60)
+                input_text = f"{initial_message}\nexit\n"
+                logger.info(f"📤 Відправляю вхідні дані: {repr(input_text)}")
+                
+                stdout, stderr = process.communicate(input=input_text, timeout=60)
+                
+                logger.info(f"📥 Отримано відповідь (return_code: {process.returncode})")
+                logger.info(f"📤 STDOUT: {stdout[:500]}..." if len(stdout) > 500 else f"📤 STDOUT: {stdout}")
+                if stderr:
+                    logger.warning(f"⚠️ STDERR: {stderr}")
                 
                 self.active_sessions[session_name] = {
                     "created": datetime.now().isoformat(),
@@ -125,12 +143,17 @@ class SessionManager:
     def send_to_session(self, session_name: str, message: str, resume: bool = True) -> Dict:
         """Відправляє повідомлення в існуючу сесію"""
         try:
+            logger.info(f"🔗 SessionManager: Відправляю команду до сесії '{session_name}'")
+            logger.info(f"📝 Команда: {message}")
+            
             if resume:
                 # Відновлюємо сесію і відправляємо повідомлення
                 cmd = [self.goose_binary, "session", "--name", session_name, "--resume"]
             else:
                 # Нова сесія з іменем
                 cmd = [self.goose_binary, "session", "--name", session_name]
+            
+            logger.info(f"🚀 Виконую команду: {' '.join(cmd)}")
             
             # Запускаємо процес
             process = subprocess.Popen(
@@ -145,7 +168,14 @@ class SessionManager:
             
             # Відправляємо повідомлення
             input_text = f"{message}\nexit\n"
+            logger.info(f"📤 Відправляю вхідні дані: {repr(input_text)}")
+            
             stdout, stderr = process.communicate(input=input_text, timeout=300)  # 5 хвилин
+            
+            logger.info(f"📥 Отримано відповідь (return_code: {process.returncode})")
+            logger.info(f"📤 STDOUT: {stdout[:500]}..." if len(stdout) > 500 else f"📤 STDOUT: {stdout}")
+            if stderr:
+                logger.warning(f"⚠️ STDERR: {stderr}")
             
             # Оновлюємо статистику сесії
             if session_name in self.active_sessions:
