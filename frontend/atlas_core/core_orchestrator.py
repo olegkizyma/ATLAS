@@ -57,6 +57,22 @@ class CoreOrchestrator:
         self.stats["total_requests"] += 1
         
         try:
+            # === ПЕРЕВІРКА КОМАНД КЕРУВАННЯ СЕСІЯМИ ===
+            print(f"🔧 Перевіряю команди керування сесіями...")
+            
+            # Швидкий аналіз чи це команда керування сесіями
+            session_analysis = self.atlas_llm._analyze_session_management_intent(user_message)
+            
+            if session_analysis["is_session_command"]:
+                print(f"🎯 Виявлено команду сесії: {session_analysis['action']}")
+                
+                session_response = self._handle_session_command(
+                    session_analysis, user_context, start_time
+                )
+                
+                self.stats["successful_requests"] += 1
+                return session_response
+            
             # === КРОК 1: ATLAS LLM1 - РОЗУМНА ОБРОБКА З АВТОДОПОВНЕННЯМ ===
             print(f"🧠 Atlas LLM1: Розумна обробка повідомлення з автодоповненням...")
             
@@ -437,6 +453,122 @@ class CoreOrchestrator:
             health_status["overall_health"] = "critical"
         
         return health_status
+
+    # === МЕТОДИ КЕРУВАННЯ СЕСІЯМИ ===
+    def close_session_by_user(self, session_name: str, user_context: Dict = None) -> Dict:
+        """Закриває конкретну сесію за командою користувача"""
+        return self.session_manager.close_session_by_user(session_name, user_context)
+
+    def close_all_sessions_by_user(self, user_context: Dict = None) -> Dict:
+        """Закриває всі сесії за командою користувача"""
+        return self.session_manager.close_all_sessions_by_user(user_context)
+
+    def list_active_sessions_for_user(self) -> Dict:
+        """Повертає список активних сесій для користувача"""
+        return self.session_manager.list_active_sessions_for_user()
+
+    def get_available_sessions(self) -> List[Dict]:
+        """Отримує доступні сесії (з Goose + активні)"""
+        return self.session_manager.get_available_sessions()
+
+    def _handle_session_command(self, session_analysis: Dict, user_context: Dict, start_time) -> Dict:
+        """Обробляє команди керування сесіями"""
+        action = session_analysis["action"]
+        target = session_analysis.get("target")
+        
+        response_data = {
+            "timestamp": start_time.isoformat(),
+            "user_message": f"Команда керування сесіями: {action}",
+            "response_type": "session_management",
+            "atlas_core": True,
+            "processing_time": (datetime.now() - start_time).total_seconds()
+        }
+        
+        try:
+            if action == "list":
+                # Показати активні сесії
+                sessions_info = self.list_active_sessions_for_user()
+                active_sessions = sessions_info["active_sessions"]
+                
+                if active_sessions:
+                    session_list = "\n".join([
+                        f"• {s['name']} - {s['message_count']} повідомлень (остання активність: {s['last_used']})"
+                        for s in active_sessions
+                    ])
+                    response = f"📋 Активні сесії ({len(active_sessions)}):\n{session_list}\n\n💡 Щоб закрити сесію, напишіть: 'закрий сесію [назва]'"
+                else:
+                    response = "📋 Немає активних сесій.\n💡 Сесії створюються автоматично при виконанні завдань."
+                
+                response_data.update({
+                    "response": response,
+                    "session_info": sessions_info,
+                    "success": True
+                })
+                
+            elif action == "close_all":
+                # Закрити всі сесії
+                result = self.close_all_sessions_by_user(user_context)
+                
+                if result["success"]:
+                    response = f"✅ {result['message']}\n📊 Закрито сесій: {', '.join(result['closed_sessions'])}" if result['closed_sessions'] else "✅ Всі сесії закриті (активних не було)"
+                else:
+                    response = f"❌ Помилка: {result.get('error', 'Невідома помилка')}"
+                
+                response_data.update({
+                    "response": response,
+                    "session_result": result,
+                    "success": result["success"]
+                })
+                
+            elif action == "close_specific":
+                # Закрити конкретну сесію
+                if target == "unspecified":
+                    # Запитати яку сесію закрити
+                    sessions_info = self.list_active_sessions_for_user()
+                    active_sessions = sessions_info["active_sessions"]
+                    
+                    if active_sessions:
+                        session_names = [s['name'] for s in active_sessions]
+                        response = f"🤔 Яку саме сесію закрити?\n📋 Доступні сесії: {', '.join(session_names)}\n💡 Напишіть: 'закрий сесію [назва]'"
+                    else:
+                        response = "📋 Немає активних сесій для закриття."
+                        
+                    response_data.update({
+                        "response": response,
+                        "session_info": sessions_info,
+                        "success": True,
+                        "requires_clarification": True
+                    })
+                else:
+                    # Закрити вказану сесію
+                    result = self.close_session_by_user(target, user_context)
+                    
+                    if result["success"]:
+                        response = f"✅ {result['message']}"
+                    else:
+                        response = f"❌ {result['error']}\n📋 Доступні сесії: {', '.join(result.get('available_sessions', []))}"
+                    
+                    response_data.update({
+                        "response": response,
+                        "session_result": result,
+                        "success": result["success"]
+                    })
+            
+            else:
+                response_data.update({
+                    "response": f"❌ Невідома команда керування сесіями: {action}",
+                    "success": False,
+                    "error": f"Unsupported session action: {action}"
+                })
+                
+        except Exception as e:
+            response_data.update({
+                "response": f"❌ Помилка при обробці команди сесії: {str(e)}",
+                "success": False,
+                "error": str(e)
+            })
+        
+        return response_data
 
 
 # Глобальний екземпляр для використання в atlas_minimal_live.py

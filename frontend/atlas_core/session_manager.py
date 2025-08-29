@@ -580,21 +580,70 @@ class SessionManager:
         return None
 
     def cleanup_old_sessions(self, max_age_hours: int = 24):
-        """Очищає старі неактивні сесії"""
-        current_time = datetime.now()
-        to_remove = []
-        
-        for session_name, session_data in self.active_sessions.items():
-            last_used = datetime.fromisoformat(session_data["last_used"])
-            age_hours = (current_time - last_used).total_seconds() / 3600
-            
-            if age_hours > max_age_hours:
-                to_remove.append(session_name)
-        
-        for session_name in to_remove:
+        """Очищає старі неактивні сесії (ВІДКЛЮЧЕНО - сесії закриваються тільки користувачем)"""
+        # ЗМІНА: Відключаємо автоматичне очищення сесій
+        # Сесії тепер закриваються тільки за явною командою користувача
+        logger.info("⚠️ Автоматичне очищення сесій відключено. Сесії закриваються тільки користувачем.")
+        return {"removed_sessions": [], "remaining": len(self.active_sessions), "auto_cleanup_disabled": True}
+
+    def close_session_by_user(self, session_name: str, user_context: Dict = None) -> Dict:
+        """Закриває конкретну сесію за командою користувача"""
+        if session_name in self.active_sessions:
+            session_data = self.active_sessions[session_name]
             del self.active_sessions[session_name]
+            
+            # Також видаляємо з контексту
+            if session_name in self.session_contexts:
+                del self.session_contexts[session_name]
+            
+            logger.info(f"✅ Користувач закрив сесію '{session_name}'")
+            return {
+                "success": True,
+                "message": f"Сесія '{session_name}' успішно закрита",
+                "closed_session": session_data,
+                "remaining_sessions": len(self.active_sessions)
+            }
+        else:
+            logger.warning(f"⚠️ Спроба закрити неіснуючу сесію '{session_name}'")
+            return {
+                "success": False,
+                "error": f"Сесія '{session_name}' не знайдена",
+                "available_sessions": list(self.active_sessions.keys())
+            }
+
+    def close_all_sessions_by_user(self, user_context: Dict = None) -> Dict:
+        """Закриває всі сесії за командою користувача"""
+        closed_sessions = list(self.active_sessions.keys())
+        session_count = len(closed_sessions)
         
-        return {"removed_sessions": to_remove, "remaining": len(self.active_sessions)}
+        self.active_sessions.clear()
+        self.session_contexts.clear()
+        
+        logger.info(f"✅ Користувач закрив всі сесії ({session_count} сесій)")
+        return {
+            "success": True,
+            "message": f"Всі сесії успішно закриті ({session_count} сесій)",
+            "closed_sessions": closed_sessions,
+            "remaining_sessions": 0
+        }
+
+    def list_active_sessions_for_user(self) -> Dict:
+        """Повертає список активних сесій для користувача"""
+        sessions_info = []
+        for session_name, session_data in self.active_sessions.items():
+            sessions_info.append({
+                "name": session_name,
+                "created": session_data.get("created"),
+                "last_used": session_data.get("last_used"),
+                "message_count": session_data.get("message_count", 0),
+                "status": "active"
+            })
+        
+        return {
+            "active_sessions": sessions_info,
+            "total_count": len(sessions_info),
+            "auto_cleanup_disabled": True
+        }
 
     def _get_goose_env(self) -> Dict[str, str]:
         """Отримує середовище для запуску Goose"""
