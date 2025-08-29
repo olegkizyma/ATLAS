@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 03F — Sentry Expressive Bright",
+  "pitch_steps": -5,
+  "hpf": 140.0,
+  "lpf": 6500.0,
+  "presence_f0": 2400.0,
+  "presence_gain_db": 3.2,
+  "presence_Q": 0.8,
+  "delay_ms_1": 5.0,
+  "delay_ms_2": 10.0,
+  "mix_dry": 0.82,
+  "mix_d1": 0.10,
+  "mix_d2": 0.08,
+  "comp_thresh": 0.48,
+  "comp_ratio": 2.0,
+  "clip_drive": 1.2
+}

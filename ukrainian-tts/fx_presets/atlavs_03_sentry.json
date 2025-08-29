@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 03 — Sentry",
+  "pitch_steps": -6,
+  "hpf": 100.0,
+  "lpf": 3600.0,
+  "presence_f0": 1100.0,
+  "presence_gain_db": 1.8,
+  "presence_Q": 1.1,
+  "delay_ms_1": 8.0,
+  "delay_ms_2": 16.0,
+  "mix_dry": 0.78,
+  "mix_d1": 0.14,
+  "mix_d2": 0.08,
+  "comp_thresh": 0.40,
+  "comp_ratio": 3.2,
+  "clip_drive": 1.9
+}

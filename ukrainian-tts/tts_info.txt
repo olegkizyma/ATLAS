@@ -1,0 +1,5 @@
+channels=1
+rate=22050
+sample_bits=16
+frames=35328
+duration_sec=1.60

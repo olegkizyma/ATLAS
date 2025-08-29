@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 04 — Oracle",
+  "pitch_steps": -4,
+  "hpf": 90.0,
+  "lpf": 7000.0,
+  "presence_f0": 2600.0,
+  "presence_gain_db": 2.2,
+  "presence_Q": 0.8,
+  "delay_ms_1": 6.0,
+  "delay_ms_2": 12.0,
+  "mix_dry": 0.88,
+  "mix_d1": 0.08,
+  "mix_d2": 0.04,
+  "comp_thresh": 0.48,
+  "comp_ratio": 2.2,
+  "clip_drive": 1.2
+}

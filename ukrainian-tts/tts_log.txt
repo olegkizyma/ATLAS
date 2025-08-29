@@ -1,0 +1,27 @@
+TTS demo failed:
+Traceback (most recent call last):
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/quick_tts_demo.py", line 21, in main
+    tts = TTS(device=args.device)
+          ^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/ukrainian_tts/tts.py", line 43, in __init__
+    self.__setup_cache(cache_folder)
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/ukrainian_tts/tts.py", line 117, in __setup_cache
+    self.synthesizer = Text2Speech(
+                       ^^^^^^^^^^^^
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/espnet2/bin/tts_inference.py", line 92, in __init__
+    model, train_args = TTSTask.build_model_from_file(
+                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/espnet2/tasks/abs_task.py", line 1851, in build_model_from_file
+    model.to(device)
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1369, in to
+    return self._apply(convert)
+           ^^^^^^^^^^^^^^^^^^^^
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 928, in _apply
+    module._apply(fn)
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1020, in _apply
+    self._buffers[key] = fn(buf)
+                         ^^^^^^^
+  File "/Users/dev/Documents/GitHub/ukrainian-tts/.venv/lib/python3.11/site-packages/torch/nn/modules/module.py", line 1355, in convert
+    return t.to(
+           ^^^^^
+TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64. Please use float32 instead.

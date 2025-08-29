@@ -2,6 +2,7 @@
 """
 Atlas Minimal Frontend Server - Simplified Version
 Мінімалістичний хакерський інтерфейс для Atlas
+ОНОВЛЕНО: Інтеграція з Atlas Core (Atlas LLM1 + Goose + Гріша LLM3)
 """
 
 import json
@@ -9,12 +10,48 @@ import logging
 import time
 import subprocess
 import re
+import asyncio
+import os
 from datetime import datetime
 from pathlib import Path
 from http.server import HTTPServer, SimpleHTTPRequestHandler
 import urllib.parse
 import requests
-import os
+
+# Завантажуємо .env файл
+def load_env():
+    """Завантажує змінні з .env файлу"""
+    env_path = Path(__file__).parent / ".env"
+    if env_path.exists():
+        print(f"📄 Завантажую .env з {env_path}")
+        with open(env_path, 'r') as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith('#') and '=' in line:
+                    key, value = line.split('=', 1)
+                    os.environ[key.strip()] = value.strip()
+        print("✅ .env файл завантажено")
+    else:
+        print("⚠️ .env файл не знайдено")
+
+# Завантажуємо змінні середовища
+load_env()
+
+# Перевіряємо API ключі
+print(f"🔑 Gemini API: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
+print(f"🔑 Mistral API: {'✅' if os.getenv('MISTRAL_API_KEY') else '❌'}")
+
+# Імпортуємо Atlas Core
+try:
+    from atlas_core import get_atlas_core
+    ATLAS_CORE_AVAILABLE = True
+    logger = logging.getLogger(__name__)
+    logger.info("🚀 Atlas Core успішно завантажений!")
+except ImportError as e:
+    ATLAS_CORE_AVAILABLE = False
+    logger = logging.getLogger(__name__)
+    logger.warning(f"⚠️ Atlas Core недоступний: {e}")
+    logger.info("Використовуватиму legacy Goose інтеграцію")
 
 # Налаштування логування
 logging.basicConfig(level=logging.INFO)
@@ -350,6 +387,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.serve_live_logs()
         elif self.path == "/api/status":
             self.serve_system_status()
+        elif self.path == "/api/atlas/status":
+            self.serve_atlas_core_status()
+        elif self.path == "/api/atlas/sessions":
+            self.serve_atlas_sessions()
         else:
             super().do_GET()
 
@@ -576,6 +617,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             status = {
                 "services": {
                     "atlas_frontend": "running",
+                    "atlas_core_available": ATLAS_CORE_AVAILABLE,
                     "timestamp": datetime.now().isoformat()
                 },
                 "processes": {
@@ -592,74 +634,387 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.wfile.write(response)
         except Exception as e:
             logger.error(f"System status error: {e}")
-            try:
-                self.send_error(500, str(e))
-            except:
-                pass
-            self.end_headers()
-            self.wfile.write(response)
-        except Exception as e:
-            logger.error(f"System status error: {e}")
             self.send_error(500, str(e))
 
+    def serve_atlas_core_status(self):
+        """Статус Atlas Core системи"""
+        try:
+            if ATLAS_CORE_AVAILABLE:
+                core = get_atlas_core("/Users/dev/Documents/GitHub/ATLAS/goose")
+                status = core.get_system_status()
+                health = core.health_check()
+                
+                response_data = {
+                    "atlas_core": {
+                        "available": True,
+                        "status": status,
+                        "health": health
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                response_data = {
+                    "atlas_core": {
+                        "available": False,
+                        "error": "Atlas Core не завантажений",
+                        "legacy_mode": True
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            response = json.dumps(response_data, ensure_ascii=False, indent=2).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            
+        except Exception as e:
+            logger.error(f"Atlas Core status error: {e}")
+            error_response = {
+                "atlas_core": {
+                    "available": False,
+                    "error": str(e)
+                },
+                "timestamp": datetime.now().isoformat()
+            }
+            response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+    def serve_atlas_sessions(self):
+        """Список доступних сесій Goose"""
+        try:
+            if ATLAS_CORE_AVAILABLE:
+                core = get_atlas_core("/Users/dev/Documents/GitHub/ATLAS/goose")
+                sessions = core.get_available_sessions()
+                
+                response_data = {
+                    "sessions": sessions,
+                    "count": len(sessions),
+                    "atlas_core": True,
+                    "timestamp": datetime.now().isoformat()
+                }
+            else:
+                response_data = {
+                    "sessions": [],
+                    "count": 0,
+                    "atlas_core": False,
+                    "error": "Atlas Core недоступний",
+                    "timestamp": datetime.now().isoformat()
+                }
+            
+            response = json.dumps(response_data, ensure_ascii=False, indent=2).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            
+        except Exception as e:
+            logger.error(f"Atlas sessions error: {e}")
+            error_response = {
+                "sessions": [],
+                "error": str(e),
+                "atlas_core": False,
+                "timestamp": datetime.now().isoformat()
+            }
+            response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
     def handle_chat(self):
-        """Обробка чат запитів до Goose API (спрощена версія)"""
+        """Обробка чат запитів через Atlas Core (Atlas LLM1 + Goose + Гріша LLM3)"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
             data = json.loads(post_data.decode('utf-8'))
             
             # Підтримка як "message" так і "prompt"
-            prompt = data.get("message", data.get("prompt", ""))
-            if not prompt:
+            user_message = data.get("message", data.get("prompt", ""))
+            if not user_message:
                 self.send_json_response({"error": "Message is required"}, 400)
                 return
             
+            # Формуємо контекст користувача
+            user_context = {
+                "timestamp": datetime.now().isoformat(),
+                "session_hint": data.get("session_type"),
+                "client_ip": self.client_address[0],
+                "user_agent": self.headers.get('User-Agent', 'unknown')
+            }
+            
+            if ATLAS_CORE_AVAILABLE:
+                # === НОВИЙ ШЛЯХ: Atlas Core ===
+                logger.info(f"🧠 Atlas Core: Обробляю повідомлення: {user_message[:100]}...")
+                
+                try:
+                    # Отримуємо екземпляр Atlas Core
+                    core = get_atlas_core("/Users/dev/Documents/GitHub/ATLAS/goose")
+                    
+                    # Обробляємо повідомлення через всі три компоненти
+                    # Потрібно викликати async метод в sync контексті
+                    loop = asyncio.new_event_loop()
+                    asyncio.set_event_loop(loop)
+                    
+                    try:
+                        result = loop.run_until_complete(
+                            core.process_user_message(user_message, user_context)
+                        )
+                    finally:
+                        loop.close()
+                    
+                    # Формуємо відповідь на основі результату Atlas Core
+                    if result.get("success"):
+                        response_data = {
+                            "response": result.get("response", result.get("atlas_response", "Завдання виконано")),
+                            "response_type": result.get("response_type", "unknown"),
+                            "atlas_core": True,
+                            "processing_time": result.get("processing_time", 0),
+                            "intent": result.get("intent_analysis", {}).get("intent", "unknown"),
+                            "confidence": result.get("intent_analysis", {}).get("confidence", 0.0)
+                        }
+                        
+                        # Додаємо інформацію про сесію якщо є
+                        if "session_strategy" in result:
+                            response_data["session_info"] = {
+                                "strategy": result["session_strategy"].get("strategy"),
+                                "session_name": result["session_strategy"].get("session_name")
+                            }
+                        
+                        # Додаємо інформацію про безпеку якщо є
+                        if "security_analysis" in result:
+                            response_data["security"] = {
+                                "risk_level": result["security_analysis"].get("risk_level"),
+                                "validated": True
+                            }
+                        
+                        logger.info(f"✅ Atlas Core: Успішно оброблено ({result.get('response_type')})")
+                        self.send_json_response(response_data)
+                        
+                    else:
+                        # Помилка в Atlas Core
+                        error_message = result.get("error", "Невідома помилка Atlas Core")
+                        
+                        if result.get("response_type") == "security_block":
+                            # Заблоковано системою безпеки
+                            response_data = {
+                                "response": "🛡️ Команда заблокована системою безпеки Гріша",
+                                "error": error_message,
+                                "blocked": True,
+                                "atlas_core": True,
+                                "security_analysis": result.get("security_analysis", {})
+                            }
+                            logger.warning(f"🛡️ Гріша: Заблокував команду - {error_message}")
+                        else:
+                            # Загальна помилка
+                            response_data = {
+                                "response": f"Помилка Atlas Core: {error_message}",
+                                "error": error_message,
+                                "atlas_core": True,
+                                "fallback_available": True
+                            }
+                            logger.error(f"❌ Atlas Core: {error_message}")
+                        
+                        self.send_json_response(response_data, 500)
+                        
+                except Exception as atlas_error:
+                    logger.error(f"💥 Atlas Core Exception: {atlas_error}")
+                    # Fallback до legacy режиму
+                    self.handle_chat_legacy(user_message, data, user_context, str(atlas_error))
+            
+            else:
+                # === СТАРИЙ ШЛЯХ: Legacy Goose ===
+                logger.info("🔄 Використовую legacy Goose інтеграцію")
+                self.handle_chat_legacy(user_message, data, user_context)
+                
+        except Exception as e:
+            logger.error(f"Fatal error in handle_chat: {e}")
+            self.send_json_response({
+                "response": f"Критична помилка сервера: {str(e)}",
+                "error": str(e),
+                "atlas_core": False
+            }, 500)
+
+    def handle_chat_legacy(self, user_message: str, data: dict, user_context: dict, atlas_error: str = None):
+        """Legacy обробка чату через прямий виклик Goose CLI"""
+        try:
+            logger.info(f"🔄 Legacy: Обробляю через Goose CLI: {user_message[:100]}...")
+            
+            # Визначаємо тип сесії (legacy логіка)
+            session_type = self.determine_session_type(user_message, data.get("session_type"))
+            session_name = self.get_session_name(user_message, session_type)
+            
             # Виклик Goose CLI з правильною командою
-            try:
-                import subprocess
-                import os
+            goose_path = "/Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose"
+            
+            if session_type == "new_session":
+                # Нова іменована сесія
+                cmd = [goose_path, "session", "--name", session_name]
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    cwd="/Users/dev/Documents/GitHub/ATLAS/goose",
+                    env=self._get_goose_env()
+                )
+                stdout, stderr = process.communicate(input=f"{user_message}\nexit\n", timeout=300)
                 
-                # Використовуємо робочу команду Goose
-                goose_path = "/Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose"
-                cmd = [
-                    goose_path, "run", 
-                    "-t", prompt,
-                    "--quiet"
-                ]
-                
-                # Запускаємо Goose з текстом
+            elif session_type == "continue_session":
+                # Продовжуємо існуючу сесію
+                cmd = [goose_path, "session", "--name", session_name, "--resume"]
+                process = subprocess.Popen(
+                    cmd,
+                    stdin=subprocess.PIPE,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True,
+                    cwd="/Users/dev/Documents/GitHub/ATLAS/goose",
+                    env=self._get_goose_env()
+                )
+                stdout, stderr = process.communicate(input=f"{user_message}\nexit\n", timeout=300)
+            else:
+                # Fallback до старого методу
+                cmd = [goose_path, "run", "-t", user_message, "--quiet"]
                 result = subprocess.run(
                     cmd,
                     capture_output=True, 
                     text=True, 
-                    timeout=600,  # Збільшуємо таймаут до 5 хвилин
+                    timeout=300,
                     cwd="/Users/dev/Documents/GitHub/ATLAS/goose",
-                    env={
-                        **os.environ, 
-                        "PATH": "/Users/dev/Documents/GitHub/ATLAS/goose/bin:" + os.environ.get("PATH", ""),
-                        "RUST_LOG": "info"
-                    }
+                    env=self._get_goose_env()
                 )
+                stdout = result.stdout
+                stderr = result.stderr
+            
+            # Обробка результату
+            if stdout:
+                answer = self._clean_goose_output(stdout)
                 
-                if result.returncode == 0:
-                    answer = result.stdout.strip()
-                    if not answer:
-                        answer = "Goose відповів, але відповідь порожня"
-                    
-                    self.send_json_response({"response": answer})
-                else:
-                    error_msg = result.stderr.strip() or "Goose command failed"
-                    self.send_json_response({"response": f"⚠️ Помилка: {error_msg}"})
-                    
-            except subprocess.TimeoutExpired:
-                self.send_json_response({"response": "⚠️ Час очікування відповіді закінчився"})
-            except Exception as e:
-                self.send_json_response({"response": f"⚠️ Помилка виконання: {str(e)}"})
+                response_data = {
+                    "response": answer,
+                    "session_name": session_name,
+                    "session_type": session_type,
+                    "atlas_core": False,
+                    "legacy_mode": True
+                }
                 
+                # Якщо була помилка Atlas Core, додаємо інформацію
+                if atlas_error:
+                    response_data["atlas_fallback"] = True
+                    response_data["atlas_error"] = atlas_error
+                
+                logger.info(f"✅ Legacy: Успішно виконано ({session_type})")
+                self.send_json_response(response_data)
+            else:
+                error_msg = stderr or "Goose не повернув відповідь"
+                logger.error(f"❌ Legacy: {error_msg}")
+                self.send_json_response({
+                    "response": f"Помилка Goose: {error_msg}",
+                    "error": error_msg,
+                    "atlas_core": False,
+                    "legacy_mode": True
+                }, 500)
+                
+        except subprocess.TimeoutExpired:
+            logger.error("⏱️ Legacy: Timeout при виконанні команди")
+            self.send_json_response({
+                "response": "Команда виконувалася занадто довго (>5хв)",
+                "error": "Timeout",
+                "atlas_core": False,
+                "legacy_mode": True
+            }, 408)
+            
         except Exception as e:
-            logger.error(f"Chat error: {e}")
-            self.send_json_response({"error": str(e)}, 500)
+            logger.error(f"💥 Legacy Exception: {e}")
+            self.send_json_response({
+                "response": f"Помилка legacy режиму: {str(e)}",
+                "error": str(e),
+                "atlas_core": False,
+                "legacy_mode": True
+            }, 500)
+
+    def _get_goose_env(self):
+        """Отримує середовище для запуску Goose"""
+        env = os.environ.copy()
+        env["PATH"] = "/Users/dev/Documents/GitHub/ATLAS/goose/bin:" + env.get("PATH", "")
+        env["RUST_LOG"] = "info"
+        return env
+
+    def _clean_goose_output(self, output: str) -> str:
+        """Очищає вивід Goose від системних повідомлень"""
+        lines = output.strip().split('\n')
+        clean_lines = []
+        for line in lines:
+            if not any(skip in line for skip in [
+                "starting session", "logging to", "working directory", 
+                "Hermit environment", "activated", "Context:", "( O)>", "Press Enter"
+            ]):
+                clean_lines.append(line)
+        
+        clean_answer = '\n'.join(clean_lines).strip()
+        return clean_answer if clean_answer else "Goose виконав завдання успішно"
+
+    def determine_session_type(self, message, forced_type=None):
+        """Визначає тип сесії на основі повідомлення"""
+        if forced_type:
+            return forced_type
+            
+        message_lower = message.lower()
+        
+        # Ключові слова для НОВОГО завдання
+        new_keywords = [
+            "відкрий", "знайди", "створи", "почни", "запусти", "нове", 
+            "завдання", "проект", "робота", "старт", "init"
+        ]
+        
+        # Ключові слова для ПРОДОВЖЕННЯ
+        continue_keywords = [
+            "продовжи", "далі", "також", "тепер", "потім", "ще", 
+            "додай", "зміни", "покращи", "зроби", "включи", "натисни"
+        ]
+        
+        # Перевірка явних вказівок для нової сесії
+        if any(word in message_lower for word in new_keywords):
+            return "new_session"
+        
+        # Перевірка явних вказівок для продовження
+        if any(word in message_lower for word in continue_keywords):
+            return "continue_session"
+        
+        # За замовчуванням - нова сесія для безпеки
+        return "new_session"
+
+    def get_session_name(self, message, session_type):
+        """Генерує ім'я сесії на основі контексту"""
+        message_lower = message.lower()
+        
+        # Контекстні теми
+        if any(word in message_lower for word in ["відео", "фільм", "youtube", "браузер"]):
+            return "video_browser"
+        elif any(word in message_lower for word in ["музика", "пісня", "аудіо"]):
+            return "music_player"
+        elif any(word in message_lower for word in ["документ", "файл", "текст"]):
+            return "document_editor"
+        elif any(word in message_lower for word in ["калькулятор", "рахунок", "математика"]):
+            return "calculator"
+        elif any(word in message_lower for word in ["система", "статус", "моніторинг"]):
+            return "system_monitor"
+        else:
+            # Універсальна сесія
+            return "general_assistant"
     
     def send_json_response(self, data, status_code=200):
         """Відправка JSON відповіді"""

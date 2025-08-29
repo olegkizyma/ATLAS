@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 03D — Sentry Wide",
+  "pitch_steps": -6,
+  "hpf": 110.0,
+  "lpf": 5200.0,
+  "presence_f0": 1800.0,
+  "presence_gain_db": 2.2,
+  "presence_Q": 0.8,
+  "delay_ms_1": 9.0,
+  "delay_ms_2": 18.0,
+  "mix_dry": 0.80,
+  "mix_d1": 0.14,
+  "mix_d2": 0.06,
+  "comp_thresh": 0.42,
+  "comp_ratio": 3.0,
+  "clip_drive": 1.7
+}

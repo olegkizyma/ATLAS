@@ -216,7 +216,10 @@
             display: flex;
             gap: 6px;
             align-items: flex-end;
+            position: relative;
         }
+
+
 
         .chat-input {
             flex: 1;
@@ -261,6 +264,54 @@
             background: rgba(255, 255, 65, 0.2);
             border-color: rgba(255, 255, 65, 0.6);
             color: #ffff41;
+        }
+
+        /* Session Controls */
+        .session-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .current-session {
+            font-size: 12px;
+            color: #495057;
+            background: #ffffff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            margin-left: auto;
+            white-space: nowrap;
+        }        .session-btn {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 65, 0.2);
+            color: #00ff41;
+            padding: 4px 6px;
+            cursor: pointer;
+            font-size: 10px;
+            transition: all 0.2s;
+            min-width: 24px;
+        }
+
+        .session-btn:hover {
+            border-color: rgba(0, 255, 65, 0.4);
+            background: rgba(0, 255, 65, 0.1);
+        }
+
+        .session-btn.active {
+            background: rgba(0, 255, 65, 0.2);
+            border-color: rgba(0, 255, 65, 0.6);
+        }
+
+        .current-session {
+            font-size: 9px;
+            color: rgba(0, 255, 65, 0.6);
+            margin-left: 4px;
         }
 
         /* Scrollbar Styling */
@@ -356,6 +407,14 @@
             </div>
             
             <div class="chat-input-area">
+
+                <!-- Кнопки управління сесіями -->
+                <div class="session-controls">
+                    <button id="newSessionBtn" class="session-btn new-session" title="Нове завдання">🆕</button>
+                    <button id="continueSessionBtn" class="session-btn continue-session" title="Продовжити поточне">▶️</button>
+                    <span id="currentSession" class="current-session">Автоматично</span>
+                </div>
+                
                 <textarea 
                     id="chatInput" 
                     class="chat-input" 
@@ -376,6 +435,12 @@
                 this.clickTimer = null;
                 this.singleModeSendTimer = null; // таймер очікування 3s у single режимі
                 this.lastFinalTimestamp = 0;
+                this.TTSBlockTimer = null; // пауза для continuous під час "мовлення"
+                this.TTS_ACTIVE = false;
+                
+                // Система управління сесіями
+                this.sessionMode = 'auto'; // 'auto', 'new', 'continue'
+                this.currentSessionName = null;
                 this.TTSBlockTimer = null; // пауза для continuous під час "мовлення"
                 this.TTS_ACTIVE = false;
                 this.SINGLE_INACTIVITY_MS = 3000; // 3s після останнього фінального результату
@@ -399,6 +464,8 @@
                 this.networkStatus = document.getElementById('networkStatus');
                 this.resourceStatus = document.getElementById('resourceStatus');
             }
+
+
 
             initializeVoiceRecognition() {
                 if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
@@ -479,6 +546,51 @@
                 this.voiceButton.addEventListener('click', () => {
                     this.handleVoiceButtonClick();
                 });
+
+                // Session control events
+                const newSessionBtn = document.getElementById('newSessionBtn');
+                const continueSessionBtn = document.getElementById('continueSessionBtn');
+                
+                newSessionBtn.addEventListener('click', () => {
+                    this.setSessionMode('new');
+                });
+                
+                continueSessionBtn.addEventListener('click', () => {
+                    this.setSessionMode('continue');
+                });
+            }
+
+
+
+            setSessionMode(mode) {
+                this.sessionMode = mode;
+                
+                // Оновлюємо UI
+                const newBtn = document.getElementById('newSessionBtn');
+                const continueBtn = document.getElementById('continueSessionBtn');
+                const currentSession = document.getElementById('currentSession');
+                
+                // Скидаємо всі активні стани
+                newBtn.classList.remove('active');
+                continueBtn.classList.remove('active');
+                
+                // Встановлюємо активний стан
+                if (mode === 'new') {
+                    newBtn.classList.add('active');
+                    currentSession.textContent = 'Нова сесія';
+                } else if (mode === 'continue') {
+                    continueBtn.classList.add('active');
+                    currentSession.textContent = 'Продовжити';
+                } else {
+                    currentSession.textContent = 'Автоматично';
+                }
+                
+                // Автоматично скидаємо режим через 10 секунд
+                setTimeout(() => {
+                    if (this.sessionMode === mode) {
+                        this.setSessionMode('auto');
+                    }
+                }, 10000);
             }
 
             handleVoiceButtonClick() {
@@ -589,14 +701,42 @@
             async sendToAtlas(message) {
                 const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
                 const url = `${baseUrl}/api/chat`;
+                
+                // Визначаємо тип сесії для відправки
+                let sessionType = null;
+                if (this.sessionMode === 'new') {
+                    sessionType = 'new_session';
+                } else if (this.sessionMode === 'continue') {
+                    sessionType = 'continue_session';
+                }
+                
+                const requestData = { 
+                    message,
+                    session_type: sessionType
+                };
+                
                 try {
                     const response = await fetch(url, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify({ message })
+                        body: JSON.stringify(requestData)
                     });
                     if (response.ok) {
                         const data = await response.json();
+                        
+                        // Оновлюємо інформацію про поточну сесію
+                        if (data.session_name) {
+                            this.currentSessionName = data.session_name;
+                            if (this.sessionMode === 'auto') {
+                                document.getElementById('currentSession').textContent = data.session_name;
+                            }
+                        }
+                        
+                        // Скидаємо режим після успішного відправлення
+                        if (this.sessionMode !== 'auto') {
+                            this.setSessionMode('auto');
+                        }
+                        
                         return data.response || data.message || 'Відповідь отримана';
                     } else {
                         this.logMessage(`[CHAT] HTTP ${response.status} (${url})`, 'warning');

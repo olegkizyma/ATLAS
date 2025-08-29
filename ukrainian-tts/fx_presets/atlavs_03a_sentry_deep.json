@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 03A — Sentry Deep",
+  "pitch_steps": -7,
+  "hpf": 95.0,
+  "lpf": 3400.0,
+  "presence_f0": 1000.0,
+  "presence_gain_db": 1.5,
+  "presence_Q": 1.1,
+  "delay_ms_1": 7.0,
+  "delay_ms_2": 14.0,
+  "mix_dry": 0.76,
+  "mix_d1": 0.16,
+  "mix_d2": 0.08,
+  "comp_thresh": 0.38,
+  "comp_ratio": 3.5,
+  "clip_drive": 2.0
+}

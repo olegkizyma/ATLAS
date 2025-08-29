@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 01 — Command",
+  "pitch_steps": -5,
+  "hpf": 120.0,
+  "lpf": 4200.0,
+  "presence_f0": 1400.0,
+  "presence_gain_db": 2.0,
+  "presence_Q": 1.0,
+  "delay_ms_1": 7.0,
+  "delay_ms_2": 13.0,
+  "mix_dry": 0.82,
+  "mix_d1": 0.12,
+  "mix_d2": 0.06,
+  "comp_thresh": 0.42,
+  "comp_ratio": 3.0,
+  "clip_drive": 1.6
+}

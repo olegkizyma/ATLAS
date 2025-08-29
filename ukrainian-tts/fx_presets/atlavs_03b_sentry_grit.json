@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 03B — Sentry Grit",
+  "pitch_steps": -6,
+  "hpf": 120.0,
+  "lpf": 3600.0,
+  "presence_f0": 1300.0,
+  "presence_gain_db": 2.0,
+  "presence_Q": 1.0,
+  "delay_ms_1": 8.0,
+  "delay_ms_2": 16.0,
+  "mix_dry": 0.74,
+  "mix_d1": 0.18,
+  "mix_d2": 0.08,
+  "comp_thresh": 0.40,
+  "comp_ratio": 3.8,
+  "clip_drive": 2.2
+}

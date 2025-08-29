@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 02 — Scout",
+  "pitch_steps": -3,
+  "hpf": 150.0,
+  "lpf": 5200.0,
+  "presence_f0": 2200.0,
+  "presence_gain_db": 3.0,
+  "presence_Q": 0.9,
+  "delay_ms_1": 5.0,
+  "delay_ms_2": 10.0,
+  "mix_dry": 0.85,
+  "mix_d1": 0.10,
+  "mix_d2": 0.05,
+  "comp_thresh": 0.46,
+  "comp_ratio": 2.4,
+  "clip_drive": 1.3
+}

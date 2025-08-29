@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 03C — Sentry Calm",
+  "pitch_steps": -5,
+  "hpf": 140.0,
+  "lpf": 4200.0,
+  "presence_f0": 1600.0,
+  "presence_gain_db": 1.4,
+  "presence_Q": 0.9,
+  "delay_ms_1": 6.5,
+  "delay_ms_2": 13.0,
+  "mix_dry": 0.84,
+  "mix_d1": 0.10,
+  "mix_d2": 0.06,
+  "comp_thresh": 0.45,
+  "comp_ratio": 2.6,
+  "clip_drive": 1.4
+}

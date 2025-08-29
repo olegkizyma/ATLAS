@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 03E — Sentry Expressive",
+  "pitch_steps": -6,
+  "hpf": 120.0,
+  "lpf": 5200.0,
+  "presence_f0": 1900.0,
+  "presence_gain_db": 2.8,
+  "presence_Q": 0.9,
+  "delay_ms_1": 6.0,
+  "delay_ms_2": 12.0,
+  "mix_dry": 0.80,
+  "mix_d1": 0.12,
+  "mix_d2": 0.08,
+  "comp_thresh": 0.46,
+  "comp_ratio": 2.2,
+  "clip_drive": 1.3
+}

@@ -1,0 +1,17 @@
+{
+  "name": "Atlavs 05 — Warlord",
+  "pitch_steps": -7,
+  "hpf": 110.0,
+  "lpf": 3200.0,
+  "presence_f0": 900.0,
+  "presence_gain_db": 1.2,
+  "presence_Q": 1.2,
+  "delay_ms_1": 9.0,
+  "delay_ms_2": 18.0,
+  "mix_dry": 0.75,
+  "mix_d1": 0.17,
+  "mix_d2": 0.08,
+  "comp_thresh": 0.38,
+  "comp_ratio": 3.6,
+  "clip_drive": 2.0
+}
