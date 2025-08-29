@@ -173,43 +173,8 @@ class SessionManager:
                 "session_name": session_name
             }
 
-    def execute_one_time_command(self, message: str) -> Dict:
-        """Виконує одноразову команду без сесії"""
-        try:
-            cmd = [self.goose_binary, "run", "-t", message, "--quiet"]
-            
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                cwd=self.goose_path,
-                env=self._get_goose_env(),
-                timeout=300  # 5 хвилин
-            )
-            
-            return {
-                "success": result.returncode == 0,
-                "response": result.stdout.strip(),
-                "stderr": result.stderr.strip(),
-                "return_code": result.returncode,
-                "command_type": "one_time"
-            }
-            
-        except subprocess.TimeoutExpired:
-            return {
-                "success": False,
-                "error": "Timeout: Command took too long to execute",
-                "command_type": "one_time"
-            }
-        except Exception as e:
-            return {
-                "success": False,
-                "error": str(e),
-                "command_type": "one_time"
-            }
-
     def determine_session_strategy(self, intent_analysis: Dict, session_strategy: Dict) -> Dict:
-        """Визначає як саме виконати команду"""
+        """Визначає як саме виконати команду - створити нову сесію або продовжити існуючу"""
         strategy = session_strategy.get("strategy", "new")
         session_name = session_strategy.get("session_name")
         
@@ -220,23 +185,20 @@ class SessionManager:
                 "session_name": session_name,
                 "resume": True
             }
-        elif strategy == "new" and session_name:
-            # Створити нову сесію
+        else:
+            # За замовчуванням - створювати нову сесію
+            # Якщо ім'я сесії не вказано, використовуємо поточну дату/час
+            if not session_name:
+                session_name = f"session_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
+                
             return {
                 "action": "create_session", 
                 "session_name": session_name,
                 "resume": False
             }
-        else:
-            # Одноразова команда
-            return {
-                "action": "one_time",
-                "session_name": None,
-                "resume": False
-            }
 
     def execute_command(self, message: str, intent_analysis: Dict, session_strategy: Dict) -> Dict:
-        """Основний метод виконання команди"""
+        """Основний метод виконання команди - використовує тільки сесії"""
         execution_plan = self.determine_session_strategy(intent_analysis, session_strategy)
         
         if execution_plan["action"] == "resume_session":
@@ -248,16 +210,11 @@ class SessionManager:
             )
             result["execution_type"] = "session_resume"
             
-        elif execution_plan["action"] == "create_session":
+        else:
             # Створити нову сесію
             session_name = execution_plan["session_name"]
             result = self.create_session(session_name, message)
             result["execution_type"] = "session_create"
-            
-        else:
-            # Одноразова команда
-            result = self.execute_one_time_command(message)
-            result["execution_type"] = "one_time"
         
         # Додаємо метадані
         result["timestamp"] = datetime.now().isoformat()

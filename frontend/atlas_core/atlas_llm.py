@@ -24,26 +24,54 @@ class AtlasLLM:
         self.conversation_history = []
         self.current_context = {}
 
-    def analyze_user_intent(self, message: str, previous_context: Dict) -> Dict:
+    def analyze_user_intent(self, message: str, previous_context: Dict = None) -> Dict:
         """
         Інтелектуальний аналіз наміру користувача через Gemini API
         Returns: {"intent": "task|chat|continue", "confidence": 0.0-1.0, "context": {...}}
         """
         print("🧠 Atlas LLM1: Аналізую інтенцію користувача...")
         
+        # Зберігаємо історію повідомлень у контексті
+        if previous_context is None:
+            previous_context = {}
+        
+        # Отримуємо останні повідомлення з історії для більш точного аналізу
+        conversation_history = previous_context.get("conversation_history", [])
+        recent_messages = conversation_history[-5:] if conversation_history else []
+        
         try:
-            # Спроба використати Gemini API для аналізу інтенції
-            gemini_analysis = self._analyze_intent_with_gemini(message, previous_context)
+            # Спроба використати Gemini API для аналізу інтенції з урахуванням історії повідомлень
+            gemini_analysis = self._analyze_intent_with_gemini(message, previous_context, recent_messages)
             if gemini_analysis:
+                # Оновлюємо історію повідомлень у контексті
+                if "context" not in gemini_analysis:
+                    gemini_analysis["context"] = {}
+                gemini_analysis["context"]["last_message"] = message
+                
+                # Зберігаємо останні N повідомлень для контексту
+                new_history = conversation_history + [{"role": "user", "content": message}]
+                gemini_analysis["context"]["conversation_history"] = new_history[-10:]  # Зберігаємо останні 10 повідомлень
+                
                 return gemini_analysis
         except Exception as e:
             print(f"⚠️ Gemini API недоступний для аналізу інтенції: {e}")
         
         # Fallback на локальний аналіз (спрощений)
-        return self._analyze_intent_locally(message, previous_context)
+        local_analysis = self._analyze_intent_locally(message, previous_context)
+        
+        # Оновлюємо історію повідомлень у локальному аналізі також
+        if "context" not in local_analysis:
+            local_analysis["context"] = {}
+        local_analysis["context"]["last_message"] = message
+        
+        # Зберігаємо останні N повідомлень для контексту
+        new_history = conversation_history + [{"role": "user", "content": message}]
+        local_analysis["context"]["conversation_history"] = new_history[-10:]
+        
+        return local_analysis
 
-    def _analyze_intent_with_gemini(self, message: str, previous_context: Dict) -> Optional[Dict]:
-        """Використовує Gemini API для аналізу наміру користувача"""
+    def _analyze_intent_with_gemini(self, message: str, previous_context: Dict = None, recent_messages: List = None) -> Optional[Dict]:
+        """Використовує Gemini API для аналізу наміру користувача з урахуванням історії розмови"""
         import os
         import requests
         import json
@@ -72,24 +100,41 @@ class AtlasLLM:
 - "Розкажи про фільми" = chat (розмова про тему)
 - "Включи повний екран" = continue (продовження поточного)
 
-КОНТЕКСТ СЕСІЇ:
-- Якщо є активна сесія і користувач каже "це", "той", "зупини", "більше" - це continue
-- Якщо користувач ввічливо питає можливості - це chat
-- Якщо користувач дає конкретне доручення - це task
+АНАЛІЗ КОНТЕКСТУ РОЗМОВИ:
+- Проаналізуй всю історію розмови для визначення контексту
+- Визнач, чи змінюється намір користувача від спілкування до виконання завдань
+- Якщо в повідомленні є дієслова дії після обговорення - це "task"
+- Якщо користувач задає уточнюючі питання про можливості - це "chat"
+- Якщо користувач переходить від питань до конкретних інструкцій - це перехід до "task"
 
 ФОРМАТ ВІДПОВІДІ (тільки JSON):
 {
   "intent": "chat|task|continue",
   "confidence": 0.0-1.0,
-  "reasoning": "коротке пояснення чому саме така інтенція",
-  "context": {}
+  "reasoning": "детальне пояснення чому саме така інтенція",
+  "context": {
+    "topic": "загальна тема розмови",
+    "task_type": "якщо це завдання - тип завдання",
+    "conversation_phase": "початок|уточнення|виконання"
+  }
 }"""
         
-        user_prompt = f"""Повідомлення користувача: "{message}"
+        # Формуємо контекст з історією повідомлень, якщо вона є
+        conversation_context = ""
+        if recent_messages and len(recent_messages) > 0:
+            conversation_context = "Історія розмови:\n"
+            for idx, msg in enumerate(recent_messages):
+                role = msg.get("role", "user")
+                content = msg.get("content", "")
+                conversation_context += f"{idx+1}. {role}: {content}\n"
+        
+        user_prompt = f"""Поточне повідомлення користувача: "{message}"
+
+{conversation_context}
 
 Попередній контекст: {json.dumps(previous_context, ensure_ascii=False) if previous_context else "відсутній"}
 
-Проаналізуй інтенцію та дай відповідь у JSON форматі."""
+Проаналізуй інтенцію з урахуванням всієї історії розмови та дай відповідь у JSON форматі."""
         
         try:
             url = f"{base_url}/models/{model}:generateContent"
@@ -141,9 +186,39 @@ class AtlasLLM:
             
         return None
 
-    def _analyze_intent_locally(self, message: str, previous_context: Dict) -> Dict:
-        """Локальний fallback аналіз інтенції"""
+    def _analyze_intent_locally(self, message: str, previous_context: Dict = None) -> Dict:
+        """Локальний fallback аналіз інтенції з урахуванням контексту"""
         message_lower = message.lower()
+        
+        # Історія повідомлень
+        conversation_history = previous_context.get("conversation_history", []) if previous_context else []
+        
+        # Аналіз послідовності повідомлень для визначення зміни наміру
+        if conversation_history:
+            # Аналіз останніх повідомлень для визначення контексту
+            last_messages = [msg.get("content", "").lower() for msg in conversation_history[-3:] if msg.get("role") == "user"]
+            
+            # Якщо після загальних питань йде конкретне завдання
+            if any("?" in msg for msg in last_messages[:-1]) and not "?" in message_lower and any(word in message_lower for word in ["знайди", "відкрий", "запусти", "виконай"]):
+                return {
+                    "intent": "task",
+                    "confidence": 0.75,
+                    "reasoning": "Перехід від запитань до конкретного завдання",
+                    "context": {
+                        "topic": self._extract_chat_topic(message),
+                        "task_type": self._extract_task_type(message),
+                        "conversation_phase": "execution"
+                    }
+                }
+            
+            # Якщо користувач продовжує попереднє завдання
+            if any(word in message_lower for word in ["продовжи", "далі", "ще", "більше"]):
+                return {
+                    "intent": "continue",
+                    "confidence": 0.8,
+                    "reasoning": "Явне продовження попередньої операції",
+                    "context": previous_context
+                }
         
         # Прості евристики як fallback
         if any(word in message_lower for word in ["продовжи", "далі", "зупини", "повний екран"]):
@@ -151,23 +226,46 @@ class AtlasLLM:
                 "intent": "continue",
                 "confidence": 0.6,
                 "reasoning": "Виявлено слова продовження (локальний аналіз)",
-                "context": previous_context
+                "context": previous_context or {}
             }
         
-        if any(phrase in message_lower for phrase in ["хочу щоб", "можеш зробити", "знайди і", "запусти", "відкрий"]):
+        if any(phrase in message_lower for phrase in ["хочу щоб", "можеш зробити", "знайди", "запусти", "відкрий"]):
             return {
                 "intent": "task", 
                 "confidence": 0.7,
                 "reasoning": "Виявлено фрази завдання (локальний аналіз)",
-                "context": self._extract_task_context(message)
+                "context": {
+                    "topic": self._extract_chat_topic(message),
+                    "task_type": self._extract_task_type(message),
+                    "conversation_phase": "execution"
+                }
             }
         
+        # За замовчуванням - спілкування
         return {
             "intent": "chat",
             "confidence": 0.5,
             "reasoning": "За замовчуванням - спілкування (локальний аналіз)",
-            "context": {"topic": self._extract_chat_topic(message)}
+            "context": {
+                "topic": self._extract_chat_topic(message),
+                "conversation_phase": "information"
+            }
         }
+        
+    def _extract_task_type(self, message: str) -> str:
+        """Визначає тип завдання на основі тексту повідомлення"""
+        message_lower = message.lower()
+        
+        if any(word in message_lower for word in ["відео", "фільм", "youtube", "дивитися"]):
+            return "video"
+        elif any(word in message_lower for word in ["музика", "аудіо", "пісня", "слухати"]):
+            return "audio"
+        elif any(word in message_lower for word in ["браузер", "сайт", "google", "інтернет"]):
+            return "browser"
+        elif any(word in message_lower for word in ["файл", "документ", "папка", "зберегти"]):
+            return "file"
+        else:
+            return "general"
 
 
 
@@ -209,44 +307,55 @@ class AtlasLLM:
         else:
             return "general"
 
-    def determine_session_strategy(self, intent_analysis: Dict, active_sessions: List) -> Dict:
+    def determine_session_strategy(self, intent_analysis: Dict, previous_context: Dict = None) -> Dict:
         """
-        Визначає стратегію роботи з сесіями
-        Returns: {"strategy": "new|continue|resume", "session_name": str, "action": str}
+        Інтелектуально визначає стратегію роботи з сесіями на основі контексту
+        Returns: {"strategy": "new|continue", "session_name": str, "action": str}
         """
-        intent = intent_analysis["intent"]
-        context = intent_analysis["context"]
+        intent = intent_analysis.get("intent", "task")
+        context = intent_analysis.get("context", {})
         
-        if intent == "continue" and active_sessions:
-            # Продовжити останню активну сесію
-            latest_session = active_sessions[0] if active_sessions else None
+        # Отримуємо історію сесій (якщо є у контексті)
+        active_sessions = previous_context.get("active_sessions", []) if previous_context else []
+        previous_session = previous_context.get("last_session") if previous_context else None
+        
+        # Визначаємо поточну тему на основі аналізу повідомлення
+        current_topic = context.get("topic", "general")
+        
+        # Якщо це продовження розмови і є активна сесія з тією ж темою
+        if intent == "continue" and previous_session:
             return {
                 "strategy": "continue",
-                "session_name": latest_session["name"] if latest_session else None,
+                "session_name": previous_session.get("name"),
                 "action": "resume_and_continue",
-                "reasoning": "Продовження активної сесії"
+                "reasoning": f"Продовження сесії '{previous_session.get('name')}' на основі контексту розмови"
             }
         
-        elif intent == "task":
-            # Створити нову сесію для завдання
-            task_type = context.get("task_type", "general")
+        # Якщо є активна сесія з тією ж темою, що й поточна
+        elif previous_session and current_topic == previous_context.get("topic"):
+            return {
+                "strategy": "continue",
+                "session_name": previous_session.get("name"),
+                "action": "resume_with_new_context",
+                "reasoning": f"Використання існуючої сесії '{previous_session.get('name')}' бо тема не змінилася"
+            }
+        
+        # В іншому випадку створюємо нову сесію
+        else:
             timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-            session_name = f"{task_type}_{timestamp}"
+            
+            # Формуємо інформативну назву сесії
+            if intent == "chat":
+                session_name = f"chat_{current_topic}_{timestamp}"
+            else:
+                task_type = context.get("task_type", "general")
+                session_name = f"{task_type}_{timestamp}"
             
             return {
                 "strategy": "new",
                 "session_name": session_name,
-                "action": "create_and_execute",
-                "reasoning": "Створення нової сесії для завдання"
-            }
-        
-        else:
-            # Спілкування - використати chat сесію
-            return {
-                "strategy": "chat",
-                "session_name": "atlas_chat",
-                "action": "direct_response",
-                "reasoning": "Пряма відповідь без Goose"
+                "action": "create_new_session",
+                "reasoning": "Створення нової сесії на основі зміни контексту або теми розмови"
             }
 
     def format_goose_command(self, message: str, intent_analysis: Dict, session_strategy: Dict) -> str:
