@@ -153,11 +153,12 @@ class CoreOrchestrator:
             )
             print(monitor_start["monitor_message"])
             
-            # Виконуємо завдання
+            # Виконуємо завдання з підтримкою перевірки від Гріші
             execution_result = self.session_manager.execute_command(
                 atlas_processing.get("detailed_instruction"),
                 atlas_processing.get("intent_analysis", {}),
-                session_strategy
+                session_strategy,
+                self.grisha_security  # Передаємо Гришу для перевірки
             )
             
             # Логування виконання
@@ -177,16 +178,40 @@ class CoreOrchestrator:
             }
             response_data["processing_steps"].append(step3)
             
-            # === КРОК 4: ГРІША - ГЕНЕРАЦІЯ КОМПАКТНОГО ЗВІТУ ===
-            print(f"📋 Гріша: Генерую компактний звіт...")
+            # === КРОК 4: ОБРОБКА РЕЗУЛЬТАТІВ З ПЕРЕВІРКОЮ ===
+            print(f"📋 Гріша: Аналізую результати виконання...")
             
             if execution_result.get("success"):
-                # Гріша створює компактний звіт замість довгої відповіді Goose
-                compact_summary = self.grisha_security.generate_completion_summary(
-                    atlas_processing.get("working_message", user_message),
-                    execution_result,
-                    {"session_name": session_name, "auto_enriched": atlas_processing.get("auto_enriched", False)}
-                )
+                # Визначаємо чи була перевірка
+                task_completed = execution_result.get("task_completed")
+                session_alive = execution_result.get("session_alive", False)
+                verification_details = execution_result.get("verification_details", "")
+                
+                if task_completed is not None:
+                    # Була перевірка від Гріші
+                    if task_completed:
+                        print(f"✅ Гріша підтвердив: завдання виконано успішно!")
+                        if session_alive:
+                            print(f"⏳ Сесія залишається активною для тривалого використання")
+                        else:
+                            print(f"🔚 Сесія завершена - завдання виконано")
+                        
+                        compact_summary = verification_details or self.grisha_security.generate_completion_summary(
+                            atlas_processing.get("working_message", user_message),
+                            execution_result,
+                            {"session_name": session_name, "verified": True, "session_alive": session_alive}
+                        )
+                    else:
+                        print(f"❌ Гріша: завдання не виконано після перевірок")
+                        compact_summary = f"❌ Завдання не вдалося виконати. {verification_details}"
+                else:
+                    # Звичайне виконання без перевірки Гріші
+                    print(f"📝 Звичайне виконання - генерую звіт...")
+                    compact_summary = self.grisha_security.generate_completion_summary(
+                        atlas_processing.get("working_message", user_message),
+                        execution_result,
+                        {"session_name": session_name, "auto_enriched": atlas_processing.get("auto_enriched", False)}
+                    )
                 
                 monitor_complete = self.grisha_security.monitor_task_progress(
                     atlas_processing.get("working_message", user_message), session_name, "completion"
@@ -196,13 +221,20 @@ class CoreOrchestrator:
                 self.stats["successful_requests"] += 1
                 self.stats["task_executions"] += 1
                 
-                # Повертаємо КОМПАКТНУ відповідь від Гріші замість довгої від Goose
+                # Повертаємо результат з інформацією про перевірку
                 response_data.update({
                     "response_type": "task_execution",
                     "response": compact_summary,  # КОРОТКИЙ звіт від Гріші
-                    "goose_details": execution_result.get("response", ""),  # Деталі Goose (опційно)
                     "success": True,
-                    "session_info": {"strategy": session_strategy.get("strategy"), "session_name": session_name},
+                    "task_completed": task_completed,
+                    "session_alive": session_alive,
+                    "verification_details": verification_details,
+                    "execution_type": execution_result.get("execution_type", "unknown"),
+                    "session_info": {
+                        "strategy": session_strategy.get("strategy"), 
+                        "session_name": session_name,
+                        "alive": session_alive
+                    },
                     "processing_time": (datetime.now() - start_time).total_seconds(),
                     "atlas_core": True,
                     "intent": atlas_processing.get("intent_analysis", {}).get("intent"),
@@ -281,8 +313,27 @@ class CoreOrchestrator:
         return self.session_manager.get_available_sessions()
 
     def create_new_session(self, session_name: str, initial_message: str = None) -> Dict:
-        """Створює нову сесію Goose"""
-        return self.session_manager.create_session(session_name, initial_message)
+        """Створює нову сесію Goose з підтримкою перевірки від Гріші"""
+        # Використовуємо новий метод з перевіркою якщо це завдання
+        if initial_message and self._is_task_execution(initial_message):
+            return self.session_manager.create_session_with_verification(
+                session_name, initial_message, self.grisha_security
+            )
+        else:
+            # Звичайна сесія без перевірки
+            return self.session_manager.create_session(session_name, initial_message)
+
+    def _is_task_execution(self, message: str) -> bool:
+        """Визначає чи це виконання завдання (потребує перевірки Гріші)"""
+        # Використовуємо Atlas LLM для визначення
+        try:
+            analysis = self.atlas_llm.analyze_intent(message)
+            return analysis.get("type") == "task_execution"
+        except Exception:
+            # Fallback - якщо повідомлення довге та містить інструкції
+            return len(message) > 50 and any(word in message.lower() for word in [
+                'завдання', 'виконай', 'створи', 'запусти', 'відкрий', 'знайди'
+            ])
 
     def continue_session(self, session_name: str, message: str) -> Dict:
         """Продовжує існуючу сесію"""

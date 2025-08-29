@@ -478,6 +478,430 @@ class GrishaSecurity:
         """
         return f"🛡️ Гріша-Моніторинг: {progress_info} [Сесія: {session_name}]"
 
+    def verify_task_completion(self, task_description: str, session_info: Dict = None) -> Dict:
+        """
+        Гріша перевіряє виконання завдання через власну сесію з Goose
+        Використовує розумний аналіз без хардкоду
+        """
+        print("🕵️ Гріша: Перевіряю виконання завдання через власну сесію...")
+        
+        try:
+            # Визначаємо тип перевірки на основі завдання (промпт-driven)
+            verification_approach = self._determine_verification_approach(task_description)
+            
+            # Створюємо окрему сесію для Гріші з Goose
+            verification_result = self._run_verification_session(task_description, verification_approach)
+            
+            return {
+                "task_completed": verification_result.get("completed", False),
+                "verification_details": verification_result.get("details", ""),
+                "should_continue_session": self._should_keep_session_alive(task_description),
+                "next_action_needed": verification_result.get("next_action", None)
+            }
+            
+        except Exception as e:
+            print(f"⚠️ Помилка перевірки виконання: {e}")
+            return {
+                "task_completed": False,
+                "verification_details": f"Помилка перевірки: {e}",
+                "should_continue_session": False,
+                "next_action_needed": "retry_task"
+            }
+
+    def _determine_verification_approach(self, task_description: str) -> str:
+        """
+        Визначає як перевіряти виконання завдання (промпт-driven, без хардкоду)
+        """
+        try:
+            # Використовуємо Gemini для визначення підходу до перевірки
+            return self._analyze_verification_with_gemini(task_description)
+        except Exception as e:
+            print(f"⚠️ Gemini недоступний для аналізу: {e}")
+            # Fallback на базовий аналіз
+            return self._analyze_verification_locally(task_description)
+
+    def _analyze_verification_with_gemini(self, task_description: str) -> str:
+        """Аналізує як перевіряти завдання через Gemini"""
+        import os
+        import requests
+        
+        api_key = os.getenv('GEMINI_API_KEY')
+        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        
+        if not api_key:
+            raise Exception("GEMINI_API_KEY не встановлено")
+        
+        system_prompt = """Ти - Гріша, система безпеки Atlas. Визнач ЯК перевірити виконання завдання.
+
+МЕТА: Створити команду перевірки для Goose щоб він переконався що завдання виконано.
+
+ТИПИ ПЕРЕВІРКИ:
+🌐 Веб/браузер: "check if browser opened and shows [specific content]"
+📁 Файли: "verify if file exists and contains [expected data]"  
+🎥 Медіа: "check if video/audio is playing in browser"
+💻 Додатки: "confirm if application [name] is running"
+🔍 Пошук: "verify search results are displayed for [query]"
+
+ПРИНЦИПИ:
+- Дай конкретну команду англійською для Goose
+- Уточни ЩО саме треба перевірити
+- Не використовуй хардкод ключові слова
+- Фокусуйся на РЕЗУЛЬТАТІ завдання
+
+ФОРМАТ ВІДПОВІДІ: тільки команда для Goose, без пояснень"""
+
+        user_prompt = f"""Завдання користувача: "{task_description}"
+
+Як Гоосу перевірити що це завдання виконано?"""
+
+        try:
+            url = f"{base_url}/models/{model}:generateContent"
+            headers = {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': api_key
+            }
+            
+            data = {
+                "contents": [{
+                    "parts": [{
+                        "text": system_prompt + "\n\n" + user_prompt
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.3,
+                    "maxOutputTokens": 200
+                }
+            }
+            
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+            
+            result = response.json()
+            if 'candidates' in result and len(result['candidates']) > 0:
+                verification_command = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                print(f"🧠 Гріша через Gemini визначив перевірку: {verification_command}")
+                return verification_command
+            
+        except Exception as e:
+            print(f"⚠️ Помилка Gemini аналізу: {e}")
+            raise e
+
+    def _analyze_verification_locally(self, task_description: str) -> str:
+        """Fallback аналіз як перевіряти завдання"""
+        task_lower = task_description.lower()
+        
+        # Базовий аналіз без жорсткого хардкоду
+        if any(word in task_lower for word in ['браузер', 'відкрий', 'website', 'browser']):
+            return f"check if browser is open and displays content related to: {task_description}"
+        elif any(word in task_lower for word in ['фільм', 'відео', 'movie', 'video']):
+            return f"verify if video is playing in browser fullscreen mode"
+        elif any(word in task_lower for word in ['файл', 'створи', 'file', 'create']):
+            return f"confirm if file was created successfully"
+        else:
+            return f"verify task completion for: {task_description}"
+
+    def _should_keep_session_alive(self, task_description: str) -> bool:
+        """
+        Визначає чи треба залишити сесію активною (промпт-driven)
+        """
+        try:
+            return self._analyze_session_duration_with_gemini(task_description)
+        except Exception as e:
+            print(f"⚠️ Gemini недоступний для аналізу сесії: {e}")
+            return self._analyze_session_duration_locally(task_description)
+
+    def _analyze_session_duration_with_gemini(self, task_description: str) -> bool:
+        """Аналізує чи треба залишити сесію активною через Gemini"""
+        import os
+        import requests
+        
+        api_key = os.getenv('GEMINI_API_KEY')
+        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        
+        if not api_key:
+            raise Exception("GEMINI_API_KEY не встановлено")
+        
+        system_prompt = """Ти - Гріша, система безпеки Atlas. Визнач чи треба залишити сесію активною.
+
+ПРАВИЛО: Сесія має ВИСІТИ якщо:
+🎥 Відтворення медіа (фільми, відео, музика)
+🎮 Ігри або інтерактивні додатки  
+📺 Стрімінг або трансляції
+⏱️ Довгострокові процеси
+🌐 Активний браузер з контентом
+
+ПРАВИЛО: Сесія може ЗАКРИТИСЯ якщо:
+📋 Одноразові задачі (створення файлу, пошук інформації)
+💻 Команди термінала (ls, cat, mkdir)
+📊 Генерація звітів
+📁 Операції з файлами
+
+ВІДПОВІДЬ: тільки "YES" (залишити сесію) або "NO" (закрити сесію)"""
+
+        user_prompt = f"""Завдання: "{task_description}"
+
+Чи треба залишити сесію активною?"""
+
+        try:
+            url = f"{base_url}/models/{model}:generateContent"
+            headers = {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': api_key
+            }
+            
+            data = {
+                "contents": [{
+                    "parts": [{
+                        "text": system_prompt + "\n\n" + user_prompt
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 10
+                }
+            }
+            
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+            
+            result = response.json()
+            if 'candidates' in result and len(result['candidates']) > 0:
+                decision = result['candidates'][0]['content']['parts'][0]['text'].strip().upper()
+                keep_alive = decision == "YES"
+                print(f"🧠 Гріша через Gemini вирішив {'залишити' if keep_alive else 'закрити'} сесію")
+                return keep_alive
+            
+        except Exception as e:
+            print(f"⚠️ Помилка Gemini аналізу сесії: {e}")
+            raise e
+
+    def _analyze_session_duration_locally(self, task_description: str) -> bool:
+        """Fallback аналіз тривалості сесії"""
+        task_lower = task_description.lower()
+        
+        # Завдання що потребують тривалої сесії
+        long_running_indicators = [
+            'фільм', 'відео', 'movie', 'video', 'перегляд', 'play', 'stream',
+            'музика', 'music', 'аудіо', 'audio', 'listen',
+            'гра', 'game', 'ігр', 'інтерактив'
+        ]
+        
+        return any(indicator in task_lower for indicator in long_running_indicators)
+
+    def _run_verification_session(self, task_description: str, verification_command: str) -> Dict:
+        """
+        Запускає окрему сесію Goose для Гріші щоб перевірити виконання
+        """
+        import subprocess
+        import uuid
+        from datetime import datetime
+        
+        verification_session_name = f"grisha_verification_{uuid.uuid4().hex[:8]}_{int(datetime.now().timestamp())}"
+        
+        print(f"🕵️ Гріша: Створюю сесію перевірки '{verification_session_name}'")
+        print(f"🔍 Команда перевірки: {verification_command}")
+        
+        try:
+            # Команда для запуску Goose з перевіркою
+            goose_command = [
+                "/Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose",
+                "session",
+                "--name", verification_session_name
+            ]
+            
+            # Вхідні дані для Goose - команда перевірки + вихід
+            verification_input = f"{verification_command}\nexit\n"
+            
+            print(f"🚀 Гріша: Запускаю перевірку через Goose...")
+            
+            # Запускаємо Goose для перевірки
+            process = subprocess.Popen(
+                goose_command,
+                stdin=subprocess.PIPE,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+                cwd="/Users/dev/Documents/GitHub/ATLAS/goose"
+            )
+            
+            stdout, stderr = process.communicate(input=verification_input, timeout=60)
+            
+            print(f"📥 Гріша: Отримав результат перевірки (return_code: {process.returncode})")
+            
+            # Аналізуємо результат перевірки
+            verification_result = self._analyze_verification_result(
+                stdout, stderr, process.returncode, task_description
+            )
+            
+            return verification_result
+            
+        except subprocess.TimeoutExpired:
+            print("⏰ Гріша: Перевірка перевищила час очікування")
+            return {
+                "completed": False,
+                "details": "Перевірка перевищила час очікування",
+                "next_action": "retry_task"
+            }
+        except Exception as e:
+            print(f"❌ Гріша: Помилка під час перевірки: {e}")
+            return {
+                "completed": False,
+                "details": f"Помилка перевірки: {e}",
+                "next_action": "retry_task"
+            }
+
+    def _analyze_verification_result(self, stdout: str, stderr: str, return_code: int, original_task: str) -> Dict:
+        """
+        Аналізує результат перевірки від Goose та визначає чи завдання виконано
+        """
+        print(f"📊 Гріша: Аналізую результат перевірки...")
+        
+        try:
+            # Спроба розумного аналізу через Gemini
+            return self._analyze_verification_result_with_gemini(stdout, stderr, return_code, original_task)
+        except Exception as e:
+            print(f"⚠️ Gemini недоступний для аналізу результату: {e}")
+            # Fallback на локальний аналіз
+            return self._analyze_verification_result_locally(stdout, stderr, return_code, original_task)
+
+    def _analyze_verification_result_with_gemini(self, stdout: str, stderr: str, return_code: int, original_task: str) -> Dict:
+        """Аналізує результат перевірки через Gemini"""
+        import os
+        import requests
+        
+        api_key = os.getenv('GEMINI_API_KEY')
+        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        
+        if not api_key:
+            raise Exception("GEMINI_API_KEY не встановлено")
+        
+        system_prompt = """Ти - Гріша, система безпеки Atlas. Аналізуй результат перевірки виконання завдання.
+
+МЕТА: Визначити чи завдання ДІЙСНО виконано на основі відповіді Goose.
+
+КРИТЕРІЇ УСПІХУ:
+✅ Завдання ВИКОНАНО якщо:
+- Goose підтвердив що результат досягнуто
+- Браузер відкрито та показує потрібний контент
+- Файли створено/знайдено як очікувалось
+- Процес/додаток запущено успішно
+
+❌ Завдання НЕ ВИКОНАНО якщо:
+- Goose повідомив про помилки
+- Результат не відповідає очікуванням
+- Процес завершився з помилкою
+- Потрібний контент не знайдено
+
+ФОРМАТ ВІДПОВІДІ JSON:
+{
+  "completed": true/false,
+  "details": "короткий опис результату",
+  "next_action": null або "retry_task" або "modify_approach"
+}"""
+
+        # Обрізаємо stdout щоб не перевищити ліміти API
+        stdout_trimmed = stdout[-2000:] if len(stdout) > 2000 else stdout
+        stderr_trimmed = stderr[-500:] if len(stderr) > 500 else stderr
+
+        user_prompt = f"""Оригінальне завдання: "{original_task}"
+
+Результат Goose (return_code: {return_code}):
+STDOUT: {stdout_trimmed}
+STDERR: {stderr_trimmed}
+
+Чи завдання виконано?"""
+
+        try:
+            url = f"{base_url}/models/{model}:generateContent"
+            headers = {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': api_key
+            }
+            
+            data = {
+                "contents": [{
+                    "parts": [{
+                        "text": system_prompt + "\n\n" + user_prompt
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.1,
+                    "maxOutputTokens": 300
+                }
+            }
+            
+            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response.raise_for_status()
+            
+            result = response.json()
+            if 'candidates' in result and len(result['candidates']) > 0:
+                analysis_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                
+                # Парсимо JSON відповідь
+                import json
+                try:
+                    analysis_result = json.loads(analysis_text)
+                    print(f"🧠 Гріша через Gemini проаналізував: {analysis_result}")
+                    return analysis_result
+                except json.JSONDecodeError:
+                    # Якщо не JSON, то створюємо структуру на основі тексту
+                    completed = "true" in analysis_text.lower() or "виконано" in analysis_text.lower()
+                    return {
+                        "completed": completed,
+                        "details": analysis_text[:100],
+                        "next_action": None if completed else "retry_task"
+                    }
+            
+        except Exception as e:
+            print(f"⚠️ Помилка Gemini аналізу результату: {e}")
+            raise e
+
+    def _analyze_verification_result_locally(self, stdout: str, stderr: str, return_code: int, original_task: str) -> Dict:
+        """Fallback аналіз результату перевірки"""
+        # Базовий аналіз
+        success_indicators = [
+            "success", "completed", "opened", "found", "created", "running",
+            "виконано", "відкрито", "знайдено", "створено", "запущено"
+        ]
+        
+        error_indicators = [
+            "error", "failed", "not found", "cannot", "unable",
+            "помилка", "не знайдено", "неможливо", "не вдалося"
+        ]
+        
+        stdout_lower = stdout.lower()
+        stderr_lower = stderr.lower()
+        
+        # Перевіряємо на помилки
+        has_errors = (return_code != 0 or 
+                     any(error in stderr_lower for error in error_indicators) or
+                     any(error in stdout_lower for error in error_indicators))
+        
+        # Перевіряємо на успіх
+        has_success = any(success in stdout_lower for success in success_indicators)
+        
+        if has_errors and not has_success:
+            return {
+                "completed": False,
+                "details": "Виявлено помилки при перевірці виконання",
+                "next_action": "retry_task"
+            }
+        elif has_success:
+            return {
+                "completed": True,
+                "details": "Перевірка підтвердила успішне виконання",
+                "next_action": None
+            }
+        else:
+            return {
+                "completed": False,
+                "details": "Результат перевірки неоднозначний",
+                "next_action": "modify_approach"
+            }
+
     def generate_completion_summary(self, task_description: str, execution_result: Dict, session_info: Dict = None) -> str:
         """
         Генерує компактний звіт про виконання завдання від Гріші
