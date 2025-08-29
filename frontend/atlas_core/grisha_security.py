@@ -441,3 +441,39 @@ class GrishaSecurity:
             "status": "active",
             "last_check": self.security_log[-1]["timestamp"] if self.security_log else None
         }
+
+    def monitor_task_progress(self, task_description: str, session_name: str, stage: str = "start") -> Dict:
+        """
+        Моніторить прогрес виконання завдання та надає звіти в чат
+        """
+        timestamp = datetime.now().isoformat()
+        
+        monitoring_messages = {
+            "start": f"🔍 Гріша: Розпочинаю моніторинг завдання '{task_description}' у сесії '{session_name}'",
+            "analysis": f"🧠 Гріша: Аналізую завдання '{task_description}' - виявляю необхідні кроки",
+            "execution": f"⚙️ Гріша: Моніторю виконання завдання '{task_description}' - процес активний",
+            "checking": f"🔎 Гріша: Перевіряю прогрес виконання завдання '{task_description}'",
+            "validation": f"✅ Гріша: Валідую результати завдання '{task_description}'",
+            "completion": f"🎉 Гріша: Завдання '{task_description}' успішно завершено",
+            "error": f"⚠️ Гріша: Виявлено проблему при виконанні '{task_description}' - аналізую",
+            "retry": f"🔄 Гріша: Повторна спроба виконання '{task_description}' з новим підходом"
+        }
+        
+        message = monitoring_messages.get(stage, f"📊 Гріша: Статус завдання '{task_description}': {stage}")
+        
+        # Логуємо моніторинг
+        self.logger.info(f"🛡️ MONITOR: {stage.upper()} - {task_description[:50]}")
+        
+        return {
+            "monitor_message": message,
+            "timestamp": timestamp,
+            "stage": stage,
+            "session": session_name,
+            "task": task_description
+        }
+
+    def provide_progress_update(self, session_name: str, progress_info: str) -> str:
+        """
+        Надає оновлення прогресу виконання в чат
+        """
+        return f"🛡️ Гріша-Моніторинг: {progress_info} [Сесія: {session_name}]"

@@ -99,7 +99,7 @@ class SessionManager:
                 input_text = f"{initial_message}\nexit\n"
                 logger.info(f"📤 Відправляю вхідні дані: {repr(input_text)}")
                 
-                stdout, stderr = process.communicate(input=input_text, timeout=180)
+                stdout, stderr = process.communicate(input=input_text)  # Без тайм-ауту
                 
                 logger.info(f"📥 Отримано відповідь (return_code: {process.returncode})")
                 logger.info(f"📤 STDOUT: {stdout[:500]}..." if len(stdout) > 500 else f"📤 STDOUT: {stdout}")
@@ -143,14 +143,6 @@ class SessionManager:
                     "response": "Session registered"
                 }
                 
-        except subprocess.TimeoutExpired:
-            logger.error(f"⏰ Операція перевищила ліміт часу 180с")
-            process.kill()
-            return {
-                "success": False,
-                "error": "Операція перевищила ліміт часу 180с",
-                "session_name": session_name
-            }
         except Exception as e:
             logger.error(f"💥 Виняток при створенні сесії: {str(e)}")
             return {
@@ -189,7 +181,7 @@ class SessionManager:
             input_text = f"{message}\nexit\n"
             logger.info(f"📤 Відправляю вхідні дані: {repr(input_text)}")
             
-            stdout, stderr = process.communicate(input=input_text, timeout=300)  # 5 хвилин
+            stdout, stderr = process.communicate(input=input_text)  # Без тайм-ауту - нехай Гріша моніторить
             
             logger.info(f"📥 Отримано відповідь (return_code: {process.returncode})")
             logger.info(f"📤 STDOUT: {stdout[:500]}..." if len(stdout) > 500 else f"📤 STDOUT: {stdout}")

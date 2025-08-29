@@ -157,6 +157,13 @@ class CoreOrchestrator:
             # === КРОК 3: GOOSE - ВИКОНАННЯ ПЕРЕФОРМУЛЬОВАНОЇ КОМАНДИ ===
             print(f"🚀 Goose: Виконую детальну інструкцію...")
             
+            # Гріша починає моніторинг завдання
+            session_name = session_strategy.get("session_name", f"session_{int(datetime.now().timestamp())}")
+            monitor_start = self.grisha_security.monitor_task_progress(
+                user_message, session_name, "start"
+            )
+            print(monitor_start["monitor_message"])
+            
             # Виконуємо переформульовану команду через Session Manager
             execution_result = self.session_manager.execute_command(
                 detailed_instruction,  # Передаємо детальну інструкцію замість оригінального повідомлення
@@ -179,6 +186,18 @@ class CoreOrchestrator:
                 "timestamp": datetime.now().isoformat()
             }
             response_data["processing_steps"].append(step3)
+            
+            # Гріша моніторить завершення завдання
+            if execution_result.get("success"):
+                monitor_complete = self.grisha_security.monitor_task_progress(
+                    user_message, session_name, "completion"
+                )
+                print(monitor_complete["monitor_message"])
+            else:
+                monitor_error = self.grisha_security.monitor_task_progress(
+                    user_message, session_name, "error"
+                )
+                print(monitor_error["monitor_message"])
             
             # Оновлюємо статистику
             if execution_result.get("success"):
