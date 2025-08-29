@@ -99,7 +99,7 @@ class SessionManager:
                 input_text = f"{initial_message}\nexit\n"
                 logger.info(f"📤 Відправляю вхідні дані: {repr(input_text)}")
                 
-                stdout, stderr = process.communicate(input=input_text, timeout=60)
+                stdout, stderr = process.communicate(input=input_text, timeout=180)
                 
                 logger.info(f"📥 Отримано відповідь (return_code: {process.returncode})")
                 logger.info(f"📤 STDOUT: {stdout[:500]}..." if len(stdout) > 500 else f"📤 STDOUT: {stdout}")
@@ -144,11 +144,11 @@ class SessionManager:
                 }
                 
         except subprocess.TimeoutExpired:
-            logger.error(f"⏰ Операція перевищила ліміт часу 60с")
+            logger.error(f"⏰ Операція перевищила ліміт часу 180с")
             process.kill()
             return {
                 "success": False,
-                "error": "Операція перевищила ліміт часу 60с",
+                "error": "Операція перевищила ліміт часу 180с",
                 "session_name": session_name
             }
         except Exception as e:
