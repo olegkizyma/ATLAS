@@ -772,10 +772,19 @@
                 }
             }
 
-            logMessage(text, type = 'info') {
+            logMessage(text, type = 'info', customColor = null) {
                 const logDiv = document.createElement('div');
                 logDiv.className = 'log-line';
-                // Чистий текст без парсінгу, просто зелений колір
+                
+                // Застосовуємо кастомний колір або стандартний
+                if (customColor) {
+                    logDiv.style.color = customColor;
+                } else if (type === 'error') {
+                    logDiv.classList.add('error');
+                } else if (type === 'warning') {
+                    logDiv.classList.add('warning');
+                }
+                
                 logDiv.textContent = text;
                 
                 this.logsContainer.appendChild(logDiv);
@@ -835,10 +844,10 @@
             }
 
             async pollLiveLogs(initial = false) {
-                // Одноразове завантаження backlog для випадку якщо SSE підключається із затримкою
+                // Завантаження логів Goose
                 if (!initial) return;
                 const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
-                const url = `${baseUrl}/logs?limit=200`;
+                const url = `${baseUrl}/logs?limit=100`;
                 try {
                     const response = await fetch(url);
                     if (response.ok) {
@@ -846,11 +855,84 @@
                         if (data.logs && data.logs.length > 0) {
                             this.logsContainer.innerHTML = '';
                             data.logs.forEach(log => {
-                                this.logMessage(`[${log.timestamp}] [${(log.level||'INFO').toUpperCase()}] ${log.source}: ${log.message}`);
+                                // Форматуємо повідомлення з кольорами та іконками
+                                let level = log.level.toLowerCase();
+                                let icon = '📄';
+                                let color = '#4a9c5a';
+                                
+                                if (log.source === 'goose_session') {
+                                    icon = '🤖';
+                                    color = '#00ff41';
+                                } else if (log.source === 'goose_task') {
+                                    icon = '📋';
+                                    color = '#61dafb';
+                                } else if (log.source === 'atlas_monitor') {
+                                    icon = '🔍';
+                                    color = '#98fb98';
+                                } else if (level === 'error') {
+                                    icon = '❌';
+                                    color = '#d16969';
+                                } else if (level === 'warning') {
+                                    icon = '⚠️';
+                                    color = '#d19a66';
+                                }
+                                
+                                const message = `[${log.timestamp}] ${icon} ${log.message}`;
+                                this.logMessage(message, level, color);
                             });
                         }
                     }
-                } catch(_) { /* ignore */ }
+                } catch(e) { 
+                    this.logMessage(`[${new Date().toLocaleTimeString()}] ❌ Error fetching logs: ${e.message}`, 'error');
+                }
+                
+                // Запускаємо періодичне оновлення кожні 2 секунди
+                if (initial) {
+                    setInterval(() => this.refreshLogs(), 2000);
+                }
+            }
+            
+            async refreshLogs() {
+                // Метод для періодичного оновлення логів
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const url = `${baseUrl}/logs?limit=50`;
+                try {
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.logs && data.logs.length > 0) {
+                            // Додаємо тільки нові логи (останні 5)
+                            const recentLogs = data.logs.slice(-5);
+                            recentLogs.forEach(log => {
+                                let level = log.level.toLowerCase();
+                                let icon = '📄';
+                                let color = '#4a9c5a';
+                                
+                                if (log.source === 'goose_session') {
+                                    icon = '🤖';
+                                    color = '#00ff41';
+                                } else if (log.source === 'goose_task') {
+                                    icon = '📋';
+                                    color = '#61dafb';
+                                } else if (log.source === 'atlas_monitor') {
+                                    icon = '🔍';
+                                    color = '#98fb98';
+                                } else if (level === 'error') {
+                                    icon = '❌';
+                                    color = '#d16969';
+                                } else if (level === 'warning') {
+                                    icon = '⚠️';
+                                    color = '#d19a66';
+                                }
+                                
+                                const message = `[${log.timestamp}] ${icon} ${log.message}`;
+                                this.logMessage(message, level, color);
+                            });
+                        }
+                    }
+                } catch(e) { 
+                    // Ігноруємо помилки при періодичному оновленні
+                }
             }
 
             simulateTTSPause(text) {
@@ -885,16 +967,40 @@
 
             async updateSystemStatus() {
                 try {
+                    // Отримуємо стандартний статус системи
                     const response = await fetch('/api/status');
+                    let status = {};
+                    
                     if (response.ok) {
-                        const status = await response.json();
-                        this.renderSystemStatus(status);
+                        status = await response.json();
                     } else {
-                        this.renderSystemStatus({
+                        status = {
                             error: "Status unavailable",
                             timestamp: new Date().toISOString()
-                        });
+                        };
                     }
+                    
+                    // Додаємо інформацію про Goose сесії
+                    try {
+                        const gooseResponse = await fetch('/api/goose/sessions');
+                        if (gooseResponse.ok) {
+                            const gooseData = await gooseResponse.json();
+                            status.goose_sessions = {
+                                count: gooseData.count || 0,
+                                latest: gooseData.sessions && gooseData.sessions.length > 0 ? 
+                                    gooseData.sessions[0].name : 'None',
+                                status: gooseData.count > 0 ? 'active' : 'inactive'
+                            };
+                        }
+                    } catch (e) {
+                        status.goose_sessions = {
+                            count: 0,
+                            latest: 'Error',
+                            status: 'error'
+                        };
+                    }
+                    
+                    this.renderSystemStatus(status);
                 } catch (error) {
                     this.renderSystemStatus({
                         error: error.message,
@@ -937,24 +1043,47 @@
                         this.networkStatus.innerHTML = `<div class="status-item ${statusClass}">Connections: ${connCount}</div>`;
                     }
 
-                    // Ресурси
-                    if (status.resources) {
+                    // Ресурси з додаванням Goose сесій
+                    if (status.resources || status.goose_sessions) {
                         let resourceHTML = '';
                         
-                        if (status.resources.cpu && status.resources.cpu.usage_line) {
-                            const cpuInfo = status.resources.cpu.usage_line;
-                            resourceHTML += `<div class="status-item online">CPU: ${cpuInfo.substring(0, 30)}...</div>`;
-                        } else {
-                            resourceHTML += `<div class="status-item warning">CPU: --</div>`;
+                        // CPU та Disk (як раніше)
+                        if (status.resources) {
+                            if (status.resources.cpu && status.resources.cpu.usage_line) {
+                                const cpuInfo = status.resources.cpu.usage_line;
+                                resourceHTML += `<div class="status-item online">CPU: ${cpuInfo.substring(0, 30)}...</div>`;
+                            } else {
+                                resourceHTML += `<div class="status-item warning">CPU: --</div>`;
+                            }
+                            
+                            if (status.resources.disk && status.resources.disk.usage_percent) {
+                                const diskUsage = status.resources.disk.usage_percent;
+                                const usageNum = parseInt(diskUsage);
+                                const statusClass = usageNum > 90 ? 'error' : usageNum > 70 ? 'warning' : 'online';
+                                resourceHTML += `<div class="status-item ${statusClass}">Disk: ${diskUsage}</div>`;
+                            } else {
+                                resourceHTML += `<div class="status-item warning">Disk: --</div>`;
+                            }
                         }
                         
-                        if (status.resources.disk && status.resources.disk.usage_percent) {
-                            const diskUsage = status.resources.disk.usage_percent;
-                            const usageNum = parseInt(diskUsage);
-                            const statusClass = usageNum > 90 ? 'error' : usageNum > 70 ? 'warning' : 'online';
-                            resourceHTML += `<div class="status-item ${statusClass}">Disk: ${diskUsage}</div>`;
-                        } else {
-                            resourceHTML += `<div class="status-item warning">Disk: --</div>`;
+                        // Додаємо інформацію про Goose сесії
+                        if (status.goose_sessions) {
+                            const count = status.goose_sessions.count || 0;
+                            const latest = status.goose_sessions.latest || 'None';
+                            const sessionStatus = status.goose_sessions.status || 'unknown';
+                            
+                            let statusClass = 'warning';
+                            if (sessionStatus === 'active' && count > 0) {
+                                statusClass = 'online';
+                            } else if (sessionStatus === 'error') {
+                                statusClass = 'error';
+                            }
+                            
+                            resourceHTML += `<div class="status-item ${statusClass}">🤖 Goose: ${count} sessions</div>`;
+                            if (latest !== 'None' && latest !== 'Error') {
+                                const shortName = latest.length > 25 ? latest.substring(0, 25) + '...' : latest;
+                                resourceHTML += `<div class="status-item online">📋 Latest: ${shortName}</div>`;
+                            }
                         }
                         
                         this.resourceStatus.innerHTML = resourceHTML;

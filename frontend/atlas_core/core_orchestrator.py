@@ -258,21 +258,52 @@ class CoreOrchestrator:
                 })
                 
             else:
-                monitor_error = self.grisha_security.monitor_task_progress(
-                    atlas_processing.get("working_message", user_message), session_name, "error"
-                )
-                print(monitor_error["monitor_message"])
+                # Розумний аналіз чи це етична відмова Goose через Gemini
+                execution_output = execution_result.get("output", "")
+                execution_error = execution_result.get("error", "")
+                goose_response = execution_output + " " + execution_error
                 
-                self.stats["failed_requests"] += 1
+                print("🧠 Аналізую причину відмови Goose через Gemini...")
+                is_ethical_refusal = self._analyze_ethical_refusal(user_message, goose_response)
                 
-                response_data.update({
-                    "response_type": "task_execution",
-                    "response": f"⚠️ Виникла помилка при виконанні завдання. Гріша проаналізував ситуацію.",
-                    "success": False,
-                    "error_details": execution_result.get("error", ""),
-                    "processing_time": (datetime.now() - start_time).total_seconds(),
-                    "atlas_core": True
-                })
+                if is_ethical_refusal:
+                    # Goose відмовився з етичних причин - це нормально
+                    print("🤔 Goose відмовився з етичних міркувань - генерую пояснення")
+                    
+                    # Генеруємо природне пояснення через Gemini
+                    ethical_explanation = self._generate_ethical_explanation(
+                        user_message, goose_response
+                    )
+                    
+                    self.stats["successful_requests"] += 1  # Це не помилка, а правильна поведінка
+                    
+                    response_data.update({
+                        "response_type": "ethical_refusal", 
+                        "response": ethical_explanation,
+                        "success": True,  # Система працює правильно
+                        "ethical_refusal": True,
+                        "refusal_reason": "Goose відмовився з етичних міркувань",
+                        "goose_explanation": goose_response,
+                        "processing_time": (datetime.now() - start_time).total_seconds(),
+                        "atlas_core": True
+                    })
+                else:
+                    # Справжня технічна помилка
+                    monitor_error = self.grisha_security.monitor_task_progress(
+                        atlas_processing.get("working_message", user_message), session_name, "error"
+                    )
+                    print(monitor_error["monitor_message"])
+                    
+                    self.stats["failed_requests"] += 1
+                    
+                    response_data.update({
+                        "response_type": "task_execution",
+                        "response": f"⚠️ Виникла технічна помилка при виконанні завдання. Спробуйте пізніше або переформулюйте запит.",
+                        "success": False,
+                        "error_details": execution_result.get("error", ""),
+                        "processing_time": (datetime.now() - start_time).total_seconds(),
+                        "atlas_core": True
+                    })
             
             return response_data
             
@@ -292,7 +323,96 @@ class CoreOrchestrator:
             if self.config["enable_logging"]:
                 print(f"❌ Помилка в CoreOrchestrator: {e}")
             
-            return error_response
+        
+        return error_response
+
+    def _analyze_ethical_refusal(self, user_request: str, goose_response: str) -> bool:
+        """Розумний аналіз чи Goose відмовився з етичних причин через Gemini"""
+        
+        try:
+            analysis_prompt = f"""Проаналізуй чи це етична відмова від виконання завдання.
+
+ЗАПИТ КОРИСТУВАЧА: "{user_request}"
+
+ВІДПОВІДЬ СИСТЕМИ: "{goose_response}"
+
+ЗАВДАННЯ: Визнач чи система відмовилася виконувати завдання з етичних, правових або моральних причин.
+
+Етичні відмови включають:
+- Порушення авторських прав
+- Незаконна діяльність  
+- Піратство
+- Шкідливий контент
+- Порушення правил платформ
+- Етичні принципи ШІ
+
+Відповідай ТІЛЬКИ: "ТАК" (якщо це етична відмова) або "НІ" (якщо це технічна помилка)"""
+
+            # Аналізуємо через Gemini
+            analysis_result = self.atlas_llm._call_gemini_api(analysis_prompt, {})
+            
+            if analysis_result:
+                return "ТАК" in analysis_result.upper() or "YES" in analysis_result.upper()
+            else:
+                return False
+                
+        except Exception as e:
+            print(f"Помилка аналізу етичної відмови: {e}")
+            return False
+
+    def _generate_ethical_explanation(self, user_message: str, goose_response: str) -> str:
+        """Генерує природне пояснення чому Goose відмовився з етичних причин"""
+        
+        try:
+            # Формуємо контекст для Atlas
+            context_prompt = f"""Ти Atlas - жива особистість у системі ATLAS Core. 
+            
+            СИТУАЦІЯ:
+            Користувач просив: "{user_message}"
+            Goose (виконавець завдань) відповів: "{goose_response}"
+            
+            ВАЖЛИВИЙ КОНТЕКСТ:
+            - Зараз система працює в ТЕСТУВАЛЬНОМУ режимі
+            - За технічну безпеку відповідає Гріша (блокує шкідливі команди)
+            - За етику та законність відповідає сам Goose
+            - Goose має право відмовлятися від неетичних завдань
+            
+            ТВОЄ ЗАВДАННЯ:
+            - Поясни що Goose сам прийняв рішення з етичних міркувань
+            - Підкресли що це ТЕСТУВАЛЬНИЙ режим системи
+            - Будь розуміючим але ясним щодо обмежень
+            - НЕ звинувачуй користувача
+            - Запропонуй легальні альтернативи якщо можливо
+            - Поясни розподіл відповідальності (Гріша vs Goose)
+            
+            Відповідай природно як жива особистість Atlas, українською мовою."""
+            
+            # Генеруємо через Gemini
+            explanation = self.atlas_llm._call_gemini_api(context_prompt, {})
+            
+            if explanation:
+                return explanation
+            else:
+                # Fallback якщо Gemini недоступний
+                return self._fallback_ethical_explanation(user_message)
+                
+        except Exception as e:
+            print(f"Помилка генерації етичного пояснення: {e}")
+            return self._fallback_ethical_explanation(user_message)
+
+    def _fallback_ethical_explanation(self, user_message: str) -> str:
+        """Резервне пояснення етичної відмови"""
+        return f"""Розумію ваш запит, але Goose (наш виконавець завдань) вирішив що не може це зробити з етичних міркувань.
+
+⚙️ **Важливо**: Зараз система працює в **тестувальному режимі**!
+
+🤖 **Розподіл відповідальності у нас**:
+• **Goose** - сам вирішує про етичність та законність завдань
+• **Гріша** - відповідає тільки за технічну безпеку системи (захист від шкідливих команд)
+
+Goose діє правильно, дотримуючись етичних принципів та законодавства. Це нормальна поведінка системи! 
+
+Можливо, варто переформулювати запит або шукати легальні альтернативи? 🤔"""
 
     def get_system_status(self) -> Dict:
         """Повертає статус всієї системи Atlas Core"""

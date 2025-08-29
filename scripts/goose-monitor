@@ -1,0 +1,43 @@
+#!/bin/bash
+
+# 🎯 Головний скрипт для моніторингу Goose
+# Використання: ./goose-monitor [latest|live|list|help]
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
+case "${1:-latest}" in
+    "latest"|"l")
+        echo "🔍 Показую останні записи..."
+        "$SCRIPT_DIR/watch_goose_latest.sh"
+        ;;
+    "live"|"r")
+        echo "🔄 Запускаю real-time моніторинг..."
+        "$SCRIPT_DIR/watch_goose_live.sh"
+        ;;
+    "list"|"ls")
+        echo "📊 Показую список сесій..."
+        "$SCRIPT_DIR/list_goose_sessions.sh"
+        ;;
+    "help"|"h")
+        echo "🤖 Goose Monitor - Утиліта для моніторингу сесій"
+        echo ""
+        echo "Використання:"
+        echo "  ./goose-monitor [команда]"
+        echo ""
+        echo "Команди:"
+        echo "  latest, l    - Показати останні записи з найсвіжішої сесії"
+        echo "  live, r      - Real-time моніторинг (оновлення кожні 3 сек)"
+        echo "  list, ls     - Список всіх сесій"
+        echo "  help, h      - Показати цю довідку"
+        echo ""
+        echo "Приклади:"
+        echo "  ./goose-monitor              # Показати останні записи"
+        echo "  ./goose-monitor live         # Real-time моніторинг"
+        echo "  ./goose-monitor list         # Список сесій"
+        ;;
+    *)
+        echo "❌ Невідома команда: $1"
+        echo "💡 Використовуйте: ./goose-monitor help"
+        exit 1
+        ;;
+esac

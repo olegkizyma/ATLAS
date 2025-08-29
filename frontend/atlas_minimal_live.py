@@ -391,6 +391,8 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.serve_atlas_core_status()
         elif self.path == "/api/atlas/sessions":
             self.serve_atlas_sessions()
+        elif self.path == "/api/goose/sessions":
+            self.serve_goose_sessions()
         else:
             super().do_GET()
 
@@ -522,23 +524,95 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.send_error(500, str(e))
 
     def serve_live_logs(self):
-        """Отримання логів (спрощена версія)"""
+        """Отримання логів Goose з останньої сесії"""
         try:
             # Парсимо query параметри
             parsed_path = urllib.parse.urlparse(self.path)
             query_params = urllib.parse.parse_qs(parsed_path.query)
             
-            # Отримуємо limit параметр (за замовчуванням 10)
-            limit = int(query_params.get('limit', ['10'])[0])
+            # Отримуємо limit параметр (за замовчуванням 50)
+            limit = int(query_params.get('limit', ['50'])[0])
             
-            # Повертаємо простий список логів
             logs = []
-            for i in range(min(limit, 10)):
+            
+            # Читаємо логи з найсвіжішої сесії Goose
+            try:
+                sessions_dir = Path.home() / ".local/share/goose/sessions"
+                if sessions_dir.exists():
+                    # Знаходимо найновіший .jsonl файл
+                    jsonl_files = list(sessions_dir.glob("*.jsonl"))
+                    if jsonl_files:
+                        latest_session = max(jsonl_files, key=lambda f: f.stat().st_mtime)
+                        
+                        # Читаємо останні записи з файлу
+                        with open(latest_session, 'r', encoding='utf-8') as f:
+                            lines = f.readlines()
+                            
+                        # Беремо останні N рядків
+                        recent_lines = lines[-min(limit, len(lines)):]
+                        
+                        for line in recent_lines:
+                            line = line.strip()
+                            if line:
+                                try:
+                                    # Пробуємо парсити як JSON
+                                    data = json.loads(line)
+                                    
+                                    # Витягуємо корисну інформацію
+                                    if "role" in data and "content" in data:
+                                        role = data["role"]
+                                        content = str(data.get("content", ""))
+                                        
+                                        # Форматуємо повідомлення
+                                        if role == "user":
+                                            message = f"🔵 USER: {content[:200]}..."
+                                        elif role == "assistant":
+                                            message = f"🤖 GOOSE: {content[:200]}..."
+                                        else:
+                                            message = f"📊 {role.upper()}: {content[:200]}..."
+                                            
+                                        logs.append({
+                                            "message": message,
+                                            "level": "info",
+                                            "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                            "source": "goose_session"
+                                        })
+                                        
+                                    elif "description" in data:
+                                        # Опис задачі
+                                        description = data["description"]
+                                        message = f"📋 TASK: {description}"
+                                        logs.append({
+                                            "message": message,
+                                            "level": "info", 
+                                            "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                            "source": "goose_task"
+                                        })
+                                        
+                                except json.JSONDecodeError:
+                                    # Якщо не JSON, показуємо як текст
+                                    logs.append({
+                                        "message": f"📄 RAW: {line[:200]}...",
+                                        "level": "debug",
+                                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                        "source": "goose_raw"
+                                    })
+                                    
+            except Exception as e:
                 logs.append({
-                    "message": f"[{datetime.now().strftime('%H:%M:%S')}] System log {i+1}",
-                    "level": "info",
-                    "timestamp": datetime.now().strftime("%H:%M:%S")
+                    "message": f"❌ Error reading Goose sessions: {e}",
+                    "level": "error",
+                    "timestamp": datetime.now().strftime("%H:%M:%S"),
+                    "source": "atlas_frontend"
                 })
+            
+            # Додаємо інформацію про статус
+            logs.append({
+                "message": f"🔍 Monitoring Goose sessions in real-time...",
+                "level": "info",
+                "timestamp": datetime.now().strftime("%H:%M:%S"),
+                "source": "atlas_monitor"
+            })
             
             response = json.dumps({"logs": logs}).encode('utf-8')
             self.send_response(200)
@@ -547,6 +621,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.send_header('Content-Length', str(len(response)))
             self.end_headers()
             self.wfile.write(response)
+            
         except Exception as e:
             logger.error(f"Live logs error: {e}")
             try:
@@ -723,6 +798,68 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 "sessions": [],
                 "error": str(e),
                 "atlas_core": False,
+                "timestamp": datetime.now().isoformat()
+            }
+            response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+    def serve_goose_sessions(self):
+        """Список сесій Goose з файлової системи"""
+        try:
+            sessions_dir = Path.home() / ".local/share/goose/sessions"
+            sessions = []
+            
+            if sessions_dir.exists():
+                jsonl_files = list(sessions_dir.glob("*.jsonl"))
+                
+                for session_file in sorted(jsonl_files, key=lambda f: f.stat().st_mtime, reverse=True)[:10]:
+                    stat = session_file.stat()
+                    size_kb = round(stat.st_size / 1024, 1)
+                    
+                    # Читаємо перший рядок для опису
+                    description = "Unknown task"
+                    try:
+                        with open(session_file, 'r', encoding='utf-8') as f:
+                            first_line = f.readline().strip()
+                            if first_line:
+                                data = json.loads(first_line)
+                                description = data.get("description", "Unknown task")
+                    except:
+                        pass
+                    
+                    sessions.append({
+                        "name": session_file.name,
+                        "description": description,
+                        "size_kb": size_kb,
+                        "modified": datetime.fromtimestamp(stat.st_mtime).isoformat(),
+                        "path": str(session_file)
+                    })
+            
+            response_data = {
+                "sessions": sessions,
+                "count": len(sessions),
+                "sessions_dir": str(sessions_dir),
+                "timestamp": datetime.now().isoformat()
+            }
+            
+            response = json.dumps(response_data, ensure_ascii=False, indent=2).encode('utf-8')
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            
+        except Exception as e:
+            logger.error(f"Goose sessions error: {e}")
+            error_response = {
+                "sessions": [],
+                "error": str(e),
                 "timestamp": datetime.now().isoformat()
             }
             response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
