@@ -106,6 +106,16 @@ class SessionManager:
                 if stderr:
                     logger.warning(f"⚠️ STDERR: {stderr}")
                 
+                # Перевіряємо код завершення
+                if process.returncode != 0:
+                    logger.error(f"❌ Команда завершилася з кодом помилки: {process.returncode}")
+                    return {
+                        "success": False,
+                        "error": f"Команда завершилася з кодом {process.returncode}. STDERR: {stderr}",
+                        "session_name": session_name,
+                        "stdout": stdout
+                    }
+                
                 self.active_sessions[session_name] = {
                     "created": datetime.now().isoformat(),
                     "last_used": datetime.now().isoformat(),
@@ -133,7 +143,16 @@ class SessionManager:
                     "response": "Session registered"
                 }
                 
+        except subprocess.TimeoutExpired:
+            logger.error(f"⏰ Операція перевищила ліміт часу 60с")
+            process.kill()
+            return {
+                "success": False,
+                "error": "Операція перевищила ліміт часу 60с",
+                "session_name": session_name
+            }
         except Exception as e:
+            logger.error(f"💥 Виняток при створенні сесії: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
