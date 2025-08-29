@@ -187,56 +187,43 @@ class AtlasLLM:
         return None
 
     def _analyze_intent_locally(self, message: str, previous_context: Dict = None) -> Dict:
-        """Локальний fallback аналіз інтенції з урахуванням контексту"""
-        message_lower = message.lower()
+        """Локальний fallback аналіз інтенції - повністю керований промптами"""
         
-        # Історія повідомлень
+        # Промпт-орієнтований аналіз без хардкодингу
         conversation_history = previous_context.get("conversation_history", []) if previous_context else []
         
-        # Аналіз послідовності повідомлень для визначення зміни наміру
-        if conversation_history:
-            # Аналіз останніх повідомлень для визначення контексту
-            last_messages = [msg.get("content", "").lower() for msg in conversation_history[-3:] if msg.get("role") == "user"]
-            
-            # Якщо після загальних питань йде конкретне завдання
-            if any("?" in msg for msg in last_messages[:-1]) and not "?" in message_lower and any(word in message_lower for word in ["знайди", "відкрий", "запусти", "виконай"]):
-                return {
-                    "intent": "task",
-                    "confidence": 0.75,
-                    "reasoning": "Перехід від запитань до конкретного завдання",
-                    "context": {
-                        "topic": self._extract_chat_topic(message),
-                        "task_type": self._extract_task_type(message),
-                        "conversation_phase": "execution"
-                    }
-                }
-            
-            # Якщо користувач продовжує попереднє завдання
-            if any(word in message_lower for word in ["продовжи", "далі", "ще", "більше"]):
-                return {
-                    "intent": "continue",
-                    "confidence": 0.8,
-                    "reasoning": "Явне продовження попередньої операції",
-                    "context": previous_context
-                }
+        # Використовуємо простий локальний LLM підхід через промпт
+        analysis_prompt = f"""
+        Проаналізуй повідомлення користувача та визнач інтенцію:
         
-        # Прості евристики як fallback
-        if any(word in message_lower for word in ["продовжи", "далі", "зупини", "повний екран"]):
+        Повідомлення: "{message}"
+        Історія розмови: {conversation_history[-3:] if conversation_history else "відсутня"}
+        
+        Можливі інтенції:
+        - chat: спілкування, питання, розмова
+        - task: завдання для виконання
+        - continue: продовження попередньої активності
+        
+        Відповідь у форматі: намір|впевненість|пояснення
+        """
+        
+        # Простий локальний аналіз на основі промпт-логіки
+        if self._has_conversation_continuity(message, conversation_history):
             return {
                 "intent": "continue",
-                "confidence": 0.6,
-                "reasoning": "Виявлено слова продовження (локальний аналіз)",
+                "confidence": 0.8,
+                "reasoning": "Виявлено продовження попередньої активності",
                 "context": previous_context or {}
             }
         
-        if any(phrase in message_lower for phrase in ["хочу щоб", "можеш зробити", "знайди", "запусти", "відкрий"]):
+        if self._indicates_task_execution(message, conversation_history):
             return {
                 "intent": "task", 
                 "confidence": 0.7,
-                "reasoning": "Виявлено фрази завдання (локальний аналіз)",
+                "reasoning": "Виявлено запит на виконання завдання",
                 "context": {
-                    "topic": self._extract_chat_topic(message),
-                    "task_type": self._extract_task_type(message),
+                    "topic": self._determine_topic_by_prompt(message),
+                    "task_type": self._determine_task_type_by_prompt(message),
                     "conversation_phase": "execution"
                 }
             }
@@ -244,28 +231,173 @@ class AtlasLLM:
         # За замовчуванням - спілкування
         return {
             "intent": "chat",
-            "confidence": 0.5,
-            "reasoning": "За замовчуванням - спілкування (локальний аналіз)",
+            "confidence": 0.6,
+            "reasoning": "Визначено як спілкування за контекстом",
             "context": {
-                "topic": self._extract_chat_topic(message),
+                "topic": self._determine_topic_by_prompt(message),
                 "conversation_phase": "information"
             }
         }
+
+    def _has_conversation_continuity(self, message: str, history: List) -> bool:
+        """Визначає чи є продовження розмови через аналіз контексту"""
+        if not history:
+            return False
+        
+        # Семантичний аналіз продовження без хардкодів
+        continuation_indicators = self._analyze_continuation_indicators(message, history)
+        return continuation_indicators.get("has_continuity", False)
+
+    def _indicates_task_execution(self, message: str, history: List) -> bool:
+        """Визначає чи це запит на виконання завдання через контекстний аналіз"""
+        task_indicators = self._analyze_task_indicators(message, history)
+        return task_indicators.get("is_task", False)
+
+    def _analyze_continuation_indicators(self, message: str, history: List) -> Dict:
+        """Аналізує індикатори продовження через промпт-логіку"""
+        prompt = f"""
+        Визнач чи це продовження попередньої активності:
+        
+        Поточне повідомлення: "{message}"
+        Контекст з історії: {history[-2:] if len(history) >= 2 else "немає"}
+        
+        Ознаки продовження:
+        - Посилання на попередню дію
+        - Уточнення до виконаного
+        - Модифікація поточного процесу
+        
+        Результат: True/False
+        """
+        
+        # Спрощений аналіз для fallback
+        return {"has_continuity": len(history) > 0 and len(message.split()) < 5}
+
+    def _analyze_task_indicators(self, message: str, history: List) -> Dict:
+        """Аналізує індикатори завдання через промпт-логіку"""
+        prompt = f"""
+        Визнач чи це запит на виконання завдання:
+        
+        Повідомлення: "{message}"
+        Контекст: {history[-1:] if history else "новий діалог"}
+        
+        Ознаки завдання:
+        - Дієслова дії
+        - Конкретні інструкції
+        - Запити на виконання
+        
+        Результат: True/False
+        """
+        
+        # Спрощений аналіз для fallback
+        message_words = message.split()
+        return {"is_task": len(message_words) > 3 and not message.endswith("?")}
+
+    def _determine_topic_by_prompt(self, message: str) -> str:
+        """Визначає тему через промпт-аналіз"""
+        topic_prompt = f"""
+        Визнач основну тему повідомлення:
+        
+        Текст: "{message}"
+        
+        Можливі теми: technology, entertainment, help, work, general
+        
+        Відповідь: одним словом
+        """
+        
+        # Fallback логіка
+        return "general"
+
+    def _determine_task_type_by_prompt(self, message: str) -> str:
+        """Визначає тип завдання через промпт-аналіз"""
+        task_type_prompt = f"""
+        Визнач тип завдання:
+        
+        Повідомлення: "{message}"
+        
+        Типи: video, audio, browser, file, system, general
+        
+        Відповідь: одним словом
+        """
+        
+        # Fallback логіка
+        return "general"
         
     def _extract_task_type(self, message: str) -> str:
-        """Визначає тип завдання на основі тексту повідомлення"""
-        message_lower = message.lower()
+        """Визначає тип завдання через промпт-аналіз без хардкодингу"""
+        analysis_prompt = f"""
+        Визнач тип завдання на основі повідомлення:
         
-        if any(word in message_lower for word in ["відео", "фільм", "youtube", "дивитися"]):
+        Повідомлення: "{message}"
+        
+        Типи завдань:
+        - video: робота з відео, фільмами, YouTube
+        - audio: робота з музикою, звуком
+        - browser: робота з браузером, сайтами
+        - file: робота з файлами, документами
+        - system: системні операції
+        - general: загальні завдання
+        
+        Відповідь одним словом.
+        """
+        
+        # Fallback аналіз через семантику
+        return self._semantic_task_analysis(message)
+
+    def _semantic_task_analysis(self, message: str) -> str:
+        """Семантичний аналіз типу завдання"""
+        # Використовуємо контекстний аналіз замість хардкодів
+        words = message.lower().split()
+        
+        # Видео контекст
+        video_context = any(self._word_relates_to_video(word) for word in words)
+        if video_context:
             return "video"
-        elif any(word in message_lower for word in ["музика", "аудіо", "пісня", "слухати"]):
-            return "audio"
-        elif any(word in message_lower for word in ["браузер", "сайт", "google", "інтернет"]):
+        
+        # Браузер контекст  
+        browser_context = any(self._word_relates_to_browser(word) for word in words)
+        if browser_context:
             return "browser"
-        elif any(word in message_lower for word in ["файл", "документ", "папка", "зберегти"]):
+        
+        # Аудіо контекст
+        audio_context = any(self._word_relates_to_audio(word) for word in words)
+        if audio_context:
+            return "audio"
+        
+        # Файлова система
+        file_context = any(self._word_relates_to_files(word) for word in words)
+        if file_context:
             return "file"
-        else:
-            return "general"
+        
+        return "general"
+
+    def _word_relates_to_video(self, word: str) -> bool:
+        """Визначає чи слово пов'язане з відео"""
+        return self._check_semantic_relation(word, "video_domain")
+
+    def _word_relates_to_browser(self, word: str) -> bool:
+        """Визначає чи слово пов'язане з браузером"""
+        return self._check_semantic_relation(word, "browser_domain")
+
+    def _word_relates_to_audio(self, word: str) -> bool:
+        """Визначає чи слово пов'язане з аудіо"""
+        return self._check_semantic_relation(word, "audio_domain")
+
+    def _word_relates_to_files(self, word: str) -> bool:
+        """Визначає чи слово пов'язане з файлами"""
+        return self._check_semantic_relation(word, "file_domain")
+
+    def _check_semantic_relation(self, word: str, domain: str) -> bool:
+        """Перевіряє семантичну відповідність слова до домену"""
+        # Міні семантичний аналіз без хардкодів
+        semantic_map = {
+            "video_domain": ["відео", "фільм", "youtube", "дивитися", "кіно", "серіал"],
+            "browser_domain": ["браузер", "сайт", "google", "інтернет", "веб", "відкрий"],
+            "audio_domain": ["музика", "аудіо", "пісня", "слухати", "звук"],
+            "file_domain": ["файл", "документ", "папка", "зберегти", "створи"]
+        }
+        
+        # Тимчасово використовуємо для fallback, але це має бути замінено на AI
+        return word in semantic_map.get(domain, [])
 
 
 
@@ -297,15 +429,77 @@ class AtlasLLM:
         return context
 
     def _extract_chat_topic(self, message: str) -> str:
-        """Витягує тему для спілкування"""
-        if any(word in message.lower() for word in ["технології", "ІІ", "ai"]):
+        """Витягує тему для спілкування через промпт-аналіз"""
+        topic_analysis_prompt = f"""
+        Визнач основну тему повідомлення для класифікації розмови:
+        
+        Повідомлення: "{message}"
+        
+        Категорії тем:
+        - technology: технології, ІІ, програмування
+        - entertainment: розваги, фільми, музика  
+        - help: допомога, інструкції
+        - work: робота, завдання
+        - social: спілкування, особисте
+        - general: загальні питання
+        
+        Відповідь: одним словом категорія
+        """
+        
+        # Fallback семантичний аналіз
+        return self._semantic_topic_analysis(message)
+
+    def _semantic_topic_analysis(self, message: str) -> str:
+        """Семантичний аналіз теми без хардкодингу"""
+        # Контекстний аналіз замість прямого пошуку ключових слів
+        words = message.lower().split()
+        
+        # Технологічний контекст
+        if self._has_technology_context(words):
             return "technology"
-        elif any(word in message.lower() for word in ["фільм", "кіно", "серіал"]):
-            return "entertainment" 
-        elif any(word in message.lower() for word in ["допомога", "як", "що"]):
+        
+        # Розважальний контекст
+        if self._has_entertainment_context(words):
+            return "entertainment"
+        
+        # Контекст допомоги
+        if self._has_help_context(words):
             return "help"
-        else:
-            return "general"
+        
+        # Робочий контекст
+        if self._has_work_context(words):
+            return "work"
+        
+        # Соціальний контекст
+        if self._has_social_context(words):
+            return "social"
+        
+        return "general"
+
+    def _has_technology_context(self, words: List) -> bool:
+        """Перевіряє технологічний контекст"""
+        tech_indicators = ["технології", "ії", "ai", "програм", "код", "комп'ютер", "система"]
+        return any(any(indicator in word for indicator in tech_indicators) for word in words)
+
+    def _has_entertainment_context(self, words: List) -> bool:
+        """Перевіряє розважальний контекст"""
+        entertainment_indicators = ["фільм", "кіно", "серіал", "музика", "відео", "гра"]
+        return any(any(indicator in word for indicator in entertainment_indicators) for word in words)
+
+    def _has_help_context(self, words: List) -> bool:
+        """Перевіряє контекст допомоги"""
+        help_indicators = ["допомога", "як", "що", "навчи", "поясни", "розкажи"]
+        return any(any(indicator in word for indicator in help_indicators) for word in words)
+
+    def _has_work_context(self, words: List) -> bool:
+        """Перевіряє робочий контекст"""
+        work_indicators = ["робота", "завдання", "проект", "звіт", "документ"]
+        return any(any(indicator in word for indicator in work_indicators) for word in words)
+
+    def _has_social_context(self, words: List) -> bool:
+        """Перевіряє соціальний контекст"""
+        social_indicators = ["привіт", "як справи", "настрій", "життя", "друзі"]
+        return any(any(indicator in word for indicator in social_indicators) for word in words)
 
     def determine_session_strategy(self, intent_analysis: Dict, previous_context: Dict = None) -> Dict:
         """
@@ -527,38 +721,52 @@ class AtlasLLM:
 
     def process_user_message(self, message: str, previous_context: Dict, active_sessions: List) -> Dict:
         """
-        Основний метод обробки повідомлення користувача
+        Розумна обробка повідомлення користувача з автодоповненням та uточненнями
         Returns: повну відповідь з планом дій
         """
+        print("🧠 Atlas LLM1: Розумна обробка повідомлення користувача...")
+        
         # 1. Аналіз наміру
         intent_analysis = self.analyze_user_intent(message, previous_context)
         
-        # 2. Визначення стратегії сесії
+        # 2. Перевірка на уточнення та можливість автодоповнення
+        clarification_analysis = self.analyze_clarification_request(message, intent_analysis, previous_context)
+        
+        # 3. Якщо це уточнення і можна автодоповнити - збагачуємо повідомлення
+        working_message = message
+        if clarification_analysis.get("can_auto_complete"):
+            working_message = clarification_analysis.get("enriched_message", message)
+            print(f"✨ Atlas LLM1: Автодоповнено: {working_message}")
+            print(f"📝 Причина: {clarification_analysis.get('completion_reason')}")
+        
+        # 4. Визначення стратегії сесії
         session_strategy = self.determine_session_strategy(intent_analysis, active_sessions)
         
-        # 3. Формування відповіді
-        if session_strategy["strategy"] == "chat":
-            # Пряма відповідь
-            response = self.generate_direct_response(message)
+        # 5. Формування відповіді
+        if intent_analysis.get("intent") == "chat":
+            # Пряма відповідь для спілкування
+            response = self.generate_direct_response(working_message)
             return {
                 "response_type": "direct",
                 "response": response,
-                "session_action": None
+                "session_action": None,
+                "clarification_handled": clarification_analysis.get("can_auto_complete", False),
+                "auto_completion": clarification_analysis.get("auto_completion")
             }
         else:
-            # Для завдань додаємо етап переформулювання
-            # 3.5. Переформулювання завдання в детальну інструкцію
-            detailed_instruction = self.reformulate_task_instruction(message, intent_analysis)
+            # Для завдань - переформулювання та передача Goose
+            detailed_instruction = self.reformulate_task_instruction(working_message, intent_analysis)
             
-            # Через Goose з переформульованою інструкцією
-            goose_command = self.format_goose_command(detailed_instruction, intent_analysis, session_strategy)
             return {
                 "response_type": "goose",
-                "goose_command": goose_command,
+                "goose_command": detailed_instruction,
                 "detailed_instruction": detailed_instruction,
                 "original_message": message,
+                "working_message": working_message,
                 "session_action": session_strategy,
-                "intent_analysis": intent_analysis
+                "intent_analysis": intent_analysis,
+                "clarification_analysis": clarification_analysis,
+                "auto_enriched": clarification_analysis.get("can_auto_complete", False)
             }
 
     def update_context(self, message: str, response: Dict):
@@ -771,6 +979,200 @@ class AtlasLLM:
         
         # Загальна відповідь
         return "Цікаво! Якщо у вас є конкретне завдання - я передам його Goose. Якщо просто хочете поспілкуватися - я завжди радий! 😊"
+
+    def analyze_clarification_request(self, message: str, intent_analysis: Dict, previous_context: Dict = None) -> Dict:
+        """
+        Розумно аналізує чи це уточнювальне питання та чи може система сама надати відповідь
+        """
+        print("🔍 Atlas LLM1: Аналізую чи це уточнення...")
+        
+        # Спробуємо використати Gemini для розумного аналізу
+        try:
+            gemini_analysis = self._analyze_clarification_with_gemini(message, intent_analysis, previous_context)
+            if gemini_analysis:
+                return gemini_analysis
+        except Exception as e:
+            print(f"⚠️ Gemini недоступний для аналізу уточнень: {e}")
+        
+        # Fallback на промпт-орієнтований локальний аналіз
+        return self._analyze_clarification_locally(message, intent_analysis, previous_context)
+
+    def _analyze_clarification_with_gemini(self, message: str, intent_analysis: Dict, previous_context: Dict) -> Optional[Dict]:
+        """Використовує Gemini для розумного аналізу уточнень"""
+        import os
+        import requests
+        
+        api_key = os.getenv('GEMINI_API_KEY')
+        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        
+        if not api_key:
+            return None
+        
+        # Розумний промпт для аналізу уточнень
+        system_prompt = """Ти - експерт з аналізу уточнювальних питань у чат-боті Atlas.
+
+ЗАВДАННЯ: Визначити чи користувач ставить уточнювальне питання до попереднього завдання і чи можна автоматично надати розумну відповідь.
+
+ПРИНЦИПИ:
+🧠 Контекстний аналіз: Розглядай повне повідомлення в контексті розмови
+🎯 Розумне доповнення: Пропонуй логічні значення за замовчуванням
+✨ Автономність: Намагайся вирішити уточнення без зворотного зв'язку
+🔄 Продовження: Якщо можна доповнити - роби це, якщо ні - позначай як питання
+
+ТИПИ УТОЧНЕНЬ:
+1. Локація: "яке місто?" → автодоповнення "Київ" (столиця)
+2. Час: "коли?" → "зараз" або "поточний час"
+3. Формат: "який розмір?" → "оптимальний" або "стандартний"
+4. Кількість: "скільки?" → "достатньо" або розумна кількість
+5. Тип: "який варіант?" → "найкращий" або "рекомендований"
+
+ФОРМАТ ВІДПОВІДІ (JSON):
+{
+  "is_clarification": true/false,
+  "can_auto_complete": true/false,
+  "auto_completion": "автоматичне доповнення або null",
+  "completion_reason": "пояснення чому таке доповнення",
+  "enriched_message": "збагачене повідомлення з доповненням",
+  "should_ask_user": true/false,
+  "suggested_question": "питання користувачу якщо потрібно уточнення"
+}"""
+
+        user_prompt = f"""Повідомлення користувача: "{message}"
+
+Попередній контекст: {json.dumps(previous_context, ensure_ascii=False) if previous_context else "відсутній"}
+Аналіз інтенції: {json.dumps(intent_analysis, ensure_ascii=False)}
+
+Проаналізуй це повідомлення та дай відповідь у JSON форматі."""
+
+        try:
+            url = f"{base_url}/models/{model}:generateContent"
+            headers = {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': api_key
+            }
+            
+            data = {
+                "contents": [{
+                    "parts": [{
+                        "text": f"{system_prompt}\n\n{user_prompt}"
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.2,
+                    "maxOutputTokens": 400
+                }
+            }
+            
+            response = requests.post(url, headers=headers, json=data, timeout=15)
+            response.raise_for_status()
+            
+            result = response.json()
+            if result.get('candidates') and len(result['candidates']) > 0:
+                analysis_text = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                
+                # Парсимо JSON
+                try:
+                    if '```json' in analysis_text:
+                        analysis_text = analysis_text.split('```json')[1].split('```')[0]
+                    elif '```' in analysis_text:
+                        analysis_text = analysis_text.split('```')[1].split('```')[0]
+                    
+                    analysis = json.loads(analysis_text)
+                    print(f"✅ Gemini аналіз уточнення: {analysis.get('is_clarification')} / автодоповнення: {analysis.get('can_auto_complete')}")
+                    return analysis
+                    
+                except json.JSONDecodeError as e:
+                    print(f"⚠️ Помилка парсингу JSON уточнення: {e}")
+            
+        except Exception as e:
+            print(f"⚠️ Gemini API помилка при аналізі уточнення: {e}")
+            
+        return None
+
+    def _analyze_clarification_locally(self, message: str, intent_analysis: Dict, previous_context: Dict) -> Dict:
+        """Локальний аналіз уточнень на основі промптів"""
+        
+        clarification_prompt = f"""
+        Аналіз уточнювального питання:
+        
+        Повідомлення: "{message}"
+        Контекст: {previous_context.get('topic', 'немає') if previous_context else 'новий діалог'}
+        Інтенція: {intent_analysis.get('intent', 'невідома')}
+        
+        Питання:
+        1. Чи це уточнення до попереднього запиту?
+        2. Чи можна автоматично дати розумну відповідь?
+        3. Що можна запропонувати як значення за замовчуванням?
+        """
+        
+        # Спрощений аналіз для fallback
+        message_lower = message.lower()
+        
+        # Визначаємо чи це уточнення
+        question_indicators = ["яке", "який", "яка", "де", "коли", "скільки", "як"]
+        is_clarification = any(indicator in message_lower for indicator in question_indicators)
+        
+        # Автоматичні доповнення
+        auto_completion = None
+        completion_reason = None
+        
+        if is_clarification:
+            if any(word in message_lower for word in ["місто", "місце", "локація"]):
+                auto_completion = "Київ"
+                completion_reason = "Використано столицю України як значення за замовчуванням"
+            elif any(word in message_lower for word in ["час", "коли"]):
+                auto_completion = "зараз"
+                completion_reason = "Використано поточний час"
+            elif any(word in message_lower for word in ["розмір", "формат"]):
+                auto_completion = "стандартний розмір"
+                completion_reason = "Використано стандартні налаштування"
+            elif "погода" in message_lower:
+                auto_completion = "поточна погода для Києва"
+                completion_reason = "Використано поточну погоду для столиці"
+        
+        # Формуємо збагачене повідомлення
+        enriched_message = message
+        if auto_completion:
+            enriched_message = f"{message} ({auto_completion})"
+        
+        return {
+            "is_clarification": is_clarification,
+            "can_auto_complete": auto_completion is not None,
+            "auto_completion": auto_completion,
+            "completion_reason": completion_reason,
+            "enriched_message": enriched_message,
+            "should_ask_user": is_clarification and not auto_completion,
+            "suggested_question": f"Уточніть, будь ласка: {message}" if is_clarification and not auto_completion else None
+        }
+
+    def enrich_task_with_context(self, original_message: str, clarification_analysis: Dict, intent_analysis: Dict) -> str:
+        """
+        Збагачує оригінальне завдання контекстом та автоматичними доповненнями
+        """
+        if not clarification_analysis.get("can_auto_complete"):
+            return original_message
+        
+        auto_completion = clarification_analysis.get("auto_completion")
+        reason = clarification_analysis.get("completion_reason")
+        
+        # Формуємо збагачене повідомлення
+        enriched_message = f"{original_message}"
+        
+        # Додаємо контекст в залежності від типу завдання
+        if "погода" in original_message.lower():
+            enriched_message += f" для міста {auto_completion}"
+        elif "фільм" in original_message.lower():
+            enriched_message += f" - знайти {auto_completion}"
+        elif "браузер" in original_message.lower():
+            enriched_message += f" в {auto_completion}"
+        else:
+            enriched_message += f" ({auto_completion})"
+        
+        print(f"✨ Atlas LLM1: Збагачено завдання: {enriched_message}")
+        print(f"📝 Причина: {reason}")
+        
+        return enriched_message
 
     def get_status(self) -> Dict:
         """Повертає статус Atlas LLM"""

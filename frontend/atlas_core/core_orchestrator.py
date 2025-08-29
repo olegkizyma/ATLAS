@@ -50,82 +50,69 @@ class CoreOrchestrator:
 
     async def process_user_message(self, user_message: str, user_context: Dict = None) -> Dict:
         """
-        Головний метод обробки повідомлення користувача
+        Розумна обробка повідомлення користувача з автодоповненням та компактними звітами
         Проходить через всі три компоненти Atlas Core
         """
         start_time = datetime.now()
         self.stats["total_requests"] += 1
         
         try:
-            # === КРОК 1: ATLAS LLM1 - АНАЛІЗ ІНТЕНЦІЙ ===
-            print(f"🧠 Atlas LLM1: Аналізую інтенцію користувача...")
+            # === КРОК 1: ATLAS LLM1 - РОЗУМНА ОБРОБКА З АВТОДОПОВНЕННЯМ ===
+            print(f"🧠 Atlas LLM1: Розумна обробка повідомлення з автодоповненням...")
             
-            intent_analysis = self.atlas_llm.analyze_user_intent(user_message, user_context)
-            session_strategy = self.atlas_llm.determine_session_strategy(intent_analysis, user_context)
+            # Використовуємо новий розумний метод обробки
+            atlas_processing = self.atlas_llm.process_user_message(user_message, user_context, [])
             
             response_data = {
                 "timestamp": start_time.isoformat(),
                 "user_message": user_message,
-                "intent_analysis": intent_analysis,
-                "session_strategy": session_strategy,
+                "atlas_processing": atlas_processing,
                 "processing_steps": []
             }
             
-            # Логування кроку 1
+            # Логування розумної обробки Atlas
             step1 = {
                 "step": 1,
                 "component": "Atlas LLM1",
-                "action": "intent_analysis",
-                "result": intent_analysis,
+                "action": "smart_processing",
+                "result": {
+                    "response_type": atlas_processing.get("response_type"),
+                    "auto_enriched": atlas_processing.get("auto_enriched", False),
+                    "clarification_handled": atlas_processing.get("clarification_handled", False)
+                },
                 "timestamp": datetime.now().isoformat()
             }
             response_data["processing_steps"].append(step1)
             
-            # Якщо це чат - відповідаємо напряму
-            if intent_analysis.get("intent") == "chat":
+            # Якщо Atlas обробив як чат - повертаємо відповідь
+            if atlas_processing.get("response_type") == "direct":
                 self.stats["chat_responses"] += 1
                 self.stats["successful_requests"] += 1
                 
-                chat_response = self.atlas_llm.generate_chat_response(user_message, user_context)
-                
                 response_data.update({
                     "response_type": "chat",
-                    "atlas_response": chat_response,
+                    "atlas_response": atlas_processing.get("response"),
                     "success": True,
-                    "processing_time": (datetime.now() - start_time).total_seconds()
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                    "atlas_core": True
                 })
                 
                 return response_data
             
-            # === КРОК 1.5: ATLAS LLM1 - ПЕРЕФОРМУЛЮВАННЯ ЗАВДАННЯ ===
-            print(f"🔄 Atlas LLM1: Переформулювання завдання в детальну інструкцію...")
-            
-            detailed_instruction = self.atlas_llm.reformulate_task_instruction(user_message, intent_analysis)
-            
-            # Логування кроку 1.5
-            step1_5 = {
-                "step": 1.5,
-                "component": "Atlas LLM1",
-                "action": "task_reformulation",
-                "original_message": user_message,
-                "detailed_instruction": detailed_instruction,
-                "timestamp": datetime.now().isoformat()
-            }
-            response_data["processing_steps"].append(step1_5)
-            response_data["detailed_instruction"] = detailed_instruction
-            
-            # === КРОК 2: ГРІША LLM3 - ПЕРЕВІРКА БЕЗПЕКИ (переформульованої інструкції) ===
+            # === КРОК 2: ГРІША LLM3 - ПЕРЕВІРКА БЕЗПЕКИ ===
             if self.config["enable_security"]:
-                print(f"🛡️ Гріша LLM3: Перевіряю безпеку переформульованої інструкції...")
+                print(f"�️ Гріша LLM3: Перевіряю безпеку завдання...")
                 
-                # Передаємо детальну інструкцію для перевірки безпеки
+                working_message = atlas_processing.get("working_message", user_message)
+                detailed_instruction = atlas_processing.get("detailed_instruction", working_message)
+                
                 security_check = self.grisha_security.analyze_security_risk(
-                    detailed_instruction,  # Використовуємо переформульовану інструкцію
-                    intent_analysis, 
+                    detailed_instruction,
+                    atlas_processing.get("intent_analysis", {}), 
                     user_context
                 )
                 
-                # Логування кроку 2
+                # Логування перевірки безпеки
                 step2 = {
                     "step": 2,
                     "component": "Гріша LLM3",
@@ -136,7 +123,7 @@ class CoreOrchestrator:
                 }
                 response_data["processing_steps"].append(step2)
                 
-                # Якщо команда заблокована - повертаємо помилку
+                # Якщо заблоковано - повертаємо помилку
                 if security_check.get("risk_level") == "HIGH" and security_check.get("block_execution"):
                     self.stats["security_blocks"] += 1
                     self.stats["failed_requests"] += 1
@@ -154,30 +141,33 @@ class CoreOrchestrator:
                 
                 response_data["security_analysis"] = security_check
             
-            # === КРОК 3: GOOSE - ВИКОНАННЯ ПЕРЕФОРМУЛЬОВАНОЇ КОМАНДИ ===
-            print(f"🚀 Goose: Виконую детальну інструкцію...")
+            # === КРОК 3: GOOSE - ВИКОНАННЯ ЗАВДАННЯ ===
+            print(f"� Goose: Виконую завдання...")
             
-            # Гріша починає моніторинг завдання
-            session_name = session_strategy.get("session_name", f"session_{int(datetime.now().timestamp())}")
+            # Гріша починає моніторинг
+            session_strategy = atlas_processing.get("session_action", {})
+            session_name = session_strategy.get("session_name", f"smart_session_{int(datetime.now().timestamp())}")
+            
             monitor_start = self.grisha_security.monitor_task_progress(
-                user_message, session_name, "start"
+                atlas_processing.get("working_message", user_message), session_name, "start"
             )
             print(monitor_start["monitor_message"])
             
-            # Виконуємо переформульовану команду через Session Manager
+            # Виконуємо завдання
             execution_result = self.session_manager.execute_command(
-                detailed_instruction,  # Передаємо детальну інструкцію замість оригінального повідомлення
-                intent_analysis,
+                atlas_processing.get("detailed_instruction"),
+                atlas_processing.get("intent_analysis", {}),
                 session_strategy
             )
             
-            # Логування кроку 3
+            # Логування виконання
             step3 = {
                 "step": 3,
                 "component": "Goose",
-                "action": "detailed_instruction_execution",
-                "executed_instruction": detailed_instruction,
+                "action": "task_execution",
+                "executed_instruction": atlas_processing.get("detailed_instruction"),
                 "original_message": user_message,
+                "working_message": atlas_processing.get("working_message"),
                 "result": {
                     "success": execution_result.get("success"),
                     "execution_type": execution_result.get("execution_type"),
@@ -187,36 +177,54 @@ class CoreOrchestrator:
             }
             response_data["processing_steps"].append(step3)
             
-            # Гріша моніторить завершення завдання
+            # === КРОК 4: ГРІША - ГЕНЕРАЦІЯ КОМПАКТНОГО ЗВІТУ ===
+            print(f"📋 Гріша: Генерую компактний звіт...")
+            
             if execution_result.get("success"):
+                # Гріша створює компактний звіт замість довгої відповіді Goose
+                compact_summary = self.grisha_security.generate_completion_summary(
+                    atlas_processing.get("working_message", user_message),
+                    execution_result,
+                    {"session_name": session_name, "auto_enriched": atlas_processing.get("auto_enriched", False)}
+                )
+                
                 monitor_complete = self.grisha_security.monitor_task_progress(
-                    user_message, session_name, "completion"
+                    atlas_processing.get("working_message", user_message), session_name, "completion"
                 )
                 print(monitor_complete["monitor_message"])
+                
+                self.stats["successful_requests"] += 1
+                self.stats["task_executions"] += 1
+                
+                # Повертаємо КОМПАКТНУ відповідь від Гріші замість довгої від Goose
+                response_data.update({
+                    "response_type": "task_execution",
+                    "response": compact_summary,  # КОРОТКИЙ звіт від Гріші
+                    "goose_details": execution_result.get("response", ""),  # Деталі Goose (опційно)
+                    "success": True,
+                    "session_info": {"strategy": session_strategy.get("strategy"), "session_name": session_name},
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                    "atlas_core": True,
+                    "intent": atlas_processing.get("intent_analysis", {}).get("intent"),
+                    "confidence": atlas_processing.get("intent_analysis", {}).get("confidence")
+                })
+                
             else:
                 monitor_error = self.grisha_security.monitor_task_progress(
-                    user_message, session_name, "error"
+                    atlas_processing.get("working_message", user_message), session_name, "error"
                 )
                 print(monitor_error["monitor_message"])
-            
-            # Оновлюємо статистику
-            if execution_result.get("success"):
-                self.stats["successful_requests"] += 1
-                if execution_result.get("execution_type") == "session_resume":
-                    self.stats["session_continuations"] += 1
-                else:
-                    self.stats["task_executions"] += 1
-            else:
+                
                 self.stats["failed_requests"] += 1
-            
-            # Формуємо фінальну відповідь
-            response_data.update({
-                "response_type": "task_execution",
-                "goose_result": execution_result,
-                "success": execution_result.get("success", False),
-                "response": execution_result.get("response", ""),
-                "processing_time": (datetime.now() - start_time).total_seconds()
-            })
+                
+                response_data.update({
+                    "response_type": "task_execution",
+                    "response": f"⚠️ Виникла помилка при виконанні завдання. Гріша проаналізував ситуацію.",
+                    "success": False,
+                    "error_details": execution_result.get("error", ""),
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                    "atlas_core": True
+                })
             
             return response_data
             
@@ -229,7 +237,8 @@ class CoreOrchestrator:
                 "response_type": "error",
                 "success": False,
                 "error": str(e),
-                "processing_time": (datetime.now() - start_time).total_seconds()
+                "processing_time": (datetime.now() - start_time).total_seconds(),
+                "atlas_core": True
             }
             
             if self.config["enable_logging"]:

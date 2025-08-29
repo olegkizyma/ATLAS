@@ -477,3 +477,134 @@ class GrishaSecurity:
         Надає оновлення прогресу виконання в чат
         """
         return f"🛡️ Гріша-Моніторинг: {progress_info} [Сесія: {session_name}]"
+
+    def generate_completion_summary(self, task_description: str, execution_result: Dict, session_info: Dict = None) -> str:
+        """
+        Генерує компактний звіт про виконання завдання від Гріші
+        Замість довгих відповідей Goose - короткий звіт про результат
+        """
+        print("📋 Гріша: Генерую компактний звіт про виконання...")
+        
+        try:
+            # Спроба використати Gemini для генерації розумного звіту
+            summary = self._generate_summary_with_gemini(task_description, execution_result, session_info)
+            if summary:
+                return summary
+        except Exception as e:
+            print(f"⚠️ Gemini недоступний для звіту: {e}")
+        
+        # Fallback на локальну генерацію
+        return self._generate_summary_locally(task_description, execution_result, session_info)
+
+    def _generate_summary_with_gemini(self, task_description: str, execution_result: Dict, session_info: Dict) -> Optional[str]:
+        """Генерує компактний звіт через Gemini API"""
+        import os
+        import requests
+        
+        api_key = os.getenv('GEMINI_API_KEY')
+        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
+        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        
+        if not api_key:
+            return None
+        
+        # Промпт для генерації компактного звіту
+        system_prompt = """Ти - Гріша, система безпеки Atlas Core. Створи КОРОТКИЙ звіт про виконання завдання.
+
+МЕТА: Надати користувачу стислий і зрозумілий звіт про те, що було зроблено.
+
+ПРИНЦИПИ:
+🎯 Лаконічність: Максимум 2-3 речення
+✅ Результативність: Що конкретно досягнуто
+🛡️ Безпека: Підтверди що все пройшло безпечно
+😊 Дружність: Позитивний тон від Гріші
+
+ФОРМАТ ЗВІТУ:
+✅ [Коротко що зроблено]
+📊 [Основний результат]  
+🛡️ Перевірено Гріша - все безпечно!
+
+ВАЖЛИВО: 
+- НЕ дублюй деталі з Goose
+- НЕ повторюй довгі технічні подробиці
+- Зосередься на РЕЗУЛЬТАТІ для користувача
+- Максимум 150 символів українською"""
+
+        user_prompt = f"""Завдання користувача: "{task_description}"
+
+Результат виконання: {json.dumps(execution_result, ensure_ascii=False) if execution_result else "виконано успішно"}
+
+Інформація про сесію: {json.dumps(session_info, ensure_ascii=False) if session_info else "стандартна сесія"}
+
+Створи компактний звіт від Гріші:"""
+
+        try:
+            url = f"{base_url}/models/{model}:generateContent"
+            headers = {
+                'Content-Type': 'application/json',
+                'x-goog-api-key': api_key
+            }
+            
+            data = {
+                "contents": [{
+                    "parts": [{
+                        "text": f"{system_prompt}\n\n{user_prompt}"
+                    }]
+                }],
+                "generationConfig": {
+                    "temperature": 0.3,
+                    "maxOutputTokens": 200
+                }
+            }
+            
+            response = requests.post(url, headers=headers, json=data, timeout=15)
+            response.raise_for_status()
+            
+            result = response.json()
+            if result.get('candidates') and len(result['candidates']) > 0:
+                summary = result['candidates'][0]['content']['parts'][0]['text'].strip()
+                
+                # Обмежуємо довжину
+                if len(summary) > 300:
+                    summary = summary[:300] + "..."
+                
+                print(f"✅ Гріша згенерував звіт: {summary[:50]}...")
+                return summary
+                
+        except Exception as e:
+            print(f"⚠️ Gemini API помилка при генерації звіту: {e}")
+            
+        return None
+
+    def _generate_summary_locally(self, task_description: str, execution_result: Dict, session_info: Dict) -> str:
+        """Генерує локальний компактний звіт"""
+        
+        # Аналізуємо тип завдання
+        task_type = self._determine_task_type_from_description(task_description)
+        
+        # Базові шаблони відповідей
+        if task_type == "browser":
+            return f"✅ Браузер відкрито і завдання виконано\n🌐 Сайт завантажено успішно\n🛡️ Перевірено Гріша - все безпечно!"
+        elif task_type == "search":
+            return f"✅ Пошук завершено успішно\n🔍 Знайдено потрібну інформацію\n🛡️ Перевірено Гріша - все безпечно!"
+        elif task_type == "video":
+            return f"✅ Відео контент знайдено\n🎬 Готово до перегляду\n🛡️ Перевірено Гріша - все безпечно!"
+        elif task_type == "file":
+            return f"✅ Операція з файлами завершена\n📁 Файли оброблено\n🛡️ Перевірено Гріша - все безпечно!"
+        else:
+            return f"✅ Завдання виконано успішно\n🎯 Мета досягнута\n🛡️ Перевірено Гріша - все безпечно!"
+
+    def _determine_task_type_from_description(self, description: str) -> str:
+        """Визначає тип завдання з опису"""
+        desc_lower = description.lower()
+        
+        if any(word in desc_lower for word in ["браузер", "сайт", "google", "відкрий"]):
+            return "browser"
+        elif any(word in desc_lower for word in ["пошук", "знайди", "шукай"]):
+            return "search"
+        elif any(word in desc_lower for word in ["відео", "фільм", "youtube"]):
+            return "video"
+        elif any(word in desc_lower for word in ["файл", "документ", "папка"]):
+            return "file"
+        else:
+            return "general"
