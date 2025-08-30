@@ -12,6 +12,7 @@ import subprocess
 import os
 import re
 import logging
+import requests
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
@@ -29,12 +30,69 @@ class SessionManager:
         self.active_sessions = {}
         self.session_contexts = {}
         
-        # Перевіряємо наявність Goose
-        if not Path(self.goose_binary).exists():
+        # Конфігурація HTTP API
+        self.api_url = os.getenv("GOOSE_API_URL", "http://localhost:3001")
+        self.use_http_api = os.getenv("USE_GOOSE_HTTP_API", "true").lower() == "true"
+        
+        # Перевіряємо наявність Goose (CLI або API)
+        if not self.use_http_api and not Path(self.goose_binary).exists():
             raise FileNotFoundError(f"Goose binary not found at {self.goose_binary}")
+        elif self.use_http_api:
+            logger.info(f"🕸️ SessionManager: Використовуємо HTTP API: {self.api_url}")
+        else:
+            logger.info(f"💻 SessionManager: Використовуємо CLI: {self.goose_binary}")
+
+    def _send_api_request(self, endpoint: str, method: str = "GET", data: dict = None) -> dict:
+        """Відправка запиту до Goose HTTP API"""
+        try:
+            url = f"{self.api_url}{endpoint}"
+            
+            if method == "POST":
+                response = requests.post(url, json=data, timeout=30)
+            elif method == "PUT":
+                response = requests.put(url, json=data, timeout=30)
+            else:
+                response = requests.get(url, timeout=30)
+            
+            if response.status_code == 200:
+                return {"success": True, "data": response.json()}
+            else:
+                return {"success": False, "error": f"HTTP {response.status_code}", "response": response.text}
+                
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": str(e)}
 
     def get_available_sessions(self) -> List[Dict]:
         """Отримує список доступних сесій з Goose"""
+        try:
+            if self.use_http_api:
+                # Використовуємо HTTP API
+                result = self._send_api_request("/sessions", "GET")
+                if result["success"]:
+                    sessions_data = result["data"]
+                    sessions = []
+                    for session in sessions_data.get("sessions", []):
+                        sessions.append({
+                            "name": session.get("name", ""),
+                            "description": session.get("description", "No description"),
+                            "timestamp": session.get("timestamp", ""),
+                            "active": session.get("name", "") in self.active_sessions
+                        })
+                    return sessions
+                else:
+                    logger.warning(f"⚠️ HTTP API недоступний для sessions: {result['error']}")
+                    # Fallback до CLI
+                    return self._get_sessions_cli()
+            else:
+                # Використовуємо CLI
+                return self._get_sessions_cli()
+            
+        except Exception as e:
+            logger.error(f"Error getting sessions: {e}")
+            return []
+
+    def _get_sessions_cli(self) -> List[Dict]:
+        """Отримує список сесій через CLI (fallback метод)"""
         try:
             result = subprocess.run(
                 [self.goose_binary, "session", "list"],
@@ -68,7 +126,7 @@ class SessionManager:
             return sessions
             
         except Exception as e:
-            print(f"Error getting sessions: {e}")
+            logger.error(f"CLI Error getting sessions: {e}")
             return []
 
     def create_session_with_verification(self, session_name: str, initial_message: str, grisha_instance = None) -> Dict:
@@ -105,10 +163,57 @@ class SessionManager:
             }
 
     def _execute_task_attempt(self, session_name: str, task_message: str) -> Dict:
-        """Виконує спробу завдання через Goose"""
+        """Виконує спробу завдання через Goose з підтримкою HTTP API"""
         try:
             cmd = [self.goose_binary, "session", "--name", session_name]
             logger.info(f"🚀 Виконую команду: {' '.join(cmd)}")
+            
+            if self.use_http_api:
+                # Використовуємо HTTP API
+                result = self._send_api_request("/sessions", "POST", {
+                    "name": session_name,
+                    "message": task_message
+                })
+                
+                if result["success"]:
+                    session_data = result["data"]
+                    
+                    # Оновлюємо інформацію про сесію
+                    self.active_sessions[session_name] = {
+                        "created": datetime.now().isoformat(),
+                        "last_used": datetime.now().isoformat(),
+                        "message_count": 1,
+                        "task_description": task_message
+                    }
+                    
+                    return {
+                        "success": True,
+                        "session_name": session_name,
+                        "response": session_data.get("response", ""),
+                        "stderr": session_data.get("stderr", ""),
+                        "return_code": session_data.get("return_code", 0)
+                    }
+                else:
+                    logger.warning(f"⚠️ HTTP API недоступний для виконання завдання: {result['error']}")
+                    # Fallback до CLI
+                    return self._execute_task_attempt_cli(session_name, task_message)
+            else:
+                # Використовуємо CLI
+                return self._execute_task_attempt_cli(session_name, task_message)
+            
+        except Exception as e:
+            logger.error(f"💥 Помилка виконання завдання: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "session_name": session_name
+            }
+
+    def _execute_task_attempt_cli(self, session_name: str, task_message: str) -> Dict:
+        """Виконує спробу завдання через CLI (fallback метод)"""
+        try:
+            cmd = [self.goose_binary, "session", "--name", session_name]
+            logger.info(f"🚀 Виконую команду CLI: {' '.join(cmd)}")
             
             process = subprocess.Popen(
                 cmd,
@@ -154,7 +259,7 @@ class SessionManager:
             }
             
         except Exception as e:
-            logger.error(f"💥 Помилка виконання завдання: {str(e)}")
+            logger.error(f"💥 Помилка виконання завдання CLI: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
@@ -310,10 +415,51 @@ class SessionManager:
 5. Адаптуйся та експериментуй до успіху"""
 
     def _execute_task_retry(self, session_name: str, retry_message: str) -> Dict:
-        """Виконує повторну спробу завдання в існуючій сесії"""
+        """Виконує повторну спробу завдання в існуючій сесії з підтримкою HTTP API"""
         try:
             logger.info(f"🔄 SessionManager: Повторна спроба для сесії '{session_name}'")
             
+            if self.use_http_api:
+                # Використовуємо HTTP API
+                result = self._send_api_request(f"/sessions/{session_name}/message", "POST", {
+                    "message": retry_message,
+                    "resume": True
+                })
+                
+                if result["success"]:
+                    session_data = result["data"]
+                    
+                    # Оновлюємо статистику сесії
+                    if session_name in self.active_sessions:
+                        self.active_sessions[session_name]["last_used"] = datetime.now().isoformat()
+                        self.active_sessions[session_name]["message_count"] += 1
+                    
+                    return {
+                        "success": True,
+                        "session_name": session_name,
+                        "response": session_data.get("response", ""),
+                        "stderr": session_data.get("stderr", ""),
+                        "return_code": session_data.get("return_code", 0)
+                    }
+                else:
+                    logger.warning(f"⚠️ HTTP API недоступний для повторної спроби: {result['error']}")
+                    # Fallback до CLI
+                    return self._execute_task_retry_cli(session_name, retry_message)
+            else:
+                # Використовуємо CLI
+                return self._execute_task_retry_cli(session_name, retry_message)
+            
+        except Exception as e:
+            logger.error(f"💥 Помилка повторної спроби: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "session_name": session_name
+            }
+
+    def _execute_task_retry_cli(self, session_name: str, retry_message: str) -> Dict:
+        """Виконує повторну спробу завдання через CLI (fallback метод)"""
+        try:
             # Відновлюємо сесію і відправляємо нове завдання
             cmd = [self.goose_binary, "session", "--name", session_name, "--resume"]
             
@@ -348,7 +494,7 @@ class SessionManager:
             }
             
         except Exception as e:
-            logger.error(f"💥 Помилка повторної спроби: {str(e)}")
+            logger.error(f"💥 Помилка повторної спроби CLI: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
@@ -356,12 +502,52 @@ class SessionManager:
             }
 
     def create_session(self, session_name: str, initial_message: str = None) -> Dict:
-        """Створює нову сесію Goose"""
+        """Створює нову сесію Goose з підтримкою HTTP API"""
         try:
             logger.info(f"🆕 SessionManager: Створюю нову сесію '{session_name}'")
             
+            if self.use_http_api:
+                # Використовуємо HTTP API
+                result = self._send_api_request("/sessions", "POST", {
+                    "name": session_name,
+                    "message": initial_message or ""
+                })
+                
+                if result["success"]:
+                    session_data = result["data"]
+                    self.active_sessions[session_name] = {
+                        "created": datetime.now().isoformat(),
+                        "last_used": datetime.now().isoformat(),
+                        "message_count": 1 if initial_message else 0
+                    }
+                    
+                    return {
+                        "success": True,
+                        "session_name": session_name,
+                        "created": True,
+                        "response": session_data.get("response", "")
+                    }
+                else:
+                    logger.warning(f"⚠️ HTTP API недоступний для створення сесії: {result['error']}")
+                    # Fallback до CLI
+                    return self._create_session_cli(session_name, initial_message)
+            else:
+                # Використовуємо CLI
+                return self._create_session_cli(session_name, initial_message)
+                
+        except Exception as e:
+            logger.error(f"� Виняток при створенні сесії: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "session_name": session_name
+            }
+
+    def _create_session_cli(self, session_name: str, initial_message: str = None) -> Dict:
+        """Створює сесію через CLI (fallback метод)"""
+        try:
             if initial_message:
-                logger.info(f"📝 Початкове повідомлення: {initial_message}")
+                logger.info(f"�📝 Початкове повідомлення: {initial_message}")
                 
                 # Створюємо сесію з початковим повідомленням
                 cmd = [self.goose_binary, "session", "--name", session_name]
@@ -428,7 +614,7 @@ class SessionManager:
                 }
                 
         except Exception as e:
-            logger.error(f"💥 Виняток при створенні сесії: {str(e)}")
+            logger.error(f"💥 Виняток при створенні сесії CLI: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
@@ -436,11 +622,52 @@ class SessionManager:
             }
 
     def send_to_session(self, session_name: str, message: str, resume: bool = True) -> Dict:
-        """Відправляє повідомлення в існуючу сесію"""
+        """Відправляє повідомлення в існуючу сесію з підтримкою HTTP API"""
         try:
             logger.info(f"🔗 SessionManager: Відправляю команду до сесії '{session_name}'")
             logger.info(f"📝 Команда: {message}")
             
+            if self.use_http_api:
+                # Використовуємо HTTP API
+                result = self._send_api_request(f"/sessions/{session_name}/message", "POST", {
+                    "message": message,
+                    "resume": resume
+                })
+                
+                if result["success"]:
+                    session_data = result["data"]
+                    
+                    # Оновлюємо статистику сесії
+                    if session_name in self.active_sessions:
+                        self.active_sessions[session_name]["last_used"] = datetime.now().isoformat()
+                        self.active_sessions[session_name]["message_count"] += 1
+                    
+                    return {
+                        "success": True,
+                        "session_name": session_name,
+                        "response": session_data.get("response", ""),
+                        "stderr": session_data.get("stderr", ""),
+                        "return_code": session_data.get("return_code", 0)
+                    }
+                else:
+                    logger.warning(f"⚠️ HTTP API недоступний для відправки повідомлення: {result['error']}")
+                    # Fallback до CLI
+                    return self._send_to_session_cli(session_name, message, resume)
+            else:
+                # Використовуємо CLI
+                return self._send_to_session_cli(session_name, message, resume)
+            
+        except Exception as e:
+            logger.error(f"💥 Виняток при відправці до сесії: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "session_name": session_name
+            }
+
+    def _send_to_session_cli(self, session_name: str, message: str, resume: bool = True) -> Dict:
+        """Відправляє повідомлення в сесію через CLI (fallback метод)"""
+        try:
             if resume:
                 # Відновлюємо сесію і відправляємо повідомлення
                 cmd = [self.goose_binary, "session", "--name", session_name, "--resume"]
@@ -492,6 +719,7 @@ class SessionManager:
                 "session_name": session_name
             }
         except Exception as e:
+            logger.error(f"💥 Виняток при відправці до сесії CLI: {str(e)}")
             return {
                 "success": False,
                 "error": str(e),
@@ -574,9 +802,45 @@ class SessionManager:
             return False
 
     def get_session_status(self, session_name: str) -> Optional[Dict]:
-        """Отримує статус конкретної сесії"""
+        """Отримує статус конкретної сесії з підтримкою HTTP API"""
+        try:
+            if self.use_http_api:
+                # Використовуємо HTTP API
+                result = self._send_api_request(f"/sessions/{session_name}/status", "GET")
+                if result["success"]:
+                    session_data = result["data"]
+                    return {
+                        "name": session_name,
+                        "status": session_data.get("status", "unknown"),
+                        "created": session_data.get("created"),
+                        "last_used": session_data.get("last_used"),
+                        "message_count": session_data.get("message_count", 0),
+                        "active": session_data.get("active", False)
+                    }
+                else:
+                    logger.warning(f"⚠️ HTTP API недоступний для статусу сесії: {result['error']}")
+                    # Fallback до локального статусу
+                    return self._get_session_status_local(session_name)
+            else:
+                # Використовуємо локальний статус
+                return self._get_session_status_local(session_name)
+            
+        except Exception as e:
+            logger.error(f"Error getting session status: {e}")
+            return None
+
+    def _get_session_status_local(self, session_name: str) -> Optional[Dict]:
+        """Отримує локальний статус сесії (fallback метод)"""
         if session_name in self.active_sessions:
-            return self.active_sessions[session_name]
+            session_data = self.active_sessions[session_name]
+            return {
+                "name": session_name,
+                "status": "active",
+                "created": session_data.get("created"),
+                "last_used": session_data.get("last_used"),
+                "message_count": session_data.get("message_count", 0),
+                "active": True
+            }
         return None
 
     def cleanup_old_sessions(self, max_age_hours: int = 24):
@@ -587,7 +851,45 @@ class SessionManager:
         return {"removed_sessions": [], "remaining": len(self.active_sessions), "auto_cleanup_disabled": True}
 
     def close_session_by_user(self, session_name: str, user_context: Dict = None) -> Dict:
-        """Закриває конкретну сесію за командою користувача"""
+        """Закриває конкретну сесію за командою користувача з підтримкою HTTP API"""
+        try:
+            if self.use_http_api:
+                # Використовуємо HTTP API
+                result = self._send_api_request(f"/sessions/{session_name}", "DELETE")
+                if result["success"]:
+                    # Також видаляємо з локального контексту
+                    if session_name in self.active_sessions:
+                        session_data = self.active_sessions[session_name]
+                        del self.active_sessions[session_name]
+                    
+                    if session_name in self.session_contexts:
+                        del self.session_contexts[session_name]
+                    
+                    logger.info(f"✅ Користувач закрив сесію '{session_name}' через API")
+                    return {
+                        "success": True,
+                        "message": f"Сесія '{session_name}' успішно закрита",
+                        "closed_session": session_data if 'session_data' in locals() else {},
+                        "remaining_sessions": len(self.active_sessions)
+                    }
+                else:
+                    logger.warning(f"⚠️ HTTP API недоступний для закриття сесії: {result['error']}")
+                    # Fallback до локального закриття
+                    return self._close_session_local(session_name, user_context)
+            else:
+                # Використовуємо локальне закриття
+                return self._close_session_local(session_name, user_context)
+            
+        except Exception as e:
+            logger.error(f"💥 Помилка при закритті сесії: {str(e)}")
+            return {
+                "success": False,
+                "error": str(e),
+                "session_name": session_name
+            }
+
+    def _close_session_local(self, session_name: str, user_context: Dict = None) -> Dict:
+        """Закриває сесію локально (fallback метод)"""
         if session_name in self.active_sessions:
             session_data = self.active_sessions[session_name]
             del self.active_sessions[session_name]
@@ -596,7 +898,7 @@ class SessionManager:
             if session_name in self.session_contexts:
                 del self.session_contexts[session_name]
             
-            logger.info(f"✅ Користувач закрив сесію '{session_name}'")
+            logger.info(f"✅ Користувач закрив сесію '{session_name}' локально")
             return {
                 "success": True,
                 "message": f"Сесія '{session_name}' успішно закрита",

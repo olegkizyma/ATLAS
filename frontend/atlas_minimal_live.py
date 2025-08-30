@@ -11,6 +11,7 @@ import time
 import subprocess
 import re
 import asyncio
+import aiohttp
 import os
 from datetime import datetime
 from pathlib import Path
@@ -350,11 +351,72 @@ class LiveLogStreamer:
             return {"info": "Disk info unavailable"}
 
 class AtlasMinimalHandler(SimpleHTTPRequestHandler):
-    """Спрощений HTTP обробник для Atlas"""
+    """Обробник запитів для Atlas Minimal Interface"""
     
     def __init__(self, *args, **kwargs):
+        # Конфігурація Goose API
+        self.goose_api_url = os.getenv("GOOSE_API_URL", "http://localhost:3001")
+        self.session_endpoint = f"{self.goose_api_url}/session"
+        self.reply_endpoint = f"{self.goose_api_url}/reply"
+        
+        # Конфігурація Atlas Core
         self.atlas_core_url = "http://localhost:3000"
+        
         super().__init__(*args, **kwargs)
+    
+    def send_goose_request(self, endpoint: str, method: str = "GET", data: dict = None) -> dict:
+        """Відправка запиту до Goose API"""
+        try:
+            url = f"{self.goose_api_url}{endpoint}"
+            
+            if method == "POST":
+                response = requests.post(url, json=data, timeout=30)
+            elif method == "PUT":
+                response = requests.put(url, json=data, timeout=30)
+            else:
+                response = requests.get(url, timeout=30)
+            
+            if response.status_code == 200:
+                return {"success": True, "data": response.json()}
+            else:
+                return {"success": False, "error": f"HTTP {response.status_code}", "response": response.text}
+                
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": str(e)}
+    
+    async def send_goose_request_async(self, endpoint: str, method: str = "GET", data: dict = None) -> dict:
+        """Асинхронна відправка запиту до Goose API"""
+        try:
+            url = f"{self.goose_api_url}{endpoint}"
+            
+            async with aiohttp.ClientSession() as session:
+                if method == "POST":
+                    async with session.post(url, json=data) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return {"success": True, "data": data}
+                        else:
+                            text = await response.text()
+                            return {"success": False, "error": f"HTTP {response.status}", "response": text}
+                elif method == "PUT":
+                    async with session.put(url, json=data) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return {"success": True, "data": data}
+                        else:
+                            text = await response.text()
+                            return {"success": False, "error": f"HTTP {response.status}", "response": text}
+                else:
+                    async with session.get(url) as response:
+                        if response.status == 200:
+                            data = await response.json()
+                            return {"success": True, "data": data}
+                        else:
+                            text = await response.text()
+                            return {"success": False, "error": f"HTTP {response.status}", "response": text}
+                            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
 
     @classmethod
     def set_live_streamer(cls, streamer):
@@ -984,13 +1046,97 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             }, 500)
 
     def handle_chat_legacy(self, user_message: str, data: dict, user_context: dict, atlas_error: str = None):
-        """Legacy обробка чату через прямий виклик Goose CLI"""
+        """Legacy обробка чату через HTTP API Goose замість CLI"""
         try:
-            logger.info(f"🔄 Legacy: Обробляю через Goose CLI: {user_message[:100]}...")
+            logger.info(f"🔄 Legacy: Обробляю через Goose HTTP API: {user_message[:100]}...")
             
             # Визначаємо тип сесії (legacy логіка)
             session_type = self.determine_session_type(user_message, data.get("session_type"))
             session_name = self.get_session_name(user_message, session_type)
+            
+            # Використання HTTP API замість CLI
+            try:
+                if session_type == "new_session":
+                    # Створюємо нову сесію через API
+                    session_result = self.send_goose_request("/session", "POST", {"name": session_name})
+                    if not session_result["success"]:
+                        raise Exception(f"Не вдалося створити сесію: {session_result['error']}")
+                    
+                    # Надсилаємо повідомлення
+                    reply_result = self.send_goose_request("/reply", "POST", {
+                        "message": user_message,
+                        "session_id": session_name
+                    })
+                    
+                elif session_type == "continue_session":
+                    # Відновлюємо існуючу сесію через API
+                    session_result = self.send_goose_request("/session", "PUT", {"name": session_name})
+                    if not session_result["success"]:
+                        raise Exception(f"Не вдалося відновити сесію: {session_result['error']}")
+                    
+                    # Надсилаємо повідомлення
+                    reply_result = self.send_goose_request("/reply", "POST", {
+                        "message": user_message,
+                        "session_id": session_name
+                    })
+                    
+                else:
+                    # Простий запит без сесії
+                    reply_result = self.send_goose_request("/reply", "POST", {
+                        "message": user_message
+                    })
+                
+                # Обробка результату
+                if reply_result["success"]:
+                    response_data = reply_result["data"]
+                    answer = response_data.get("response", response_data.get("message", "Відповідь отримана"))
+                    
+                    result_data = {
+                        "response": answer,
+                        "session_name": session_name,
+                        "session_type": session_type,
+                        "atlas_core": False,
+                        "legacy_mode": True,
+                        "api_mode": True
+                    }
+                    
+                    # Якщо була помилка Atlas Core, додаємо інформацію
+                    if atlas_error:
+                        result_data["atlas_fallback"] = True
+                        result_data["atlas_error"] = atlas_error
+                    
+                    logger.info(f"✅ Legacy API: Успішно виконано ({session_type})")
+                    self.send_json_response(result_data)
+                    
+                else:
+                    error_msg = reply_result.get("error", "Goose API не повернув відповідь")
+                    logger.error(f"❌ Legacy API: {error_msg}")
+                    self.send_json_response({
+                        "response": f"Помилка Goose API: {error_msg}",
+                        "error": error_msg,
+                        "atlas_core": False,
+                        "legacy_mode": True,
+                        "api_mode": True
+                    }, 500)
+                    
+            except Exception as api_error:
+                logger.warning(f"⚠️ HTTP API недоступний, fallback до CLI: {api_error}")
+                # Fallback до старого CLI методу
+                self._handle_chat_cli_fallback(user_message, data, session_type, session_name, atlas_error)
+                
+        except Exception as e:
+            logger.error(f"💥 Legacy Exception: {e}")
+            self.send_json_response({
+                "response": f"Помилка legacy режиму: {str(e)}",
+                "error": str(e),
+                "atlas_core": False,
+                "legacy_mode": True
+            }, 500)
+
+    def _handle_chat_cli_fallback(self, user_message: str, data: dict, session_type: str, session_name: str, atlas_error: str = None):
+        """Fallback до CLI методу, якщо HTTP API недоступний"""
+        try:
+            logger.info(f"🔄 CLI Fallback: Обробляю через Goose CLI: {user_message[:100]}...")
             
             # Виклик Goose CLI з правильною командою
             goose_path = "/Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose"
@@ -1045,7 +1191,8 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     "session_name": session_name,
                     "session_type": session_type,
                     "atlas_core": False,
-                    "legacy_mode": True
+                    "legacy_mode": True,
+                    "cli_fallback": True
                 }
                 
                 # Якщо була помилка Atlas Core, додаємо інформацію
@@ -1053,34 +1200,37 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     response_data["atlas_fallback"] = True
                     response_data["atlas_error"] = atlas_error
                 
-                logger.info(f"✅ Legacy: Успішно виконано ({session_type})")
+                logger.info(f"✅ CLI Fallback: Успішно виконано ({session_type})")
                 self.send_json_response(response_data)
             else:
                 error_msg = stderr or "Goose не повернув відповідь"
-                logger.error(f"❌ Legacy: {error_msg}")
+                logger.error(f"❌ CLI Fallback: {error_msg}")
                 self.send_json_response({
-                    "response": f"Помилка Goose: {error_msg}",
+                    "response": f"Помилка Goose CLI: {error_msg}",
                     "error": error_msg,
                     "atlas_core": False,
-                    "legacy_mode": True
+                    "legacy_mode": True,
+                    "cli_fallback": True
                 }, 500)
                 
         except subprocess.TimeoutExpired:
-            logger.error("⏱️ Legacy: Timeout при виконанні команди")
+            logger.error("⏱️ CLI Fallback: Timeout при виконанні команди")
             self.send_json_response({
                 "response": "Команда виконувалася занадто довго (>5хв)",
                 "error": "Timeout",
                 "atlas_core": False,
-                "legacy_mode": True
+                "legacy_mode": True,
+                "cli_fallback": True
             }, 408)
             
         except Exception as e:
-            logger.error(f"💥 Legacy Exception: {e}")
+            logger.error(f"💥 CLI Fallback Exception: {e}")
             self.send_json_response({
-                "response": f"Помилка legacy режиму: {str(e)}",
+                "response": f"Помилка CLI fallback: {str(e)}",
                 "error": str(e),
                 "atlas_core": False,
-                "legacy_mode": True
+                "legacy_mode": True,
+                "cli_fallback": True
             }, 500)
 
     def _get_goose_env(self):

@@ -2,6 +2,9 @@
 # HTTP requests library
 requests>=2.32.0
 
+# Asynchronous HTTP client for API calls
+aiohttp>=3.9.0
+
 # Optional: For enhanced web development (if needed later)
 # fastapi>=0.100.0
 # uvicorn>=0.23.0
