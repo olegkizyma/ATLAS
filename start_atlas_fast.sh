@@ -57,10 +57,12 @@ fi
 echo "✅ AI Agent готовий до запуску"
 
 # Запуск goosed в фоне
-echo "🤖 Запуск AI Agent сервера (port 3000)..."
-echo "📋 Логи AI Agent будуть виводитись нижче..."
+echo "🤖 Запуск Goose web сервера з локальним конфігом (port 3000)..."
+echo "📋 Логи будуть виводитись нижче..."
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-"./${GOOSED_PATH}" agent &
+# Використовуємо локальний config.yaml замість глобального  
+export XDG_CONFIG_HOME="/Users/dev/Documents/GitHub/ATLAS/goose"
+cd /Users/dev/Documents/GitHub/ATLAS/goose && ./target/release/goose web --port 3000 --open &
 GOOSE_PID=$!
 echo "   PID: $GOOSE_PID"
 

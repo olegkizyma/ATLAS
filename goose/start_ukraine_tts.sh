@@ -9,5 +9,6 @@ source bin/activate-hermit
 # Встановлюємо PYTHONPATH для PyO3
 export PYTHONPATH="/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian/tts_venv/lib/python3.11/site-packages:/Users/dev/Documents/GitHub/ATLAS/mcp_tts_ukrainian:/Users/dev/Documents/GitHub/ATLAS/goose/crates/mcp-tts-ukrainian"
 
-# Запускаємо TTS сервер
+# Запускаємо TTS сервер з локальним конфігом
+export XDG_CONFIG_HOME="/Users/dev/Documents/GitHub/ATLAS/goose"
 ./target/release/goose mcp ukraine-tts

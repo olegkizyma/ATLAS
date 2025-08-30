@@ -355,7 +355,8 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     
     def __init__(self, *args, **kwargs):
         # Конфігурація Goose API
-        self.goose_api_url = os.getenv("GOOSE_API_URL", "http://localhost:3001")
+        self.goose_api_url = os.getenv("GOOSE_API_URL", "http://localhost:3000")
+        self.goose_secret_key = os.getenv("GOOSE_SECRET_KEY", "test")  # Секретний ключ для автентифікації
         self.session_endpoint = f"{self.goose_api_url}/session"
         self.reply_endpoint = f"{self.goose_api_url}/reply"
         
@@ -368,13 +369,14 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         """Відправка запиту до Goose API"""
         try:
             url = f"{self.goose_api_url}{endpoint}"
+            headers = {"X-Secret-Key": self.goose_secret_key}
             
             if method == "POST":
-                response = requests.post(url, json=data, timeout=30)
+                response = requests.post(url, json=data, headers=headers, timeout=30)
             elif method == "PUT":
-                response = requests.put(url, json=data, timeout=30)
+                response = requests.put(url, json=data, headers=headers, timeout=30)
             else:
-                response = requests.get(url, timeout=30)
+                response = requests.get(url, headers=headers, timeout=30)
             
             if response.status_code == 200:
                 return {"success": True, "data": response.json()}
@@ -388,8 +390,9 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         """Асинхронна відправка запиту до Goose API"""
         try:
             url = f"{self.goose_api_url}{endpoint}"
+            headers = {"X-Secret-Key": self.goose_secret_key}
             
-            async with aiohttp.ClientSession() as session:
+            async with aiohttp.ClientSession(headers=headers) as session:
                 if method == "POST":
                     async with session.post(url, json=data) as response:
                         if response.status == 200:
@@ -457,13 +460,6 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.serve_goose_sessions()
         else:
             super().do_GET()
-
-    def do_POST(self):
-        """Обробка POST запитів"""
-        if self.path == "/api/chat":
-            self.handle_chat()
-        else:
-            self.send_error(404, "Not Found")
 
     def do_POST(self):
         """Обробка POST запитів"""
@@ -1057,32 +1053,21 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             # Використання HTTP API замість CLI
             try:
                 if session_type == "new_session":
-                    # Створюємо нову сесію через API
-                    session_result = self.send_goose_request("/session", "POST", {"name": session_name})
-                    if not session_result["success"]:
-                        raise Exception(f"Не вдалося створити сесію: {session_result['error']}")
-                    
-                    # Надсилаємо повідомлення
-                    reply_result = self.send_goose_request("/reply", "POST", {
-                        "message": user_message,
-                        "session_id": session_name
+                    # Створюємо нову сесію та одразу відправляємо повідомлення
+                    reply_result = self.send_goose_request("/sessions", "POST", {
+                        "name": session_name,
+                        "message": user_message
                     })
-                    
                 elif session_type == "continue_session":
-                    # Відновлюємо існуючу сесію через API
-                    session_result = self.send_goose_request("/session", "PUT", {"name": session_name})
-                    if not session_result["success"]:
-                        raise Exception(f"Не вдалося відновити сесію: {session_result['error']}")
-                    
-                    # Надсилаємо повідомлення
-                    reply_result = self.send_goose_request("/reply", "POST", {
+                    # Надсилаємо повідомлення у вже існуючу сесію
+                    reply_result = self.send_goose_request(f"/sessions/{session_name}/message", "POST", {
                         "message": user_message,
-                        "session_id": session_name
+                        "resume": True
                     })
-                    
                 else:
-                    # Простий запит без сесії
-                    reply_result = self.send_goose_request("/reply", "POST", {
+                    # Якщо тип не визначений — поводимось як для нової сесії
+                    reply_result = self.send_goose_request("/sessions", "POST", {
+                        "name": session_name,
                         "message": user_message
                     })
                 
@@ -1383,14 +1368,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             logger.error(f"TTS error: {e}")
             self.send_json_response({"error": str(e)}, 500)
 
-    def send_json_response(self, data, status_code=200):
-        """Відправка JSON відповіді"""
-        response = json.dumps(data).encode('utf-8')
-        self.send_response(status_code)
-        self.send_header('Content-type', 'application/json')
-        self.send_header('Content-Length', str(len(response)))
-        self.end_headers()
-        self.wfile.write(response)
+    
 
     def send_to_atlas_core(self, message):
         """Відправлення повідомлення до Atlas Core"""
@@ -1411,7 +1389,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         """TTS запит безпосередньо до MCP серверу"""
         try:
             response = requests.post(
-                "http://localhost:3001/tts",
+                "http://localhost:3000/tts",
                 json={"text": text, "language": "uk"},
                 timeout=10
             )

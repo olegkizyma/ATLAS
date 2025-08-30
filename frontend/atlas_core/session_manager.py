@@ -31,7 +31,8 @@ class SessionManager:
         self.session_contexts = {}
         
         # Конфігурація HTTP API
-        self.api_url = os.getenv("GOOSE_API_URL", "http://localhost:3001")
+        self.api_url = os.getenv("GOOSE_API_URL", "http://localhost:3000")
+        self.secret_key = os.getenv("GOOSE_SECRET_KEY", "test")
         self.use_http_api = os.getenv("USE_GOOSE_HTTP_API", "true").lower() == "true"
         
         # Перевіряємо наявність Goose (CLI або API)
@@ -46,13 +47,14 @@ class SessionManager:
         """Відправка запиту до Goose HTTP API"""
         try:
             url = f"{self.api_url}{endpoint}"
+            headers = {"X-Secret-Key": self.secret_key}
             
             if method == "POST":
-                response = requests.post(url, json=data, timeout=30)
+                response = requests.post(url, json=data, headers=headers, timeout=30)
             elif method == "PUT":
-                response = requests.put(url, json=data, timeout=30)
+                response = requests.put(url, json=data, headers=headers, timeout=30)
             else:
-                response = requests.get(url, timeout=30)
+                response = requests.get(url, headers=headers, timeout=30)
             
             if response.status_code == 200:
                 return {"success": True, "data": response.json()}
