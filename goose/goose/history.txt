@@ -16,3 +16,11 @@
 7. Результат: 666.
 8. Адаптуй інструкцію під конкретну операційну систему.
 Confirm if application Calculator is running and displays the result "666".
+1. Мета: Виконати просте тестове завдання.
+2. Кроки:
+    *   Ініціювати тестовий процес.
+    *   Перевірити базову функціональність.
+    *   Записати результат тесту.
+3. Результат: Підтвердження працездатності системи.
+4. Адаптація: Змінюйте кроки залежно від типу тесту.
+Confirm if application "test process" is running and verify if file "test_result.txt" exists and contains "system operational".

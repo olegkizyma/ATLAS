@@ -458,6 +458,12 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.serve_atlas_sessions()
         elif self.path == "/api/goose/sessions":
             self.serve_goose_sessions()
+        elif self.path == "/api/atlas/corrections":
+            self.serve_correction_statistics()
+        elif self.path.startswith("/api/atlas/corrections/"):
+            # Отримання історії конкретної сесії: /api/atlas/corrections/session_name
+            session_name = self.path.replace("/api/atlas/corrections/", "")
+            self.serve_session_corrections(session_name)
         else:
             super().do_GET()
 
@@ -918,6 +924,106 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             error_response = {
                 "sessions": [],
                 "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+            response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+    def serve_correction_statistics(self):
+        """
+        🆕 НОВИЙ API ENDPOINT: Статистика автоматичних виправлень Atlas
+        GET /api/atlas/corrections - загальна статистика всіх виправлень
+        """
+        try:
+            if hasattr(self.server, 'session_manager'):
+                stats = self.server.session_manager.get_all_correction_statistics()
+                
+                response_data = {
+                    "correction_statistics": stats,
+                    "feature_description": "Atlas automatically creates detailed correction tasks when Grisha identifies incomplete work",
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                response = json.dumps(response_data, ensure_ascii=False, indent=2).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+            else:
+                error_response = {
+                    "error": "Session manager not available",
+                    "timestamp": datetime.now().isoformat()
+                }
+                response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+                self.send_response(503)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+                
+        except Exception as e:
+            logger.error(f"Correction statistics error: {e}")
+            error_response = {
+                "error": str(e),
+                "timestamp": datetime.now().isoformat()
+            }
+            response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+            self.send_response(500)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+
+    def serve_session_corrections(self, session_name: str):
+        """
+        🆕 НОВИЙ API ENDPOINT: Історія виправлень конкретної сесії
+        GET /api/atlas/corrections/{session_name} - детальна історія виправлень для сесії
+        """
+        try:
+            if hasattr(self.server, 'session_manager'):
+                history = self.server.session_manager.get_session_correction_history(session_name)
+                
+                response_data = {
+                    "correction_history": history,
+                    "feature_description": f"Detailed correction history for session '{session_name}'",
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                response = json.dumps(response_data, ensure_ascii=False, indent=2).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+            else:
+                error_response = {
+                    "error": "Session manager not available",
+                    "session_name": session_name,
+                    "timestamp": datetime.now().isoformat()
+                }
+                response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+                self.send_response(503)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+                
+        except Exception as e:
+            logger.error(f"Session corrections error for '{session_name}': {e}")
+            error_response = {
+                "error": str(e),
+                "session_name": session_name,
                 "timestamp": datetime.now().isoformat()
             }
             response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
