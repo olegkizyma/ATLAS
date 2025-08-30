@@ -324,13 +324,26 @@ class SessionManager:
                 else:
                     logger.warning(f"❌ Гріша визначив що завдання не виконано: {verification_result.get('verification_details', '')}")
                     
+                    # 🆕 НОВА ФУНКЦІОНАЛЬНІСТЬ: Atlas автоматично створює детальне завдання на основі аналізу Гріші
+                    detailed_task = self._create_detailed_correction_task(original_task, verification_result, attempt)
+                    logger.info(f"📋 Atlas створив детальне завдання для виправлення: {detailed_task[:200]}...")
+                    
+                    # Зберігаємо детальне завдання в контекст сесії
+                    if session_name not in self.session_contexts:
+                        self.session_contexts[session_name] = {}
+                    self.session_contexts[session_name][f"correction_attempt_{attempt}"] = {
+                        "detailed_task": detailed_task,
+                        "grisha_feedback": verification_result.get("verification_details", ""),
+                        "timestamp": datetime.now().isoformat()
+                    }
+                    
                     next_action = verification_result.get("next_action")
                     
                     if next_action == "retry_task" and attempt < max_attempts:
-                        logger.info(f"🔄 Atlas: Даю повторне завдання для сесії '{session_name}'")
+                        logger.info(f"🔄 Atlas: Даю детальне завдання для сесії '{session_name}'")
                         
-                        # Формуємо нове завдання на основі аналізу
-                        retry_message = self._generate_retry_message(original_task, verification_result, attempt)
+                        # Використовуємо детальне завдання замість загального retry
+                        retry_message = detailed_task
                         
                         # Виконуємо повторну спробу
                         retry_result = self._execute_task_retry(session_name, retry_message)
@@ -346,8 +359,8 @@ class SessionManager:
                     elif next_action == "modify_approach" and attempt < max_attempts:
                         logger.info(f"🔧 Atlas: Модифікую підхід для сесії '{session_name}'")
                         
-                        # Генеруємо модифіковане завдання
-                        modified_message = self._generate_modified_approach(original_task, verification_result, attempt)
+                        # Використовуємо детальне завдання з модифікованим підходом
+                        modified_message = detailed_task
                         
                         # Виконуємо з новим підходом
                         modified_result = self._execute_task_retry(session_name, modified_message)
@@ -415,6 +428,317 @@ class SessionManager:
 3. Застосуй креативний або нестандартний метод
 4. Фокусуйся на ДОСЯГНЕННІ результату, не на методі
 5. Адаптуйся та експериментуй до успіху"""
+
+    def _create_detailed_correction_task(self, original_task: str, verification_result: Dict, attempt: int) -> str:
+        """
+        🆕 НОВА ФУНКЦІЯ: Створює детальне завдання на основі аналізу Гріші
+        
+        Коли Гриша виявляє, що завдання не виконано, Atlas автоматично створює
+        детальне завдання з конкретними кроками для виправлення проблеми.
+        """
+        verification_details = verification_result.get("verification_details", "")
+        next_action = verification_result.get("next_action_needed", "retry_task")
+        
+        # Аналізуємо проблему з деталей Гріші
+        problem_analysis = self._analyze_grisha_feedback(verification_details)
+        
+        # Створюємо детальний план виправлення
+        correction_steps = self._generate_correction_steps(original_task, problem_analysis, attempt)
+        
+        detailed_task = f"""🔧 ДЕТАЛЬНЕ ЗАВДАННЯ ДЛЯ ВИПРАВЛЕННЯ (Спроба #{attempt + 1})
+
+📋 ОРИГІНАЛЬНЕ ЗАВДАННЯ: {original_task}
+
+❌ ПРОБЛЕМА ВИЯВЛЕНА ГРИШЕЮ:
+{verification_details}
+
+🔍 АНАЛІЗ ПРОБЛЕМИ:
+{problem_analysis}
+
+📝 ДЕТАЛЬНИЙ ПЛАН ВИПРАВЛЕННЯ:
+{correction_steps}
+
+⚠️ КРИТИЧНІ ВИМОГИ:
+1. Обов'язково виконай ВСІ кроки по порядку
+2. Перевір результат кожного кроку перед переходом до наступного
+3. Якщо крок не спрацював - спробуй альтернативний метод
+4. НЕ завершуй роботу поки не досягнеш повного результату
+5. У разі помилки - докладно опиши що сталося і спробуй інший підхід
+
+🎯 ОЧІКУВАНИЙ РЕЗУЛЬТАТ: {self._define_expected_result(original_task)}
+
+🔄 Почни виконання ЗАРАЗ і звітуй про кожен крок!"""
+
+        steps_count = len(correction_steps.split('\n'))
+        logger.info(f"📋 Atlas створив детальне завдання з {steps_count} кроків")
+        return detailed_task
+
+    def _analyze_grisha_feedback(self, verification_details: str) -> str:
+        """🧠 ІНТЕЛЕКТУАЛЬНИЙ аналіз фідбеку від Гріші"""
+        analysis = []
+        
+        # Використовуємо AI для аналізу замість хардкоду
+        try:
+            # Інтелектуальний аналіз через Gemini/GPT
+            ai_analysis = self._ai_analyze_failure(verification_details)
+            if ai_analysis:
+                return ai_analysis
+        except Exception as e:
+            logger.warning(f"⚠️ AI аналіз недоступний: {e}")
+        
+        # Fallback: базовий семантичний аналіз
+        return self._semantic_failure_analysis(verification_details)
+
+    def _ai_analyze_failure(self, verification_details: str) -> str:
+        """🤖 AI-аналіз причин невдачі через LLM"""
+        try:
+            # Спроба використати Gemini через існуючу інфраструктуру
+            if hasattr(self, '_call_gemini_analysis'):
+                prompt = f"""Проаналізуй чому завдання не було виконано успішно:
+
+ДЕТАЛІ ПЕРЕВІРКИ: {verification_details}
+
+Надай конкретний аналіз проблеми у форматі:
+• Основна причина: ...
+• Технічні деталі: ...
+• Рекомендації: ..."""
+                
+                analysis = self._call_gemini_analysis(prompt)
+                if analysis:
+                    return analysis
+                    
+            # Поки що повертаємо None для fallback
+            return None
+            
+        except Exception as e:
+            logger.warning(f"⚠️ AI аналіз недоступний: {e}")
+            return None
+
+    def _ai_generate_solution_steps(self, original_task: str, problem_analysis: str, attempt: int) -> str:
+        """🤖 AI генерація кроків рішення через LLM"""
+        try:
+            if hasattr(self, '_call_gemini_solution'):
+                prompt = f"""Створи детальні кроки для виправлення завдання:
+
+ОРИГІНАЛЬНЕ ЗАВДАННЯ: {original_task}
+АНАЛІЗ ПРОБЛЕМИ: {problem_analysis}  
+НОМЕР СПРОБИ: {attempt + 1}
+
+Згенеруй 4-6 конкретних кроків у форматі:
+КРОК 1: [назва]
+   - [деталь 1]
+   - [деталь 2]
+КРОК 2: [назва]
+   - [деталь 1]
+   - [деталь 2]
+..."""
+                
+                steps = self._call_gemini_solution(prompt)
+                if steps:
+                    return steps
+                    
+            return None
+            
+        except Exception as e:
+            logger.warning(f"⚠️ AI генерація кроків недоступна: {e}")
+            return None
+
+    def _ai_define_expected_outcome(self, original_task: str) -> str:
+        """🤖 AI визначення очікуваного результату через LLM"""
+        try:
+            if hasattr(self, '_call_gemini_outcome'):
+                prompt = f"""Визначи точний очікуваний результат для завдання:
+
+ЗАВДАННЯ: {original_task}
+
+Надай короткий опис успішного результату у форматі:
+"[Конкретний результат що має бути досягнутий]"
+
+Приклад: "Програма Calculator запущена і показує результат обчислення 2×333=666" """
+                
+                outcome = self._call_gemini_outcome(prompt)
+                if outcome:
+                    return outcome.strip('"')
+                    
+            return None
+            
+        except Exception as e:
+            logger.warning(f"⚠️ AI визначення результату недоступне: {e}")
+            return None
+
+    def _semantic_failure_analysis(self, verification_details: str) -> str:
+        """🔍 Семантичний аналіз помилок без хардкоду"""
+        text_lower = verification_details.lower()
+        analysis_points = []
+        
+        # Категорії проблем (без прив'язки до конкретних програм)
+        if any(term in text_lower for term in ['failed', 'error', 'помилка', 'не вдалося']):
+            analysis_points.append("• Виявлено технічні помилки під час виконання")
+        
+        if any(term in text_lower for term in ['not running', 'not found', 'не запущено', 'відсутній']):
+            analysis_points.append("• Цільова програма або процес не активні")
+        
+        if any(term in text_lower for term in ['display', 'показ', 'відображ', 'result', 'результат']):
+            analysis_points.append("• Проблема з відображенням або отриманням результату")
+        
+        if any(term in text_lower for term in ['timeout', 'time out', 'час', 'таймаут']):
+            analysis_points.append("• Перевищено час очікування операції")
+        
+        # Якщо нічого не знайдено - загальний аналіз
+        if not analysis_points:
+            analysis_points.append(f"• Загальна проблема: {verification_details[:150]}...")
+        
+        return "\n".join(analysis_points)
+
+    def _generate_correction_steps(self, original_task: str, problem_analysis: str, attempt: int) -> str:
+        """🧠 ІНТЕЛЕКТУАЛЬНА генерація кроків виправлення"""
+        
+        try:
+            # Спробуємо інтелектуальну генерацію через AI
+            ai_steps = self._ai_generate_solution_steps(original_task, problem_analysis, attempt)
+            if ai_steps:
+                return ai_steps
+        except Exception as e:
+            logger.warning(f"⚠️ AI генерація кроків недоступна: {e}")
+        
+        # Fallback: адаптивна генерація на основі аналізу
+        return self._adaptive_solution_generation(original_task, problem_analysis, attempt)
+
+    def _ai_generate_solution_steps(self, original_task: str, problem_analysis: str, attempt: int) -> str:
+        """🤖 AI генерація кроків рішення через LLM"""
+        # TODO: Інтеграція з Gemini/GPT для розумної генерації кроків
+        # Поки що повертаємо None для використання adaptive fallback
+        return None
+
+    def _adaptive_solution_generation(self, original_task: str, problem_analysis: str, attempt: int) -> str:
+        """🔄 Адаптивна генерація рішень на основе аналізу"""
+        
+        # Базова структура кроків
+        steps = []
+        
+        # КРОК 1: Аналіз ситуації (завжди)
+        steps.append(f"КРОК 1: Інтелектуальний аналіз ситуації")
+        steps.append(f"   - Оригінальне завдання: {original_task}")
+        clean_analysis = problem_analysis.replace('• ', '').replace('\n', '; ')
+        steps.append(f"   - Виявлені проблеми: {clean_analysis}")
+        steps.append(f"   - Визначи ТОЧНУ причину невдачі")
+        
+        # КРОК 2: Динамічне планування (на основі аналізу)
+        if "технічні помилки" in problem_analysis.lower():
+            steps.append("КРОК 2: Діагностика технічних проблем")
+            steps.append("   - Перевір доступність необхідних інструментів")
+            steps.append("   - Визначи альтернативні методи виконання")
+        elif "не активні" in problem_analysis.lower():
+            steps.append("КРОК 2: Активація необхідних компонентів")
+            steps.append("   - Визначи що саме потрібно запустити")
+            steps.append("   - Спробуй різні способи активації")
+        else:
+            steps.append("КРОК 2: Адаптивне планування")
+            steps.append("   - Розбий завдання на менші частини")
+            steps.append("   - Визначи найнадійніший підхід")
+        
+        # КРОК 3: Виконання з адаптацією
+        steps.append(f"КРОК 3: Виконання з адаптацією (спроба #{attempt + 1})")
+        steps.append("   - Виконуй кожну частину окремо")
+        steps.append("   - Перевіряй результат після кожного кроку")
+        steps.append("   - Якщо щось не працює - негайно адаптуйся")
+        
+        # КРОК 4: Верифікація та коригування  
+        steps.append("КРОК 4: Постійна верифікація")
+        steps.append("   - Перевіряй чи досягається мета")
+        steps.append("   - Документуй що працює, що ні")
+        steps.append("   - Продовжуй до повного успіху")
+        
+        return "\n".join(steps)
+
+    def _define_expected_result(self, original_task: str) -> str:
+        """🎯 ІНТЕЛЕКТУАЛЬНЕ визначення очікуваного результату"""
+        
+        try:
+            # Спробуємо AI визначення результату
+            ai_result = self._ai_define_expected_outcome(original_task)
+            if ai_result:
+                return ai_result
+        except Exception as e:
+            logger.warning(f"⚠️ AI визначення результату недоступне: {e}")
+        
+        # Fallback: семантичне визначення мети
+        return self._semantic_goal_extraction(original_task)
+
+    def _ai_define_expected_outcome(self, original_task: str) -> str:
+        """🤖 AI визначення очікуваного результату через LLM"""
+        # TODO: Інтеграція з LLM для розумного визначення мети
+        return None
+
+    def _semantic_goal_extraction(self, original_task: str) -> str:
+        """🔍 Семантичне визначення мети завдання"""
+        task_lower = original_task.lower()
+        
+        # Пошук дієслів дії для визначення мети
+        if any(verb in task_lower for verb in ['відкрий', 'запусти', 'open', 'launch', 'start']):
+            # Завдання на запуск
+            program = self._extract_program_name(original_task)
+            return f"Програма {program} успішно запущена і доступна для роботи"
+        
+        elif any(verb in task_lower for verb in ['обчисли', 'посчитай', 'calculate', 'compute']):
+            # Завдання на обчислення  
+            calculation = self._extract_calculation(original_task)
+            return f"Виконано обчислення: {calculation} з коректним результатом"
+        
+        elif any(verb in task_lower for verb in ['створи', 'зроби', 'create', 'make']):
+            # Завдання на створення
+            target = self._extract_target_object(original_task)
+            return f"Успішно створено: {target}"
+        
+        elif any(verb in task_lower for verb in ['знайди', 'шукай', 'find', 'search']):
+            # Завдання на пошук
+            search_target = self._extract_search_target(original_task)
+            return f"Знайдено та надано: {search_target}"
+        
+        else:
+            # Загальна мета
+            return f"Повністю виконано завдання: {original_task.strip()}"
+
+    def _extract_program_name(self, task: str) -> str:
+        """Витягує назву програми з завдання"""
+        # Простий regex для знаходження назв програм
+        import re
+        programs = re.findall(r'\b([A-Z][a-zA-Z]*(?:\s[A-Z][a-zA-Z]*)?)\b', task)
+        if programs:
+            return programs[0] if isinstance(programs[0], str) else programs[0][0]
+        return "цільову програму"
+
+    def _extract_calculation(self, task: str) -> str:
+        """Витягує математичний вираз з завдання"""
+        import re
+        # Шукаємо числа та математичні операції
+        numbers = re.findall(r'\b\d+\b', task)
+        operations = re.findall(r'[+\-*/×÷]', task)
+        
+        if len(numbers) >= 2:
+            return f"{numbers[0]} {operations[0] if operations else '×'} {numbers[1]}"
+        return "обчислення"
+
+    def _extract_target_object(self, task: str) -> str:
+        """Витягує об'єкт для створення"""
+        # Шукаємо іменники після дієслів створення
+        task_words = task.lower().split()
+        create_verbs = ['створи', 'зроби', 'create', 'make']
+        
+        for i, word in enumerate(task_words):
+            if word in create_verbs and i + 1 < len(task_words):
+                return ' '.join(task_words[i+1:i+3])  # наступні 1-2 слова
+        return "цільовий об'єкт"
+
+    def _extract_search_target(self, task: str) -> str:
+        """Витягує об'єкт пошуку"""
+        task_words = task.lower().split()
+        search_verbs = ['знайди', 'шукай', 'find', 'search']
+        
+        for i, word in enumerate(task_words):
+            if word in search_verbs and i + 1 < len(task_words):
+                return ' '.join(task_words[i+1:i+3])  # наступні 1-2 слова
+        return "результат пошуку"
 
     def _execute_task_retry(self, session_name: str, retry_message: str) -> Dict:
         """Виконує повторну спробу завдання в існуючій сесії з підтримкою HTTP API"""
@@ -967,4 +1291,73 @@ class SessionManager:
             "active_session_names": list(self.active_sessions.keys()),
             "goose_path": self.goose_path,
             "goose_available": Path(self.goose_binary).exists()
+        }
+
+    def get_session_correction_history(self, session_name: str) -> Dict:
+        """
+        🆕 НОВА ФУНКЦІЯ: Отримує історію виправлень для сесії
+        Показує всі спроби Atlas виправити завдання на основі фідбеку Гріші
+        """
+        if session_name not in self.session_contexts:
+            return {
+                "session_name": session_name,
+                "correction_history": [],
+                "total_attempts": 0
+            }
+        
+        context = self.session_contexts[session_name]
+        corrections = []
+        
+        for key, data in context.items():
+            if key.startswith("correction_attempt_"):
+                attempt_num = key.replace("correction_attempt_", "")
+                corrections.append({
+                    "attempt": int(attempt_num),
+                    "detailed_task": data.get("detailed_task", ""),
+                    "grisha_feedback": data.get("grisha_feedback", ""),
+                    "timestamp": data.get("timestamp", ""),
+                    "task_length": len(data.get("detailed_task", "")),
+                    "feedback_summary": data.get("grisha_feedback", "")[:100] + "..." if len(data.get("grisha_feedback", "")) > 100 else data.get("grisha_feedback", "")
+                })
+        
+        # Сортуємо за номером спроби
+        corrections.sort(key=lambda x: x["attempt"])
+        
+        return {
+            "session_name": session_name,
+            "correction_history": corrections,
+            "total_attempts": len(corrections),
+            "last_correction": corrections[-1] if corrections else None
+        }
+
+    def get_all_correction_statistics(self) -> Dict:
+        """
+        🆕 НОВА ФУНКЦІЯ: Статистика всіх виправлень Atlas
+        Показує загальну ефективність системи автоматичного виправлення
+        """
+        total_corrections = 0
+        sessions_with_corrections = 0
+        correction_details = {}
+        
+        for session_name, context in self.session_contexts.items():
+            session_corrections = 0
+            for key in context.keys():
+                if key.startswith("correction_attempt_"):
+                    session_corrections += 1
+                    total_corrections += 1
+            
+            if session_corrections > 0:
+                sessions_with_corrections += 1
+                correction_details[session_name] = {
+                    "attempts": session_corrections,
+                    "last_feedback": context.get(f"correction_attempt_{session_corrections}", {}).get("grisha_feedback", "")[:50]
+                }
+        
+        return {
+            "total_correction_attempts": total_corrections,
+            "sessions_with_corrections": sessions_with_corrections,
+            "sessions_without_corrections": len(self.active_sessions) - sessions_with_corrections,
+            "average_corrections_per_session": total_corrections / max(1, sessions_with_corrections),
+            "correction_details": correction_details,
+            "system_effectiveness": "Active" if total_corrections > 0 else "Standby"
         }
