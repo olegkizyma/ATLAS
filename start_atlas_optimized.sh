@@ -73,8 +73,10 @@ if [ ! -f "./target/release/goosed" ]; then
     exit 1
 fi
 
-log "🚀 Запускаю Goose daemon..."
-./target/release/goosed agent &
+log "🚀 Запускаю Goose web сервер з локальним конфігом на порту 3000..."
+# Використовуємо локальний config.yaml замість глобального
+export XDG_CONFIG_HOME="/Users/dev/Documents/GitHub/ATLAS/goose"
+./target/release/goose web --port 3000 --open &
 GOOSE_PID=$!
 log "✅ Goose запущено (PID: $GOOSE_PID)"
 
@@ -116,7 +118,7 @@ echo ""
 echo "🔍 Перевірка статусу системи:"
 echo "────────────────────────────────"
 
-check_process "goosed" "3000"
+check_process "goose" "3000"
 check_process "atlas_minimal_live.py" "8080"
 
 # Перевірка доступності веб-інтерфейсу

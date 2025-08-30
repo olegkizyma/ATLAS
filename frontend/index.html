@@ -677,7 +677,11 @@
 
             async sendMessage() {
                 const message = this.chatInput.value.trim();
-                if (!message) return;
+                // Блокувати надто короткі або порожні повідомлення
+                if (!message || message.length < 2) {
+                    this.logMessage('[CHAT] Введіть повідомлення (мінімум 2 символи)', 'warning');
+                    return;
+                }
 
                 // Очистити таймер одиночного режиму, якщо користувач відправив вручну
                 if (this.singleModeSendTimer) {

@@ -1,0 +1,54 @@
+# Локальна конфігурація Goose для проекту ATLAS
+# Замість глобальної ~/.config/goose/config.yaml
+
+[providers.ollama]
+name = "ollama"
+model = "llama3.2:3b"
+base_url = "http://localhost:11434"
+api_key = ""
+stream = true
+
+[scheduler]
+type = "temporal"
+
+[mode]
+auto = true
+
+[extensions.memory]
+enabled = true
+type = "builtin"
+name = "memory"
+display_name = "Memory"
+timeout = 300
+bundled = true
+
+[extensions.ukrainiannativetts]
+enabled = true
+type = "stdio"
+name = "ukrainiannativetts"
+cmd = "/Users/dev/Documents/GitHub/ATLAS/goose/ukrainian-tts"
+args = []
+timeout = 300
+description = "Native Ukrainian Text-to-Speech with embedded environment setup"
+
+[extensions.vscode]
+enabled = true
+type = "stdio"
+name = "vscode"
+cmd = "/Users/dev/Documents/GitHub/ATLAS/goose/bin/npx"
+timeout = 300
+
+# Локальні налаштування для ATLAS
+[logging]
+level = "info"
+file = "logs/server.log"
+
+[server]
+host = "127.0.0.1"
+port = 3001
+secret_key = "test"
+
+[session]
+auto_cleanup = true
+max_sessions = 10
+default_timeout = 300
