@@ -211,6 +211,20 @@
             margin-top: 2px;
         }
 
+        /* Badges */
+        .badge {
+            display: inline-block;
+            margin-left: 6px;
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            border: 1px solid rgba(0, 255, 65, 0.3);
+        }
+        .badge.queued {
+            color: #ffff41;
+            border-color: rgba(255, 255, 65, 0.5);
+        }
+
         /* Chat Input Area */
         .chat-input-area {
             display: flex;
@@ -439,6 +453,9 @@
                 this.voiceMode = 'off'; // 'off', 'single', 'continuous'
                 this.recognition = null;
                 this.isListening = false;
+                // Керування порядком повідомлень/стрімів
+                this.isStreaming = false;      // активний стрім відповіді
+                this.messageQueue = [];        // черга повідомлень користувача
                 this.clickCount = 0;
                 this.clickTimer = null;
                 this.singleModeSendTimer = null; // таймер очікування 3s у single режимі
@@ -700,9 +717,24 @@
                     this.singleModeSendTimer = null;
                 }
 
-                this.addMessage(message, 'user');
+                const userEl = this.addMessage(message, 'user');
                 this.chatInput.value = '';
                 this.autoResizeTextarea();
+
+                // Якщо вже йде стрім попереднього запиту – ставимо у чергу
+                if (this.isStreaming) {
+                    // Додаємо бейдж "у черзі"
+                    const timeDiv = userEl.querySelector('.message-time');
+                    if (timeDiv) {
+                        const badge = document.createElement('span');
+                        badge.className = 'badge queued';
+                        badge.textContent = 'у черзі';
+                        timeDiv.appendChild(badge);
+                    }
+                    this.messageQueue.push({ text: message, el: userEl });
+                    this.logMessage(`[QUEUE] Додано у чергу (len=${this.messageQueue.length})`);
+                    return;
+                }
 
                 // Спочатку намагаємось стрімінгом
                 try {
@@ -782,7 +814,7 @@
             }
 
             // Новий метод: потоковий стрім відповіді від бекенду
-            async sendToAtlasStream(message) {
+            async sendToAtlasStream(message, queuedEl = null) {
                 const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
                 const url = `${baseUrl}/api/chat/stream`;
 
@@ -810,6 +842,17 @@
 
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 хв максимум
+
+                // Позначаємо, що розпочато стрім і блокуємо інпут
+                this.isStreaming = true;
+                if (this.chatInput) this.chatInput.disabled = true;
+                // Якщо це було чергове повідомлення — знімаємо бейдж "у черзі"
+                if (queuedEl) {
+                    try {
+                        const b = queuedEl.querySelector('.badge.queued');
+                        if (b) b.remove();
+                    } catch(_){}
+                }
 
                 const res = await fetch(url, {
                     method: 'POST',
@@ -885,6 +928,18 @@
 
                 // Скидаємо режим сесії після відправки
                 if (this.sessionMode !== 'auto') this.setSessionMode('auto');
+
+                // Завершення стріму: розблокуємо інпут та обробляємо чергу
+                this.isStreaming = false;
+                if (this.chatInput) this.chatInput.disabled = false;
+                if (this.messageQueue.length > 0) {
+                    const next = this.messageQueue.shift();
+                    if (typeof next === 'string') {
+                        try { await this.sendToAtlasStream(next); } catch(_){}
+                    } else if (next && next.text) {
+                        try { await this.sendToAtlasStream(next.text, next.el || null); } catch(_){}
+                    }
+                }
             }
 
             // Витяг і рендер структурованого JSON із тексту відповіді
@@ -984,6 +1039,8 @@
                 if (type === 'assistant' && this.voiceMode === 'continuous') {
                     this.simulateTTSPause(text);
                 }
+
+                return messageDiv;
             }
 
             logMessage(text, type = 'info', customColor = null) {

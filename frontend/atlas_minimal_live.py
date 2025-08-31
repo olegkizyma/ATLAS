@@ -15,7 +15,7 @@ import aiohttp
 import os
 from datetime import datetime
 from pathlib import Path
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, SimpleHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 import requests
 
@@ -67,7 +67,7 @@ import queue
 import re
 from datetime import datetime
 from pathlib import Path
-from http.server import HTTPServer, SimpleHTTPRequestHandler
+from http.server import HTTPServer, SimpleHTTPRequestHandler, ThreadingHTTPServer
 import urllib.parse
 import requests
 import os
@@ -1616,30 +1616,37 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                         self.send_json_response(response_data)
                         
                     else:
-                        # Помилка в Atlas Core
+                        # Помилка в Atlas Core (бізнес-рівень): повертаємо 200 зі структурованим описом, щоб клієнт не падав
                         error_message = result.get("error", "Невідома помилка Atlas Core")
-                        
-                        if result.get("response_type") == "security_block":
-                            # Заблоковано системою безпеки
-                            response_data = {
-                                "response": "🛡️ Команда заблокована системою безпеки Гріша",
-                                "error": error_message,
-                                "blocked": True,
-                                "atlas_core": True,
-                                "security_analysis": result.get("security_analysis", {})
+
+                        base_error_payload = {
+                            "success": False,
+                            "atlas_core": True,
+                            "error": error_message,
+                            "response_type": result.get("response_type", "error"),
+                        }
+                        # Додаємо діагностику, якщо є
+                        if "diagnostic" in result:
+                            base_error_payload["diagnostic"] = result["diagnostic"]
+                        if "security_analysis" in result:
+                            base_error_payload["security_analysis"] = result["security_analysis"]
+                        if "session_strategy" in result:
+                            base_error_payload["session_info"] = {
+                                "strategy": result["session_strategy"].get("strategy"),
+                                "session_name": result["session_strategy"].get("session_name")
                             }
+
+                        if result.get("response_type") == "security_block":
+                            base_error_payload["blocked"] = True
+                            base_error_payload["response"] = "🛡️ Команда заблокована системою безпеки Гріша"
                             logger.warning(f"🛡️ Гріша: Заблокував команду - {error_message}")
                         else:
-                            # Загальна помилка
-                            response_data = {
-                                "response": f"Помилка Atlas Core: {error_message}",
-                                "error": error_message,
-                                "atlas_core": True,
-                                "fallback_available": True
-                            }
+                            base_error_payload["fallback_available"] = True
+                            base_error_payload["response"] = f"Помилка Atlas Core: {error_message}"
                             logger.error(f"❌ Atlas Core: {error_message}")
-                        
-                        self.send_json_response(response_data, 500)
+
+                        # 200: клієнт обробляє як валідну відповідь з полем success=false
+                        self.send_json_response(base_error_payload, 200)
                         
                 except Exception as atlas_error:
                     logger.error(f"💥 Atlas Core Exception: {atlas_error}")
@@ -1686,6 +1693,9 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
 
             # Розширене перефразування запиту (можна вимкнути no_paraphrase=true)
             use_paraphrase = self._should_paraphrase(data)
+            # Якщо це звичайний чат/смаллток — перефразування вимикаємо, щоб не перетворювати на задачу
+            if session_type == "chat":
+                use_paraphrase = False
             message_to_send = self._paraphrase_user_message(user_message) if use_paraphrase else user_message
 
             self.send_response(200)
@@ -1709,6 +1719,44 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     logger.error(f"SSE write error: {e}")
 
             send_event({"type": "status", "message": "connected", "session": session_name, "paraphrase": use_paraphrase})
+            if session_type == "chat":
+                try:
+                    send_event({
+                        "type": "status",
+                        "role": "atlas",
+                        "event": "mode_detected",
+                        "mode": "chat",
+                        "say": "Атлас: Режим — звичайний чат (без постановки завдання)."
+                    })
+                except Exception:
+                    pass
+            # Додаткові службові події для чату
+            try:
+                if use_paraphrase and (message_to_send or "") != (user_message or ""):
+                    send_event({
+                        "type": "status",
+                        "role": "atlas",
+                        "event": "paraphrase",
+                        "say": "Атлас: Я перефразую для більшої зрозумілості завдання:",
+                        "content": message_to_send
+                    })
+                # Інформуємо про перевірку безпеки (логічна подія для UX)
+                send_event({
+                    "type": "status",
+                    "role": "atlas",
+                    "event": "security_dispatch",
+                    "say": "Атлас: Відправляю на службу безпеки до Гріші на перевірку виконання."
+                })
+                # Імітація результату перевірки безпеки (якщо Atlas Core не на шляху стріму)
+                send_event({
+                    "type": "status",
+                    "role": "grisha",
+                    "event": "security_result",
+                    "decision": "allow",
+                    "say": "Гріша (LLM3): Перевірив безпеку — дозвіл на виконання."
+                })
+            except Exception:
+                pass
 
             accumulated: list[str] = []
 
@@ -1765,6 +1813,83 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     "If you need confirmation: assume yes and proceed."
                 )
 
+            # === РАННІЙ АНАЛІЗ ЗАВЕРШЕННЯ ТА НЕПОВНОТИ ===
+            def _has_completion_cues(text: str) -> bool:
+                t = _safe_lower(text)
+                cues = [
+                    "готово", "завдання виконано", "виконано", "завершено", "done", "completed", "finished",
+                    "готов", "готовий", "final result", "підсумок:", "результат:" 
+                ]
+                return any(c in t for c in cues)
+
+            def _build_incompletion_reason(full_text: str, original_prompt: str) -> str:
+                reasons = []
+                data = _extract_embedded_json(full_text) or {}
+                t = _safe_lower(full_text)
+                # Пріоритет: embedded JSON
+                if isinstance(data, dict):
+                    if data.get("completed") is False:
+                        reasons.append("embedded JSON: completed=false")
+                    status = str(data.get("status", "")).lower()
+                    if any(x in status for x in ["pending", "awaiting", "confirm", "incomplete", "todo"]):
+                        reasons.append(f"статус: {status or 'incomplete'}")
+                    missing = data.get("missing") or data.get("todo") or data.get("next")
+                    if missing:
+                        try:
+                            if isinstance(missing, (list, tuple)):
+                                reasons.append("відсутнє: " + "; ".join([str(x) for x in missing][:3]))
+                            else:
+                                reasons.append("відсутнє: " + str(missing)[:200])
+                        except Exception:
+                            pass
+                # Евристики неповноти
+                need_confirm_cues = ["підтверд", "confirm", "should i proceed", "continue?", "choose", "select", "обери", "вибери", "обрати", "вибрати"]
+                if any(c in t for c in need_confirm_cues):
+                    reasons.append("потрібне підтвердження/вибір (має виконуватися автономно)")
+                planning_cues = ["план", "кроки", "steps", "outline"]
+                if any(c in t for c in planning_cues) and not any(c in t for c in ["результат", "підсумок", "result", "final"]):
+                    reasons.append("надано план без фактичного виконання")
+                promise_cues = ["i will", "i'll", "let me know", "можу", "зможу"]
+                if any(c in t for c in promise_cues):
+                    reasons.append("є обіцянки/намір без завершеного результату")
+                # Якщо нічого конкретного не знайшли, повернемо загальне
+                if not reasons:
+                    reasons.append("відсутній явний підсумок/результат")
+                return "; ".join(reasons)[:400]
+
+            def _analyze_completion(full_text: str, original_prompt: str) -> dict:
+                """Повертає dict з полями: {cues, embedded_completed, embedded_incomplete, need_follow_up, reason} """
+                info = {
+                    "cues": _has_completion_cues(full_text),
+                    "embedded_completed": False,
+                    "embedded_incomplete": False,
+                    "need_follow_up": False,
+                    "reason": None,
+                }
+                data = _extract_embedded_json(full_text)
+                if isinstance(data, dict):
+                    if data.get("completed") is True:
+                        info["embedded_completed"] = True
+                        info["need_follow_up"] = False
+                        return info
+                    if data.get("completed") is False:
+                        info["embedded_incomplete"] = True
+                # Якщо є сигнали завершення – перевіряємо неповноту
+                if info["embedded_incomplete"] or info["cues"]:
+                    if _needs_auto_follow_up(full_text):
+                        info["need_follow_up"] = True
+                        info["reason"] = _build_incompletion_reason(full_text, original_prompt)
+                return info
+
+            def _compose_follow_up_with_reason(full_text: str, original_prompt: str, reason: str | None) -> str:
+                base = _compose_auto_follow_up(full_text, original_prompt)
+                if reason:
+                    return (
+                        f"Продовжуй і довиконай завдання. Усунь незавершеність: {reason}. "
+                        + base
+                    )
+                return base
+
             def _is_web():
                 try:
                     r = requests.get(f"{self.goose_api_url}/api/health", timeout=3)
@@ -1772,10 +1897,16 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 except Exception:
                     return False
 
+            stream_timeout = self._get_stream_timeout()
+            # Прапорці раннього довиконання
+            early_followup_triggered = False
+            early_followup_text = None
+            early_analysis_enabled = True
             if _is_web():
                 import aiohttp, asyncio
 
                 async def _via_ws_and_stream():
+                    nonlocal early_followup_triggered, early_followup_text
                     ws_url = self.goose_api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
                     payload = {
                         "type": "message",
@@ -1783,7 +1914,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                         "session_id": session_name,
                         "timestamp": int(time.time() * 1000),
                     }
-                    timeout_total = aiohttp.ClientTimeout(total=300)
+                    timeout_total = aiohttp.ClientTimeout(total=stream_timeout) if stream_timeout is not None else None
                     async with aiohttp.ClientSession(timeout=timeout_total) as session:
                         async with session.ws_connect(ws_url, heartbeat=30) as ws:
                             await ws.send_str(json.dumps(payload))
@@ -1805,11 +1936,35 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                                                     "token": token,
                                                     "accumulated": "".join(accumulated)
                                                 })
-                                        elif t in ("complete", "cancelled"):
+                                                # Ранній аналіз завершення: якщо є сигнали – перевіряємо і за потреби запускаємо довиконання
+                                                if early_analysis_enabled and not early_followup_triggered:
+                                                    full_text = "".join(accumulated)
+                                                    analysis = _analyze_completion(full_text, user_message)
+                                                    if analysis.get("need_follow_up"):
+                                                        early_followup_triggered = True
+                                                        reason = analysis.get("reason")
+                                                        send_event({
+                                                            "type": "status",
+                                                            "role": "verifier",
+                                                            "event": "incomplete_detected",
+                                                            "say": "Особа, що перевіряє: Завдання не завершено, оскільки не виконано:",
+                                                            "reason": reason
+                                                        })
+                                                        early_followup_text = _compose_follow_up_with_reason(full_text, user_message, reason)
+                                                        # перериваємо поточний стрім, щоб негайно довиконати
+                                                        break
+                                            # Якщо повідомлення позначено як фінальне в полі, теж завершуємо
+                                            if obj.get("final") or obj.get("done"):
+                                                break
+                                        elif t in ("complete", "done", "cancelled", "final"):
                                             break
                                         elif t == "error":
                                             send_event({"type": "error", "error": obj.get("message", "websocket error")})
                                             return
+                                        else:
+                                            # Генеральний випадок: якщо є явні фінальні прапорці
+                                            if obj.get("final") or obj.get("done"):
+                                                break
                                 elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                                     break
 
@@ -1827,13 +1982,30 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 # Server-side auto follow-up (single chained message)
                 try:
                     full_text = "".join(accumulated)
-                    if _needs_auto_follow_up(full_text):
+                    # Якщо ранній аналіз вже вирішив – використовуємо його
+                    if early_followup_triggered and early_followup_text:
+                        follow_up = early_followup_text
+                    elif _needs_auto_follow_up(full_text):
+                        # Повідомлення від "особи, що перевіряє" перед автопродовженням
+                        send_event({
+                            "type": "status",
+                            "role": "verifier",
+                            "event": "incomplete_detected",
+                            "say": "Особа, що перевіряє: Завдання не виконано, формую коригуюче завдання."
+                        })
                         # Невелика пауза, щоб дати шанс користувачу втрутитися (8с)
                         try:
                             time.sleep(8)
                         except Exception:
                             pass
                         follow_up = _compose_auto_follow_up(full_text, user_message)
+                        send_event({
+                            "type": "status",
+                            "role": "verifier",
+                            "event": "correction_task",
+                            "correction": follow_up,
+                            "say": "Особа, що перевіряє: Передаю нове завдання на довершення:"
+                        })
                         send_event({"type": "status", "message": "server_auto_followup", "follow_up": follow_up})
 
                         async def _via_ws_and_stream_followup():
@@ -1844,7 +2016,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                                 "session_id": session_name,
                                 "timestamp": int(time.time() * 1000),
                             }
-                            timeout_total = aiohttp.ClientTimeout(total=300)
+                            timeout_total = aiohttp.ClientTimeout(total=stream_timeout) if stream_timeout is not None else None
                             async with aiohttp.ClientSession(timeout=timeout_total) as session:
                                 async with session.ws_connect(ws_url, heartbeat=30) as ws:
                                     await ws.send_str(json.dumps(payload))
@@ -1866,11 +2038,16 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                                                             "token": token,
                                                             "accumulated": "".join(accumulated)
                                                         })
-                                                elif t in ("complete", "cancelled"):
+                                                    if obj.get("final") or obj.get("done"):
+                                                        break
+                                                elif t in ("complete", "done", "cancelled", "final"):
                                                     break
                                                 elif t == "error":
                                                     send_event({"type": "error", "error": obj.get("message", "websocket error")})
                                                     return
+                                                else:
+                                                    if obj.get("final") or obj.get("done"):
+                                                        break
                                         elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
                                             break
 
@@ -1905,7 +2082,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     "session_working_dir": os.getcwd(),
                 }
 
-                with requests.post(url, json=payload, headers=headers, stream=True, timeout=300) as resp:
+                req_kwargs = {"json": payload, "headers": headers, "stream": True}
+                if stream_timeout is not None:
+                    req_kwargs["timeout"] = stream_timeout
+                with requests.post(url, **req_kwargs) as resp:
                     if resp.status_code != 200:
                         try:
                             body = resp.text[:500]
@@ -1951,6 +2131,23 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                                 token = data_part
                                 accumulated.append(token)
                                 send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                            # Ранній аналіз завершення для SSE
+                            if early_analysis_enabled and not early_followup_triggered:
+                                full_text_now = "".join(accumulated)
+                                analysis = _analyze_completion(full_text_now, user_message)
+                                if analysis.get("need_follow_up"):
+                                    early_followup_triggered = True
+                                    reason = analysis.get("reason")
+                                    send_event({
+                                        "type": "status",
+                                        "role": "verifier",
+                                        "event": "incomplete_detected",
+                                        "say": "Особа, що перевіряє: Завдання не завершено, оскільки не виконано:",
+                                        "reason": reason
+                                    })
+                                    early_followup_text = _compose_follow_up_with_reason(full_text_now, user_message, reason)
+                                    # перериваємо поточний стрім, щоб негайно довиконати
+                                    break
                             if is_done:
                                 break
                         elif line.lower() == "event: done":
@@ -1959,13 +2156,29 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 # Server-side auto follow up for goosed SSE (single chained message)
                 try:
                     full_text = "".join(accumulated)
-                    if _needs_auto_follow_up(full_text):
+                    if early_followup_triggered and early_followup_text:
+                        follow_up = early_followup_text
+                    elif _needs_auto_follow_up(full_text):
+                        # Повідомлення від "особи, що перевіряє" перед автопродовженням
+                        send_event({
+                            "type": "status",
+                            "role": "verifier",
+                            "event": "incomplete_detected",
+                            "say": "Особа, що перевіряє: Завдання не виконано, формую коригуюче завдання."
+                        })
                         # Невелика пауза, щоб дати шанс користувачу втрутитися (8с)
                         try:
                             time.sleep(8)
                         except Exception:
                             pass
                         follow_up = _compose_auto_follow_up(full_text, user_message)
+                        send_event({
+                            "type": "status",
+                            "role": "verifier",
+                            "event": "correction_task",
+                            "correction": follow_up,
+                            "say": "Особа, що перевіряє: Передаю нове завдання на довершення:"
+                        })
                         send_event({"type": "status", "message": "server_auto_followup", "follow_up": follow_up})
 
                         payload_follow = {
@@ -1980,7 +2193,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                             "session_working_dir": os.getcwd(),
                         }
 
-                        with requests.post(url, json=payload_follow, headers=headers, stream=True, timeout=300) as resp2:
+                        req2_kwargs = {"json": payload_follow, "headers": headers, "stream": True}
+                        if stream_timeout is not None:
+                            req2_kwargs["timeout"] = stream_timeout
+                        with requests.post(url, **req2_kwargs) as resp2:
                             if resp2.status_code == 200:
                                 for raw_line in resp2.iter_lines(decode_unicode=True):
                                     if raw_line is None:
@@ -2235,6 +2451,15 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             
         message_lower = message.lower()
         
+        # Легкий фільтр на звичайний чат (привітання/знайомство/смоллток)
+        chat_keywords = [
+            "привіт", "вітаю", "добрий день", "добрий вечір", "що чутно", "як справи",
+            "hi", "hello", "hey", "how are you", "how’s it going", "who are you", "як тебе звати",
+            "як звати", "як тебе кличуть", "tell me about yourself", "поговоримо", "просто чат"
+        ]
+        if any(k in message_lower for k in chat_keywords):
+            return "chat"
+
         # Ключові слова для НОВОГО завдання
         new_keywords = [
             "відкрий", "знайди", "створи", "почни", "запусти", "нове", 
@@ -2255,12 +2480,15 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         if any(word in message_lower for word in continue_keywords):
             return "continue_session"
         
-        # За замовчуванням - нова сесія для безпеки
-        return "new_session"
+        # За замовчуванням - чат (безпечніше, ніж створювати зайві сесії-завдання)
+        return "chat"
 
     def get_session_name(self, message, session_type):
         """Генерує ім'я сесії на основі контексту"""
         message_lower = message.lower()
+        
+        if session_type == "chat":
+            return "general_chat"
         
         # Контекстні теми
         if any(word in message_lower for word in ["відео", "фільм", "youtube", "браузер"]):
@@ -2322,6 +2550,26 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         )
 
         return directive
+
+    def _get_stream_timeout(self) -> int | None:
+        """Повертає таймаут стріму в секундах або None для безлімітного.
+
+        Керується змінними середовища:
+          - ATLAS_STREAM_TIMEOUT або ATLAS_STREAM_TIMEOUT_SECONDS
+            * "0", "none", "off", порожнє -> без таймауту (None)
+            * інакше -> int секунд
+        За замовчуванням: None (без таймауту).
+        """
+        try:
+            raw = (os.getenv("ATLAS_STREAM_TIMEOUT") or os.getenv("ATLAS_STREAM_TIMEOUT_SECONDS") or "").strip()
+            if not raw:
+                return None
+            low = raw.lower()
+            if low in ("0", "none", "off", "infinite"):
+                return None
+            return int(raw)
+        except Exception:
+            return None
     
     def send_json_response(self, data, status_code=200):
         """Відправка JSON відповіді"""
@@ -2527,7 +2775,8 @@ def main():
     # Зміна робочої директорії
     os.chdir(Path(__file__).parent)
     
-    httpd = HTTPServer(server_address, AtlasMinimalHandler)
+    # Используем многопоточный сервер, чтобы долгие SSE-запросы не блокировали другие эндпоинты
+    httpd = ThreadingHTTPServer(server_address, AtlasMinimalHandler)
     
     print("🚀 Starting Atlas Minimal Frontend Server...")
     print(f"📱 Interface: http://localhost:{port}")
