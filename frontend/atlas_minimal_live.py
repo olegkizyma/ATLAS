@@ -11,6 +11,7 @@ import time
 import subprocess
 import re
 import asyncio
+import sys
 import aiohttp
 import os
 from datetime import datetime
@@ -185,26 +186,33 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
 
     def do_POST(self):
         """Обробка POST запитів"""
-        if self.path == "/api/chat":
+        # Нормалізуємо шлях (відкидаємо query) і дозволяємо трейлінг-слеш
+        parsed = urllib.parse.urlsplit(self.path)
+        path = parsed.path
+        norm = path[:-1] if path.endswith('/') and path != '/' else path
+
+        if norm == "/api/chat":
             self.handle_chat()
-        elif self.path == "/api/chat/stream":
+        elif norm == "/api/chat/stream":
             self.handle_chat_stream()
-        elif self.path == "/api/tts/speak":
+        elif norm == "/api/tts/speak":
             h_tts.handle_tts(self)
-        elif self.path == "/api/atlas/analyze-prompt":
+        elif norm == "/api/chat/stream_core":
+            self.handle_chat_stream_core()
+        elif norm == "/api/atlas/analyze-prompt":
             h_atlas.handle_analyze_prompt(self)
         elif TUTORIALCHAT_INTEGRATION_AVAILABLE and (
-            self.path.startswith("/api/chat/reply") or 
-            self.path.startswith("/api/session") or 
-            self.path.startswith("/api/message")
+            norm.startswith("/api/chat/reply") or 
+            norm.startswith("/api/session") or 
+            norm.startswith("/api/message")
         ):
             # TutorialChat API маршрути
-            chat_integration.handle_tutorial_chat_api(self, self.path)
+            chat_integration.handle_tutorial_chat_api(self, path)
         else:
             self.send_error(404, "Not Found")
 
     def handle_chat(self):
-        """Простий non-stream чат через Goose HTTP API"""
+        """Non-stream чат: пріоритетно через Atlas Core, з fallback на Goose API/CLI"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
@@ -214,9 +222,31 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             if not user_message:
                 return self.send_json_response({"error": "Message is required"}, 400)
 
+            # Якщо доступний Atlas Core — використовуємо його оркестратор
+            if getattr(self, 'ATLAS_CORE_AVAILABLE', False):
+                try:
+                    from atlas_core import get_atlas_core
+                    # Побудова легкого контексту користувача (можна розширити за потреби)
+                    user_context = {
+                        "client": "atlas_minimal_frontend",
+                        "timestamp": datetime.now().isoformat(),
+                    }
+                    core = get_atlas_core(str((Path(__file__).resolve().parents[1] / "goose")))
+                    # Оркестратор асинхронний — викликаємо через asyncio.run
+                    result = asyncio.run(core.process_user_message(user_message, user_context))
+                    # Відповідаємо як є, додаємо прапорець atlas_core
+                    if isinstance(result, dict):
+                        result.setdefault("atlas_core", True)
+                        return self.send_json_response(result, 200)
+                    else:
+                        # Некоректний формат — м'який fallback
+                        logger.warning("Atlas Core повернув не-JSON результат, fallback до Goose")
+                except Exception as atlas_err:
+                    logger.warning(f"Atlas Core недоступний або помилка під час обробки: {atlas_err}. Fallback до Goose")
+
+            # Fallback: існуючий шлях через Goose HTTP API
             session_type = util_determine_session_type(user_message, data.get("session_type"))
             session_name = data.get("session_name") or util_get_session_name(user_message, session_type)
-
             try:
                 reply_result = self.goose_client.send_reply(session_name, user_message)
                 if reply_result.get("success"):
@@ -232,7 +262,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 else:
                     error_msg = reply_result.get("error", "Goose API не повернув відповідь")
                     self.send_json_response({"error": error_msg, "atlas_core": False}, 500)
-            except Exception as api_error:
+            except Exception:
                 # Fallback до CLI
                 self._handle_chat_cli_fallback(user_message, data, session_type, session_name)
         except Exception as e:
@@ -242,6 +272,51 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     def handle_chat_stream(self):
         """Delegated streaming chat endpoint."""
         return h_chat.handle_chat_stream(self)
+
+    def handle_chat_stream_core(self):
+        """Потоковий SSE через Atlas Core Orchestrator"""
+        if not getattr(self, 'ATLAS_CORE_AVAILABLE', False):
+            return self.send_json_response({"error": "Atlas Core недоступний", "atlas_core": False}, 503)
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8')) if post_data else {}
+
+            user_message = data.get("message") or data.get("prompt")
+            if not user_message:
+                return self.send_json_response({"error": "Message is required"}, 400)
+
+            from atlas_core import get_atlas_core
+            core = get_atlas_core(str((Path(__file__).resolve().parents[1] / "goose")))
+            user_context = {
+                "client": "atlas_minimal_frontend",
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            # SSE заголовки
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            async def _stream():
+                async for evt in core.process_user_message_stream(user_message, user_context):
+                    payload = json.dumps(evt, ensure_ascii=False)
+                    try:
+                        self.wfile.write(f"data: {payload}\n\n".encode('utf-8'))
+                        self.wfile.flush()
+                    except Exception:
+                        break
+
+            try:
+                asyncio.run(_stream())
+            except (BrokenPipeError, ConnectionResetError):
+                return
+        except Exception as e:
+            logger.error(f"Fatal error in handle_chat_stream_core: {e}")
+            self.send_json_response({"error": str(e)}, 500)
 
     def handle_chat_legacy(self, user_message: str, data: dict, user_context: dict, atlas_error: str = None):
         """Legacy обробка чату через HTTP API Goose замість CLI"""
@@ -532,10 +607,20 @@ def main():
     # Зміна робочої директорії
     os.chdir(Path(__file__).parent)
     
+    # Пользовательский сервер с подавлением ожидаемых сетевых ошибок
+    class SafeThreadingHTTPServer(ThreadingHTTPServer):
+        def handle_error(self, request, client_address):
+            exc_type, exc, _ = sys.exc_info()
+            if isinstance(exc, (ConnectionResetError, BrokenPipeError)):
+                # Клиент закрыл соединение — не шумим в логах
+                logger.debug(f"Client disconnected: {client_address} ({exc_type.__name__})")
+                return
+            return super().handle_error(request, client_address)
+
     # Используем многопоточный сервер, чтобы долгие SSE-запросы не блокировали другие эндпоинты
     # Пробуем занять порт, при ошибке ищем следующий свободный
     try:
-        httpd = ThreadingHTTPServer(server_address, AtlasMinimalHandler)
+        httpd = SafeThreadingHTTPServer(server_address, AtlasMinimalHandler)
     except OSError:
         # Поиск свободного порта
         import socket
@@ -544,7 +629,7 @@ def main():
             free_port = s.getsockname()[1]
         port = free_port
         server_address = ('', port)
-        httpd = ThreadingHTTPServer(server_address, AtlasMinimalHandler)
+        httpd = SafeThreadingHTTPServer(server_address, AtlasMinimalHandler)
     
     print("🚀 Starting Atlas Minimal Frontend Server...")
     print(f"📱 Interface: http://localhost:{port}")

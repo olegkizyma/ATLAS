@@ -6,7 +6,8 @@ logger = logging.getLogger(__name__)
 
 def serve_frontend(h):
     try:
-        html_path = Path(__file__).resolve().parents[2] / "frontend" / "index.html"
+        # Правильний шлях: поточна папка services/handlers -> frontend
+        html_path = Path(__file__).resolve().parents[2] / "index.html"
         with open(html_path, 'r', encoding='utf-8') as f:
             content = f.read()
         h.send_response(200)
@@ -23,7 +24,7 @@ def serve_frontend(h):
 
 def serve_3d_model(h):
     try:
-        model_path = Path(__file__).resolve().parents[2] / "frontend" / "DamagedHelmet.glb"
+        model_path = Path(__file__).resolve().parents[2] / "DamagedHelmet.glb"
         if not model_path.exists():
             h.send_error(404, "3D model not found")
             return
@@ -97,7 +98,7 @@ def serve_file(h, file_path):
 
 def serve_favicon(h):
     try:
-        favicon_path = Path(__file__).resolve().parents[2] / "frontend" / "favicon.ico"
+        favicon_path = Path(__file__).resolve().parents[2] / "favicon.ico"
         if not favicon_path.exists():
             h.send_response(200)
             h.send_header('Content-type', 'image/x-icon')

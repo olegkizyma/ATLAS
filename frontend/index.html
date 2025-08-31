@@ -448,6 +448,8 @@
     </div>
 
     <script>
+    // Визначаємо API базу динамічно, щоб уникати 404 при зміні порту
+    window.ATLAS_API_BASE = window.location.origin;
     class AtlasMinimalInterface {
             constructor() {
                 this.voiceMode = 'off'; // 'off', 'single', 'continuous'
@@ -742,8 +744,16 @@
                 } catch (error) {
                     this.logMessage(`[CHAT] Stream error, fallback to non-stream: ${error.message}`, 'warning');
                     try {
-                        const response = await this.sendToAtlas(message);
-                        this.addMessage(response, 'assistant');
+                        const result = await this.sendToAtlas(message);
+                        const el = this.addMessage(result?.text || String(result), 'assistant');
+                        // Поставити бейдж джерела на відповідь, а не на юзерське повідомлення
+                        try {
+                            const badge = document.createElement('span');
+                            badge.className = 'badge';
+                            badge.textContent = result?.atlas_core ? 'Atlas' : 'API';
+                            const td = el.querySelector('.message-time');
+                            if (td) td.appendChild(badge);
+                        } catch(_){}
                     } catch (e2) {
                         this.addMessage(`Помилка: ${e2.message}`, 'assistant');
                         this.logMessage(`[CHAT] Error: ${e2.message}`, 'error');
@@ -797,26 +807,30 @@
                         if (this.sessionMode !== 'auto') {
                             this.setSessionMode('auto');
                         }
-                        
-                        return data.response || data.message || 'Відповідь отримана';
+                        // Витягаємо текст відповіді з правильного поля Atlas Core
+                        const text = (data.atlas_response ?? data.response ?? data.message ?? 'Відповідь отримана');
+                        return { text, atlas_core: !!data.atlas_core, raw: data };
                     } else {
                         this.logMessage(`[CHAT] HTTP ${response.status} (${url})`, 'warning');
-                        return 'Помилка сервера';
+                        return { text: 'Помилка сервера', atlas_core: false };
                     }
                 } catch (error) {
                     if (error.name === 'AbortError') {
                         this.logMessage(`[CHAT] Таймаут запиту (${url})`, 'warning');
-                        return 'Таймаут запиту (180 сек)';
+                        return { text: 'Таймаут запиту (180 сек)', atlas_core: false };
                     }
                     this.logMessage(`[CHAT] Network error: ${error.message}`, 'error');
-                    return 'Помилка підключення';
+                    return { text: 'Помилка підключення', atlas_core: false };
                 }
             }
 
             // Новий метод: потоковий стрім відповіді від бекенду
             async sendToAtlasStream(message, queuedEl = null) {
                 const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
-                const url = `${baseUrl}/api/chat/stream`;
+                const isTaskLike = /завдан|виконай|зроби|task|build|run|execute|install|generate|створи/i.test(message);
+                const preferCore = (window.ATLAS_USE_CORE_STREAM_FOR_TASKS ?? '1') !== '0' && isTaskLike;
+                let endpoint = preferCore ? '/api/chat/stream_core' : '/api/chat/stream';
+                let url = `${baseUrl}${endpoint}`;
 
                 // Визначаємо тип сесії для відправки
                 let sessionType = null;
@@ -827,25 +841,23 @@
 
                 // Створюємо placeholder для асистента, який будемо оновлювати токенами
                 const container = this.chatMessages;
-                const msgDiv = document.createElement('div');
-                msgDiv.className = 'message assistant';
-                const textDiv = document.createElement('div');
-                textDiv.className = 'message-text';
-                textDiv.textContent = '';
-                const timeDiv = document.createElement('div');
-                timeDiv.className = 'message-time';
-                timeDiv.textContent = new Date().toLocaleTimeString();
-                msgDiv.appendChild(textDiv);
-                msgDiv.appendChild(timeDiv);
-                container.appendChild(msgDiv);
-                container.scrollTop = container.scrollHeight;
-
+                const assistantEl = this.addMessage('', 'assistant');
+                const textDiv = assistantEl.querySelector('.message-text');
+                const timeDiv = assistantEl.querySelector('.message-time');
                 const controller = new AbortController();
                 const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 хв максимум
 
                 // Позначаємо, що розпочато стрім і блокуємо інпут
                 this.isStreaming = true;
                 if (this.chatInput) this.chatInput.disabled = true;
+                // Маленький бейдж джерела відповіді (для прозорості)
+                try {
+                    const src = document.createElement('span');
+                    src.className = 'badge';
+                    src.textContent = (endpoint === '/api/chat/stream_core') ? 'Atlas' : 'Goose';
+                    timeDiv.appendChild(src);
+                } catch(_){}
+
                 // Якщо це було чергове повідомлення — знімаємо бейдж "у черзі"
                 if (queuedEl) {
                     try {
@@ -854,25 +866,8 @@
                     } catch(_){}
                 }
 
-                const res = await fetch(url, {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(requestData),
-                    signal: controller.signal
-                });
-
-                if (!res.ok || !res.body) {
-                    clearTimeout(timeoutId);
-                    throw new Error(`HTTP ${res.status}`);
-                }
-
-                // Читаємо text/event-stream построчно
-                const reader = res.body.getReader();
-                const decoder = new TextDecoder('utf-8');
-                let buffer = '';
-                let doneReceived = false;
                 let accumulatedText = '';
-
+                let doneReceived = false;
                 const applyToken = (token) => {
                     if (!token) return;
                     textDiv.textContent += token;
@@ -880,64 +875,118 @@
                     container.scrollTop = container.scrollHeight;
                 };
 
-                while (true) {
-                    const { value, done } = await reader.read();
-                    if (done) break;
-                    buffer += decoder.decode(value, { stream: true });
+                try {
+                    let res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestData),
+                        signal: controller.signal
+                    });
 
-                    // Події розділяються порожнім рядком. Обробляємо лінії по одній
-                    const lines = buffer.split('\n');
-                    buffer = lines.pop();
-                    for (const raw of lines) {
-                        const line = raw.trim();
-                        if (!line || line.startsWith(':')) continue; // коментар keepalive або порожньо
-                        if (line.startsWith('data:')) {
-                            const jsonStr = line.slice(5).trim();
-                            try {
-                                const obj = JSON.parse(jsonStr);
-                                if (obj.type === 'token') {
-                                    applyToken(obj.token || '');
-                                } else if (obj.type === 'done') {
-                                    doneReceived = true;
-                                } else if (obj.type === 'status') {
-                                    this.logMessage(`[SSE] ${obj.message || 'status'}`);
-                                } else if (obj.type === 'error') {
-                                    throw new Error(obj.error || 'stream error');
+                    // Якщо обрали Core, але впав запит — фолбэк на Goose
+                    if ((!res.ok || !res.body) && endpoint === '/api/chat/stream_core') {
+                        this.logMessage(`[SSE] stream_core недоступний (HTTP ${res.status}), фолбэк на Goose`, 'warning');
+                        endpoint = '/api/chat/stream';
+                        url = `${baseUrl}${endpoint}`;
+                        res = await fetch(url, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(requestData),
+                            signal: controller.signal
+                        });
+                    }
+
+                    if (!res.ok || !res.body) {
+                        throw new Error(`HTTP ${res.status}`);
+                    }
+
+                    // Читаємо text/event-stream построчно
+                    const reader = res.body.getReader();
+                    const decoder = new TextDecoder('utf-8');
+                    let buffer = '';
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+                        buffer += decoder.decode(value, { stream: true });
+
+                        // Події розділяються порожнім рядком. Обробляємо лінії по одній
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+                        for (const raw of lines) {
+                            const line = raw.trim();
+                            if (!line || line.startsWith(':')) continue; // коментар keepalive або порожньо
+                            if (line.startsWith('data:')) {
+                                const jsonStr = line.slice(5).trim();
+                                try {
+                                    const obj = JSON.parse(jsonStr);
+                                    // Підтримка двох форматів:
+                                    // 1) Goose: { type: 'token'|'done'|'status'|'error', ... }
+                                    // 2) Atlas Core: { event: '...'; on final => atlas_response/response }
+                                    if (obj.type) {
+                                        if (obj.type === 'token') {
+                                            applyToken(obj.token || '');
+                                        } else if (obj.type === 'done') {
+                                            doneReceived = true;
+                                        } else if (obj.type === 'status') {
+                                            this.logMessage(`[SSE] ${obj.message || 'status'}`);
+                                        } else if (obj.type === 'error') {
+                                            throw new Error(obj.error || 'stream error');
+                                        }
+                                    } else if (obj.event) {
+                                        // Проміжні події можна логувати
+                                        if (obj.event === 'final') {
+                                            const finalText = obj.atlas_response || obj.response || '';
+                                            if (finalText) {
+                                                // Для Core стріму токенів може не бути — просто виводимо фінальний текст
+                                                textDiv.textContent += finalText;
+                                                accumulatedText += finalText;
+                                            }
+                                            doneReceived = true;
+                                        } else {
+                                            // легкий лог
+                                            const evtName = obj.event;
+                                            this.logMessage(`[Core] ${evtName}`);
+                                        }
+                                    }
+                                } catch (e) {
+                                    // Якщо прийшов plain text токен
+                                    applyToken(jsonStr);
                                 }
-                            } catch (e) {
-                                // Якщо прийшов plain text токен
-                                applyToken(jsonStr);
                             }
                         }
                     }
-                }
 
-                clearTimeout(timeoutId);
-                if (!doneReceived) {
-                    // Якщо бекенд не прислав подію done — просто завершуємо
-                    this.logMessage('[SSE] Потік завершено');
-                }
+                    if (!doneReceived) {
+                        // Якщо бекенд не прислав подію done — просто завершуємо
+                        this.logMessage('[SSE] Потік завершено');
+                    }
 
-                // Пост-обробка відповіді (парсинг JSON у трійних лапках)
-                try {
-                    this.postProcessAssistantText(textDiv, accumulatedText);
-                    this.maybeScheduleAutoReply(accumulatedText);
-                } catch (e) {
-                    // тихо
-                }
+                    // Пост-обробка відповіді (парсинг JSON у трійних лапках)
+                    try {
+                        this.postProcessAssistantText(textDiv, accumulatedText);
+                        this.maybeScheduleAutoReply(accumulatedText);
+                    } catch (e) {
+                        // тихо
+                    }
 
-                // Скидаємо режим сесії після відправки
-                if (this.sessionMode !== 'auto') this.setSessionMode('auto');
+                    // Скидаємо режим сесії після відправки
+                    if (this.sessionMode !== 'auto') this.setSessionMode('auto');
 
-                // Завершення стріму: розблокуємо інпут та обробляємо чергу
-                this.isStreaming = false;
-                if (this.chatInput) this.chatInput.disabled = false;
-                if (this.messageQueue.length > 0) {
-                    const next = this.messageQueue.shift();
-                    if (typeof next === 'string') {
-                        try { await this.sendToAtlasStream(next); } catch(_){}
-                    } else if (next && next.text) {
-                        try { await this.sendToAtlasStream(next.text, next.el || null); } catch(_){}
+                } finally {
+                    clearTimeout(timeoutId);
+                    // Завжди розблоковуємо інпут та скидаємо прапорець стріму
+                    this.isStreaming = false;
+                    if (this.chatInput) this.chatInput.disabled = false;
+
+                    // Якщо є черга — запускаємо наступний елемент
+                    if (this.messageQueue.length > 0) {
+                        const next = this.messageQueue.shift();
+                        if (typeof next === 'string') {
+                            try { await this.sendToAtlasStream(next); } catch(_){}
+                        } else if (next && next.text) {
+                            try { await this.sendToAtlasStream(next.text, next.el || null); } catch(_){}
+                        }
                     }
                 }
             }

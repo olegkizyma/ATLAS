@@ -31,3 +31,12 @@ def goose_workdir(default: str | None = None) -> str | None:
 
 def atlas_core_url(default: str = 'http://127.0.0.1:8000') -> str:
     return os.getenv('ATLAS_CORE_URL', default)
+
+
+def disable_cli_fallback() -> bool:
+    """Флаг для строгих окружений: запрещать переход на CLI.
+
+    ATLAS_DISABLE_CLI_FALLBACK: "1"/"true"/"True" => True
+    """
+    val = os.getenv('ATLAS_DISABLE_CLI_FALLBACK', '0')
+    return str(val).lower() in ('1', 'true', 'yes', 'on')
