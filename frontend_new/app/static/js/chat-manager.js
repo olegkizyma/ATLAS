@@ -15,12 +15,12 @@ class AtlasChatManager {
     }
     
     init() {
-        this.chatInput = document.getElementById('chatInput');
-        this.chatButton = document.getElementById('chatButton');
-        this.chatContainer = document.getElementById('chatContainer');
+        this.chatInput = document.getElementById('message-input');
+        this.chatButton = document.getElementById('send-button');
+        this.chatContainer = document.getElementById('chat-container');
         
         if (!this.chatInput || !this.chatButton || !this.chatContainer) {
-            console.error('Required chat elements not found');
+            console.warn('Chat elements not found - chat functionality disabled (minimal mode)');
             return;
         }
         
