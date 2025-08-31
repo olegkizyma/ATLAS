@@ -492,11 +492,14 @@ class GrishaSecurity:
             # Створюємо окрему сесію для Гріші з Goose
             verification_result = self._run_verification_session(task_description, verification_approach)
             
+            # Уніфікуємо поля дій на наступний крок: віддаємо і next_action, і next_action_needed
+            next_action_value = verification_result.get("next_action", None)
             return {
                 "task_completed": verification_result.get("completed", False),
                 "verification_details": verification_result.get("details", ""),
                 "should_continue_session": self._should_keep_session_alive(task_description),
-                "next_action_needed": verification_result.get("next_action", None)
+                "next_action": next_action_value,
+                "next_action_needed": next_action_value
             }
             
         except Exception as e:
@@ -505,6 +508,7 @@ class GrishaSecurity:
                 "task_completed": False,
                 "verification_details": f"Помилка перевірки: {e}",
                 "should_continue_session": False,
+                "next_action": "retry_task",
                 "next_action_needed": "retry_task"
             }
 

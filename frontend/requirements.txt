@@ -5,6 +5,16 @@ requests>=2.32.0
 # Asynchronous HTTP client for API calls
 aiohttp>=3.9.0
 
+# Natural Language Processing for intelligent mode analysis
+nltk>=3.8.1
+textblob>=0.17.1
+
+# Environment variables management
+python-dotenv>=1.0.0
+
+# JSON processing and utilities
+python-json-logger>=2.0.7
+
 # Optional: For enhanced web development (if needed later)
 # fastapi>=0.100.0
 # uvicorn>=0.23.0
