@@ -434,7 +434,7 @@
     </div>
 
     <script>
-        class AtlasMinimalInterface {
+    class AtlasMinimalInterface {
             constructor() {
                 this.voiceMode = 'off'; // 'off', 'single', 'continuous'
                 this.recognition = null;
@@ -701,12 +701,18 @@
                 this.chatInput.value = '';
                 this.autoResizeTextarea();
 
+                // Спочатку намагаємось стрімінгом
                 try {
-                    const response = await this.sendToAtlas(message);
-                    this.addMessage(response, 'assistant');
+                    await this.sendToAtlasStream(message);
                 } catch (error) {
-                    this.addMessage(`Помилка: ${error.message}`, 'assistant');
-                    this.logMessage(`[CHAT] Error: ${error.message}`, 'error');
+                    this.logMessage(`[CHAT] Stream error, fallback to non-stream: ${error.message}`, 'warning');
+                    try {
+                        const response = await this.sendToAtlas(message);
+                        this.addMessage(response, 'assistant');
+                    } catch (e2) {
+                        this.addMessage(`Помилка: ${e2.message}`, 'assistant');
+                        this.logMessage(`[CHAT] Error: ${e2.message}`, 'error');
+                    }
                 }
             }
 
@@ -770,6 +776,102 @@
                     this.logMessage(`[CHAT] Network error: ${error.message}`, 'error');
                     return 'Помилка підключення';
                 }
+            }
+
+            // Новий метод: потоковий стрім відповіді від бекенду
+            async sendToAtlasStream(message) {
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const url = `${baseUrl}/api/chat/stream`;
+
+                // Визначаємо тип сесії для відправки
+                let sessionType = null;
+                if (this.sessionMode === 'new') sessionType = 'new_session';
+                else if (this.sessionMode === 'continue') sessionType = 'continue_session';
+
+                const requestData = { message, session_type: sessionType };
+
+                // Створюємо placeholder для асистента, який будемо оновлювати токенами
+                const container = this.chatMessages;
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'message assistant';
+                const textDiv = document.createElement('div');
+                textDiv.className = 'message-text';
+                textDiv.textContent = '';
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = new Date().toLocaleTimeString();
+                msgDiv.appendChild(textDiv);
+                msgDiv.appendChild(timeDiv);
+                container.appendChild(msgDiv);
+                container.scrollTop = container.scrollHeight;
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 хв максимум
+
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData),
+                    signal: controller.signal
+                });
+
+                if (!res.ok || !res.body) {
+                    clearTimeout(timeoutId);
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                // Читаємо text/event-stream построчно
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                let doneReceived = false;
+
+                const applyToken = (token) => {
+                    if (!token) return;
+                    textDiv.textContent += token;
+                    container.scrollTop = container.scrollHeight;
+                };
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Події розділяються порожнім рядком. Обробляємо лінії по одній
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for (const raw of lines) {
+                        const line = raw.trim();
+                        if (!line || line.startsWith(':')) continue; // коментар keepalive або порожньо
+                        if (line.startsWith('data:')) {
+                            const jsonStr = line.slice(5).trim();
+                            try {
+                                const obj = JSON.parse(jsonStr);
+                                if (obj.type === 'token') {
+                                    applyToken(obj.token || '');
+                                } else if (obj.type === 'done') {
+                                    doneReceived = true;
+                                } else if (obj.type === 'status') {
+                                    this.logMessage(`[SSE] ${obj.message || 'status'}`);
+                                } else if (obj.type === 'error') {
+                                    throw new Error(obj.error || 'stream error');
+                                }
+                            } catch (e) {
+                                // Якщо прийшов plain text токен
+                                applyToken(jsonStr);
+                            }
+                        }
+                    }
+                }
+
+                clearTimeout(timeoutId);
+                if (!doneReceived) {
+                    // Якщо бекенд не прислав подію done — просто завершуємо
+                    this.logMessage('[SSE] Потік завершено');
+                }
+
+                // Скидаємо режим сесії після відправки
+                if (this.sessionMode !== 'auto') this.setSessionMode('auto');
             }
 
             addMessage(text, type) {
@@ -1121,91 +1223,11 @@
 
         // Initialize the interface when page loads
         document.addEventListener('DOMContentLoaded', () => {
-            new AtlasMinimalInterface();
+            // Зберігаємо екземпляр глобально, щоб інші скрипти могли звертатися
+            window.atlasInterface = new AtlasMinimalInterface();
         });
     </script>
 
-    <!-- Goose Chat Integration Script -->
-    <script>
-        /**
-         * Appends a chat message to the chat panel.
-         *
-         * @param {string} text  - The message text.
-         * @param {boolean} isUser  - true if the message is from the user.
-         */
-        function addChatMessage(text, isUser) {
-            const container = document.getElementById('chatMessages');
-            const msgDiv = document.createElement('div');
-            msgDiv.className = 'message ' + (isUser ? 'user' : 'assistant');
-            const textDiv = document.createElement('div');
-            textDiv.className = 'message-text';
-            textDiv.textContent = text;
-            msgDiv.appendChild(textDiv);
-
-            // Optional: show a timestamp
-            const timeDiv = document.createElement('div');
-            timeDiv.className = 'message-time';
-            timeDiv.textContent = new Date().toLocaleTimeString();
-            msgDiv.appendChild(timeDiv);
-
-            container.appendChild(msgDiv);
-            container.scrollTop = container.scrollHeight;   // auto‑scroll to bottom
-        }
-
-        /**
-         * Sends the user's message to the Goose API and displays
-         * the assistant's reply.
-         */
-        async function sendMessage() {
-            const input = document.getElementById('chatInput');
-            const text = input.value.trim();
-            if (!text) return;          // nothing to send
-            addChatMessage(text, true);   // show user message
-            input.value = '';             // clear input
-
-            try {
-                const res = await fetch('/api/chat', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ prompt: text })
-                });
-
-                if (!res.ok) {
-                    throw new Error(`Server returned ${res.status}`);
-                }
-
-                const data = await res.json();             // { answer: "..." }
-                const reply = data.answer ?? 'No response';
-                addChatMessage(reply, false);              // show assistant answer
-            } catch (e) {
-                console.error(e);
-                addChatMessage(`⚠️ Error: ${e.message}`, false);
-            }
-        }
-
-        /*** Bind chat events ***/
-        document.addEventListener('DOMContentLoaded', () => {
-            const chatInput = document.getElementById('chatInput');
-
-            // Handle "Enter" → send message (but allow Shift+Enter for newline)
-            chatInput.addEventListener('keydown', (e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
-                    e.preventDefault();          // prevent newline
-                    sendMessage();
-                }
-            });
-
-            // Optional: add click handler for voice button to also send message
-            const voiceButton = document.getElementById('voiceButton');
-            if (voiceButton) {
-                voiceButton.addEventListener('click', () => {
-                    // If not in voice mode, use as send button
-                    if (window.atlasInterface && window.atlasInterface.voiceMode === 'off') {
-                        sendMessage();
-                    }
-                });
-            }
-        });
-    </script>
+    <!-- Убрали дублюющий нестриминговый скрипт; вся логика чату в AtlasMinimalInterface -->
 </body>
 </html>
