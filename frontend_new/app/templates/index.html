@@ -19,7 +19,6 @@
             auto-rotate-delay="500"
             rotation-per-second="30deg"
             camera-controls
-            poster="{{ url_for('static', filename='assets/atlas-icon.svg') }}"
             shadow-intensity="0.3"
             shadow-softness="0.8"
             environment-image="neutral"
@@ -30,25 +29,12 @@
 
     <!-- Main Container -->
     <div class="container">
-        <!-- Header -->
-        <div class="header">
-            <div class="logo-container">
-                <img src="{{ url_for('static', filename='assets/atlas-icon.svg') }}" alt="ATLAS" class="logo">
-                <h1>ATLAS</h1>
-                <span class="version">v2.0</span>
-            </div>
-            <div class="status-container">
-                <div id="connection-status" class="status disconnected">
-                    <span class="status-dot"></span>
-                    <span class="status-text">Connecting...</span>
-                </div>
-            </div>
-        </div>
+        <!-- Header removed -->
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Left Panel - Logs Stream (без заголовків) -->
-            <div class="logs-panel">
+            <!-- Left Panel - Logs Stream (expanded to full width) -->
+            <div class="logs-panel full-width">
                 <div id="logs-container" class="logs-container">
                     <div class="log-item system">
                         <span class="timestamp">[{{ current_time }}]</span>
@@ -63,77 +49,40 @@
                 </div>
             </div>
 
-            <!-- Center Panel - 3D Visualization (visible through transparent overlay) -->
-            <div class="center-panel">
-                <div class="visualization-overlay">
-                    <div class="system-info">
-                        <div class="info-item">
-                            <span class="label">Status:</span>
-                            <span id="system-status" class="value">Online</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="label">Mode:</span>
-                            <span id="system-mode" class="value">Standby</span>
-                        </div>
-                        <div class="info-item">
-                            <span class="label">Core:</span>
-                            <span id="core-status" class="value">Disconnected</span>
+            <!-- Minimal Chat Panel -->
+            <div class="minimal-chat-panel">
+                <div class="chat-toggle" id="chat-toggle">
+                    💬 Chat
+                </div>
+                <div class="chat-content" id="chat-content" style="display: none;">
+                    <div id="chat-container" class="chat-container">
+                        <div class="message system">
+                            <div class="message-header">
+                                <span class="sender">ATLAS</span>
+                                <span class="timestamp">{{ current_time }}</span>
+                            </div>
+                            <div class="message-content">
+                                Система ініціалізована. Очікую підключення до Atlas Core...
+                            </div>
                         </div>
                     </div>
-                </div>
-            </div>
-
-            <!-- Right Panel - Chat -->
-            <div class="chat-panel">
-                <div class="panel-header">
-                    <h3>Atlas Interface</h3>
-                    <div class="controls">
-                        <button id="clear-chat" class="btn btn-small">Clear</button>
-                        <button id="toggle-chat" class="btn btn-small active">Auto</button>
+                    <div class="input-container">
+                        <input
+                            type="text"
+                            id="message-input"
+                            placeholder="Введіть повідомлення..."
+                            autocomplete="off"
+                            maxlength="1000"
+                        >
+                        <button id="send-button" class="btn btn-primary">
+                            <span class="btn-text">Send</span>
+                            <span class="btn-shortcut">↵</span>
+                        </button>
                     </div>
-                </div>
-                
-                <div id="chat-container" class="chat-container">
-                    <div class="message system">
-                        <div class="message-header">
-                            <span class="sender">ATLAS</span>
-                            <span class="timestamp">{{ current_time }}</span>
-                        </div>
-                        <div class="message-content">
-                            Система ініціалізована. Очікую підключення до Atlas Core...
-                        </div>
-                    </div>
-                </div>
-
-                <div class="input-container">
-                    <input 
-                        type="text" 
-                        id="message-input" 
-                        placeholder="Введіть ваше повідомлення..." 
-                        autocomplete="off"
-                        maxlength="1000"
-                    >
-                    <button id="send-button" class="btn btn-primary">
-                        <span class="btn-text">Send</span>
-                        <span class="btn-shortcut">↵</span>
-                    </button>
                 </div>
             </div>
         </div>
 
-        <!-- Footer -->
-        <div class="footer">
-            <div class="footer-left">
-                <span>ATLAS Minimal Interface v2.0</span>
-                <span class="separator">|</span>
-                <span id="footer-status">Ready</span>
-            </div>
-            <div class="footer-right">
-                <span id="current-time">{{ current_time }}</span>
-                <span class="separator">|</span>
-                <span>Build: 20250901</span>
-            </div>
-        </div>
     </div>
 
     <!-- Loading Overlay -->

@@ -30,6 +30,9 @@ class AtlasApp {
             this.managers.status = new AtlasStatusManager();
             this.managers.chat = new AtlasChatManager();
             
+            // Ініціалізуємо мінімалістичний чат
+            this.initMinimalChat();
+            
             // Робимо глобально доступними
             window.atlasLogger = this.managers.logger;
             window.atlasChat = this.managers.chat;
@@ -48,6 +51,22 @@ class AtlasApp {
         } catch (error) {
             console.error('Atlas initialization error:', error);
             this.showErrorMessage(`Initialization failed: ${error.message}`);
+        }
+    }
+    
+    initMinimalChat() {
+        // Ініціалізуємо мінімалістичний чат
+        const chatToggle = document.getElementById('chat-toggle');
+        const chatContent = document.getElementById('chat-content');
+        
+        if (chatToggle && chatContent) {
+            chatToggle.addEventListener('click', () => {
+                const isVisible = chatContent.style.display !== 'none';
+                chatContent.style.display = isVisible ? 'none' : 'block';
+                chatToggle.textContent = isVisible ? '💬 Chat' : '❌ Close';
+            });
+            
+            this.log('Minimal chat initialized');
         }
     }
     

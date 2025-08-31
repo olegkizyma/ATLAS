@@ -14,7 +14,7 @@ class AtlasLogger {
     }
     
     init() {
-        this.logsContainer = document.getElementById('logsContainer');
+        this.logsContainer = document.getElementById('logs-container');
         
         if (!this.logsContainer) {
             console.error('Logs container not found');

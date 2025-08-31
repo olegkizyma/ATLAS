@@ -19,7 +19,7 @@ class AtlasStatusManager {
         this.resourceStatus = document.getElementById('resourceStatus');
         
         if (!this.statusPanel) {
-            console.warn('Status panel not found - status monitoring disabled');
+            console.warn('Status panel not found - status monitoring disabled (logs-only mode)');
             return;
         }
         

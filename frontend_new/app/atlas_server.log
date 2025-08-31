@@ -394,3 +394,566 @@
 2025-09-01 01:27:50,891 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:27:50] "[36mGET /static/css/minimal.css HTTP/1.1[0m" 304 -
 2025-09-01 01:27:50,891 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:27:50] "[36mGET /static/js/minimal.js HTTP/1.1[0m" 304 -
 2025-09-01 01:29:03,465 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 02:14:48,512 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 02:14:48,515 [atlas.server] INFO: Atlas API initialized
+2025-09-01 02:14:48,515 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 02:14:48,515 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 02:14:48,515 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 02:14:48,522 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 02:14:48,523 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 02:14:54,008 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET / HTTP/1.1" 200 -
+2025-09-01 02:14:54,018 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 02:14:54,018 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:14:54,019 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 02:14:54,019 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 02:14:54,020 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 02:14:54,020 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:14:54,022 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 02:14:54,046 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 02:14:54,054 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET / HTTP/1.1" 200 -
+2025-09-01 02:14:54,057 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,058 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,058 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,059 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,059 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,059 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 02:14:54,061 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,309 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,312 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:14:54,318 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:14:54] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 02:23:00,593 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET / HTTP/1.1" 200 -
+2025-09-01 02:23:00,598 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:23:00,598 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 02:23:00,599 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 02:23:00,599 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 02:23:00,601 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 02:23:00,602 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:23:00,603 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 02:23:00,657 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 02:23:00,663 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET / HTTP/1.1" 200 -
+2025-09-01 02:23:00,664 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:00,664 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:23:00,665 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:00,666 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:00,667 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:00,667 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:23:00,668 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:00] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 02:23:01,701 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:01] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 02:23:02,047 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:02] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,873 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "GET / HTTP/1.1" 200 -
+2025-09-01 02:23:36,879 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:23:36,881 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,881 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,883 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,883 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,884 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,885 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,919 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:23:36,920 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:23:36] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,200 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "GET / HTTP/1.1" 200 -
+2025-09-01 02:24:02,206 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:24:02,207 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,208 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,208 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,210 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,211 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,211 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,335 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:24:02,335 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:02] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,225 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "GET /?cache_bust=123456789 HTTP/1.1" 200 -
+2025-09-01 02:24:27,240 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,240 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,242 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,242 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,242 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,244 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,246 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,286 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:24:27,286 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:27] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,769 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "GET /?cache_bust=123456789 HTTP/1.1" 200 -
+2025-09-01 02:24:30,777 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,777 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,777 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,780 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,780 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,781 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,781 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,812 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:24:30,813 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:24:30] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:24:36,709 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 02:24:54,437 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 02:24:54,439 [atlas.server] INFO: Atlas API initialized
+2025-09-01 02:24:54,439 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 02:24:54,439 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 02:24:54,439 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 02:24:54,446 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 02:24:54,446 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 02:25:02,540 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "GET / HTTP/1.1" 200 -
+2025-09-01 02:25:02,558 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,558 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,558 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,558 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,559 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,560 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,560 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:25:02,695 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:02] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:25:23,520 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "GET / HTTP/1.1" 200 -
+2025-09-01 02:25:23,525 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:25:23,526 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:25:23,528 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:23,529 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:23,531 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:25:23,531 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 02:25:23,531 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:23,567 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:25:23,567 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:23] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,106 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "GET / HTTP/1.1" 200 -
+2025-09-01 02:25:35,113 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,114 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,115 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,115 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 02:25:35,117 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,118 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,118 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,141 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:25:35,152 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:25:35,152 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:35] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:25:38,144 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:38] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:25:41,143 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:41] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:25:44,144 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:44] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:25:46,230 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 02:25:51,155 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 02:25:51,158 [atlas.server] INFO: Atlas API initialized
+2025-09-01 02:25:51,158 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 02:25:51,158 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 02:25:51,158 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 02:25:51,165 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 02:25:51,165 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 02:25:53,145 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:53] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:25:55,247 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "GET / HTTP/1.1" 200 -
+2025-09-01 02:25:55,262 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:25:55,263 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:55,263 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:25:55,263 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 02:25:55,266 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:25:55,266 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 02:25:55,267 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:25:55,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:25:55,297 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:25:55,297 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:55] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:25:58,297 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:25:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:01,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:04,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:07,297 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:10,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:13,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:16,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:19,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:22,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:25,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:28,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:31,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:34,296 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:37,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:40,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:43,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:46,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:49,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:52,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:55,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:26:58,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:26:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:01,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:04,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:07,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:10,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:13,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:16,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:19,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:22,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:25,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:28,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:31,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:34,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:37,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:40,292 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:43,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:46,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:49,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:52,295 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:55,293 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:27:58,294 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:27:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:01,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:04,291 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:05,490 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "GET / HTTP/1.1" 200 -
+2025-09-01 02:28:05,496 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:28:05,497 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:28:05,498 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:28:05,498 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:28:05,499 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:28:05,500 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:28:05,502 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:05] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 02:28:06,412 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:06] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:06,418 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:06] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:28:06,419 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:06] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:28:09,415 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:09] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:12,414 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:12] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:15,413 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:15] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:18,413 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:18] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:18,980 [atlas.server] INFO: Received signal 15, shutting down...
+2025-09-01 02:28:54,060 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 02:28:54,063 [atlas.server] INFO: Atlas API initialized
+2025-09-01 02:28:54,063 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 02:28:54,063 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 02:28:54,063 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 02:28:54,069 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 02:28:54,070 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 02:28:54,414 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:54] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:28:57,416 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:28:57] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:00,416 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:00] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:03,417 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:03] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:06,417 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:06] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:09,415 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:09] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:12,414 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:12] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:15,415 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:15] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:18,414 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:18] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:19,233 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "GET / HTTP/1.1" 200 -
+2025-09-01 02:29:19,242 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:29:19,242 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:29:19,244 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:29:19,245 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:29:19,246 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:29:19,247 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:29:19,247 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 02:29:19,363 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:19,371 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:29:19,372 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:19] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:29:22,365 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:25,367 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:28,368 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:31,366 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:34,365 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:37,366 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:40,364 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:43,364 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:46,374 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:49,377 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:52,381 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:53,959 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 02:29:53,960 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:53] "POST /api/chat/stream HTTP/1.1" 200 -
+2025-09-01 02:29:55,385 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:29:58,388 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:29:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:01,394 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:04,389 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:07,394 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:10,394 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:13,395 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:16,396 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:19,397 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:22,397 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:25,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:28,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:31,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:34,400 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:37,400 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:40,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:43,400 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:46,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:49,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:52,401 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:55,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:30:58,401 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:30:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:01,403 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:04,401 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:07,404 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:10,401 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:13,401 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:16,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:19,400 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:22,398 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:25,401 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:28,399 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:30,201 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "GET / HTTP/1.1" 200 -
+2025-09-01 02:31:30,207 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,209 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,211 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,212 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,213 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,213 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,214 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,320 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:30,328 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:31:30,329 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:30] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:31:33,321 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:33] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:36,321 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:36] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:39,322 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:39] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:42,323 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:42] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:45,324 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:45] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:47,409 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "GET / HTTP/1.1" 200 -
+2025-09-01 02:31:47,416 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,417 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,417 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,419 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,420 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,421 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,422 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,445 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:47,457 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:31:47,458 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:47] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:31:50,449 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:50] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:53,448 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:53] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:56,450 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:56] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:31:59,453 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:31:59] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:02,448 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:02] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:05,451 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:05] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:08,450 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:08] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:11,039 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "GET / HTTP/1.1" 200 -
+2025-09-01 02:32:11,048 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,048 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,048 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,050 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,053 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,053 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,053 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,085 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:11,092 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:32:11,093 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:11] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:32:14,087 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:14] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:14,485 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 02:32:16,691 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 02:32:16,694 [atlas.server] INFO: Atlas API initialized
+2025-09-01 02:32:16,694 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 02:32:16,694 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 02:32:16,694 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 02:32:16,700 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 02:32:16,701 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 02:32:17,087 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:17] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:20,086 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:20] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:23,087 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:23] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:26,085 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:26] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:29,087 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:29,617 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET / HTTP/1.1" 200 -
+2025-09-01 02:32:29,628 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:32:29,629 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 02:32:29,629 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:32:29,629 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 02:32:29,629 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 02:32:29,632 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 02:32:29,633 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 02:32:29,656 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 02:32:29,661 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET / HTTP/1.1" 200 -
+2025-09-01 02:32:29,662 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:32:29,662 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:29,663 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:29,664 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:29,664 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:32:29,665 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:32:29,666 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 02:32:29,883 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:29,891 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:32:29,892 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:29] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 02:32:32,891 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:32] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:35,888 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:35] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:38,887 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:38] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:41,888 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:41] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:44,887 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:44] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:47,887 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:47] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:50,886 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:50] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:53,885 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:53] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:56,886 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:56] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:32:59,885 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:32:59] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:02,885 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:02] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:05,884 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:05] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:08,886 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:08] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:11,887 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:11] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:14,886 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:14] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:17,886 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:17] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:20,887 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:20] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:23,884 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:23] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:26,886 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:26] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:29,885 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:29] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:32,885 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:32] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:35,884 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:35] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:38,884 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:38] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:41,884 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:41] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:44,886 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:44] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:46,704 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "GET / HTTP/1.1" 200 -
+2025-09-01 02:33:46,710 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,712 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,712 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,712 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,715 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,715 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,715 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,899 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:46,905 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:33:46,908 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:46] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:33:49,902 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:52,902 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:55,903 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:33:58,904 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:33:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:01,902 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:04,901 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:07,902 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:10,903 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:13,902 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:16,901 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:19,901 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:22,901 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:25,359 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 02:34:26,839 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 02:34:26,842 [atlas.server] INFO: Atlas API initialized
+2025-09-01 02:34:26,842 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 02:34:26,842 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 02:34:26,842 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 02:34:26,849 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 02:34:26,850 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 02:34:28,901 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:28,999 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:28] "GET / HTTP/1.1" 200 -
+2025-09-01 02:34:29,010 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,011 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,012 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,015 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,016 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,016 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,017 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,048 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:29,055 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,056 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,968 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "GET / HTTP/1.1" 200 -
+2025-09-01 02:34:29,975 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,975 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,976 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,977 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,978 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,979 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:29,979 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:29] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:30,003 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:30] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:30,013 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:30] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:34:30,014 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:30] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:34:33,006 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:33] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:36,006 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:36] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:39,005 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:39] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:40,310 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET / HTTP/1.1" 200 -
+2025-09-01 02:34:40,317 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:34:40,318 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 02:34:40,321 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 02:34:40,321 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:34:40,321 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 02:34:40,322 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 02:34:40,322 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 02:34:40,343 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 02:34:40,348 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET / HTTP/1.1" 200 -
+2025-09-01 02:34:40,349 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:40,349 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:34:40,350 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:40,351 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:40,352 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:34:40,352 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:34:40,353 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 02:34:40,576 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:40,584 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 02:34:40,584 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:40] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:34:43,577 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:46,577 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:49,578 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:52,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:55,580 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:34:58,580 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:34:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:01,578 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:04,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:07,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:10,578 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:13,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:16,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:19,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:22,577 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:25,577 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:28,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:31,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:34,580 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:37,578 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:40,578 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:43,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:45,337 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "GET / HTTP/1.1" 200 -
+2025-09-01 02:35:45,344 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,346 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,346 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,347 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,349 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,349 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,349 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,518 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:45,526 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:35:45,528 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:45] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:35:48,520 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:48] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:51,520 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:51,635 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "GET / HTTP/1.1" 200 -
+2025-09-01 02:35:51,642 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,642 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,644 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,644 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,645 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,646 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,646 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,669 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:51,681 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:35:51,681 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:51] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 02:35:54,671 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:54] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:35:57,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:35:57] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:00,671 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:00] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:03,671 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:03] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:06,670 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:06] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:08,829 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 02:36:10,258 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 02:36:10,260 [atlas.server] INFO: Atlas API initialized
+2025-09-01 02:36:10,260 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 02:36:10,260 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 02:36:10,260 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 02:36:10,267 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 02:36:10,267 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 02:36:12,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:12] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:15,673 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:15] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:16,748 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:16] "GET / HTTP/1.1" 200 -
+2025-09-01 02:36:16,763 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:16] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 02:36:16,764 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:16] "[36mGET /static/js/utils.js HTTP/1.1[0m" 304 -
+2025-09-01 02:36:16,766 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:16] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 02:36:16,768 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:16] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 02:36:16,769 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:16] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 02:36:16,770 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:16] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 02:36:17,085 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:17] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:17,102 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:17] "[36mGET /static/assets/DamagedHelmet.glb HTTP/1.1[0m" 304 -
+2025-09-01 02:36:18,671 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:18] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:20,090 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:20] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:21,673 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:21] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:23,089 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:23] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:24,675 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:24] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:26,088 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:26] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:27,673 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:27] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:29,095 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:29] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:30,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:30] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:32,092 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:32] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:33,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:33] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:35,088 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:35] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:36,670 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:36] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:38,093 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:38] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:39,673 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:39] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:41,093 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:41] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:42,671 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:42] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:44,092 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:44] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:45,674 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:45] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:47,093 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:47] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:48,053 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 02:36:48,053 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:48] "POST /api/chat/stream HTTP/1.1" 200 -
+2025-09-01 02:36:48,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:48] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:50,094 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:50] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:51,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:51] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:53,092 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:53] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 02:36:54,672 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 02:36:54] "GET /logs?limit=100 HTTP/1.1" 200 -
