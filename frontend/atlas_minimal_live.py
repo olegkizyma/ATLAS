@@ -1684,6 +1684,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             session_type = self.determine_session_type(user_message, data.get("session_type"))
             session_name = data.get("session_name") or self.get_session_name(user_message, session_type)
 
+            # Розширене перефразування запиту (можна вимкнути no_paraphrase=true)
+            use_paraphrase = self._should_paraphrase(data)
+            message_to_send = self._paraphrase_user_message(user_message) if use_paraphrase else user_message
+
             self.send_response(200)
             self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
             self.send_header('Cache-Control', 'no-cache')
@@ -1704,9 +1708,62 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 except Exception as e:
                     logger.error(f"SSE write error: {e}")
 
-            send_event({"type": "status", "message": "connected", "session": session_name})
+            send_event({"type": "status", "message": "connected", "session": session_name, "paraphrase": use_paraphrase})
 
             accumulated: list[str] = []
+
+            def _safe_lower(s: str) -> str:
+                try:
+                    return s.lower()
+                except Exception:
+                    return s
+
+            def _extract_embedded_json(text: str):
+                """Пробує дістати JSON з ```json ...``` або з перших/останніх дужок.
+                Повертає dict або None.
+                """
+                try:
+                    import json as _json
+                    import re as _re
+                    # ```json ... ```
+                    m = _re.search(r"```json\s*(\{[\s\S]*?\})\s*```", text, _re.IGNORECASE)
+                    if m:
+                        return _json.loads(m.group(1))
+                    # перша об'єктна дужка до останньої
+                    start = text.find('{')
+                    end = text.rfind('}')
+                    if start != -1 and end != -1 and end > start:
+                        candidate = text[start:end+1]
+                        return _json.loads(candidate)
+                except Exception:
+                    return None
+                return None
+
+            def _needs_auto_follow_up(full_text: str) -> bool:
+                """Груба евристика: якщо асистент просить підтвердження/вибір або JSON каже completed=false."""
+                t = _safe_lower(full_text)
+                cues = [
+                    "підтверд", "продовжити", "можу продовжити", "обери", "вибери", "обрати", "вибрати",
+                    "confirm", "should i proceed", "continue?", "choose", "select"
+                ]
+                if any(c in t for c in cues):
+                    return True
+                data = _extract_embedded_json(full_text) or {}
+                if isinstance(data, dict):
+                    if data.get("completed") is False:
+                        return True
+                    status = str(data.get("status", "")).lower()
+                    if any(x in status for x in ["pending", "awaiting", "confirm", "incomplete"]):
+                        return True
+                return False
+
+            def _compose_auto_follow_up(full_text: str, original_prompt: str) -> str:
+                """Стандартизоване серверне продовження без потреби у підтвердженні."""
+                return (
+                    "Так, продовжуй без додаткових підтверджень. Якщо потрібно зробити вибір — обирай перший безпечний,"
+                    " без реклами/органічний результат. Заверши завдання автоматично і дай короткий підсумок. "
+                    "If you need confirmation: assume yes and proceed."
+                )
 
             def _is_web():
                 try:
@@ -1722,7 +1779,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     ws_url = self.goose_api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
                     payload = {
                         "type": "message",
-                        "content": user_message,
+                        "content": message_to_send,
                         "session_id": session_name,
                         "timestamp": int(time.time() * 1000),
                     }
@@ -1767,6 +1824,68 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                     finally:
                         asyncio.set_event_loop(None)
                         loop.close()
+                # Server-side auto follow-up (single chained message)
+                try:
+                    full_text = "".join(accumulated)
+                    if _needs_auto_follow_up(full_text):
+                        # Невелика пауза, щоб дати шанс користувачу втрутитися (8с)
+                        try:
+                            time.sleep(8)
+                        except Exception:
+                            pass
+                        follow_up = _compose_auto_follow_up(full_text, user_message)
+                        send_event({"type": "status", "message": "server_auto_followup", "follow_up": follow_up})
+
+                        async def _via_ws_and_stream_followup():
+                            ws_url = self.goose_api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+                            payload = {
+                                "type": "message",
+                                "content": follow_up,
+                                "session_id": session_name,
+                                "timestamp": int(time.time() * 1000),
+                            }
+                            timeout_total = aiohttp.ClientTimeout(total=300)
+                            async with aiohttp.ClientSession(timeout=timeout_total) as session:
+                                async with session.ws_connect(ws_url, heartbeat=30) as ws:
+                                    await ws.send_str(json.dumps(payload))
+                                    async for msg in ws:
+                                        if msg.type == aiohttp.WSMsgType.TEXT:
+                                            try:
+                                                obj = json.loads(msg.data)
+                                            except Exception:
+                                                obj = None
+                                            if isinstance(obj, dict):
+                                                t = obj.get("type")
+                                                if t == "response":
+                                                    content = obj.get("content")
+                                                    if content:
+                                                        token = str(content)
+                                                        accumulated.append(token)
+                                                        send_event({
+                                                            "type": "token",
+                                                            "token": token,
+                                                            "accumulated": "".join(accumulated)
+                                                        })
+                                                elif t in ("complete", "cancelled"):
+                                                    break
+                                                elif t == "error":
+                                                    send_event({"type": "error", "error": obj.get("message", "websocket error")})
+                                                    return
+                                        elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                            break
+
+                        try:
+                            asyncio.run(_via_ws_and_stream_followup())
+                        except RuntimeError:
+                            loop = asyncio.new_event_loop()
+                            try:
+                                asyncio.set_event_loop(loop)
+                                loop.run_until_complete(_via_ws_and_stream_followup())
+                            finally:
+                                asyncio.set_event_loop(None)
+                                loop.close()
+                except Exception as _e:
+                    logger.debug(f"Auto-followup WS skipped: {_e}")
             else:
                 url = f"{self.goose_api_url}/reply"
                 headers = {
@@ -1779,7 +1898,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                         {
                             "role": "user",
                             "created": int(time.time()),
-                            "content": [{"type": "text", "text": user_message}],
+                            "content": [{"type": "text", "text": message_to_send}],
                         }
                     ],
                     "session_id": session_name,
@@ -1836,6 +1955,82 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                                 break
                         elif line.lower() == "event: done":
                             break
+
+                # Server-side auto follow up for goosed SSE (single chained message)
+                try:
+                    full_text = "".join(accumulated)
+                    if _needs_auto_follow_up(full_text):
+                        # Невелика пауза, щоб дати шанс користувачу втрутитися (8с)
+                        try:
+                            time.sleep(8)
+                        except Exception:
+                            pass
+                        follow_up = _compose_auto_follow_up(full_text, user_message)
+                        send_event({"type": "status", "message": "server_auto_followup", "follow_up": follow_up})
+
+                        payload_follow = {
+                            "messages": [
+                                {
+                                    "role": "user",
+                                    "created": int(time.time()),
+                                    "content": [{"type": "text", "text": follow_up}],
+                                }
+                            ],
+                            "session_id": session_name,
+                            "session_working_dir": os.getcwd(),
+                        }
+
+                        with requests.post(url, json=payload_follow, headers=headers, stream=True, timeout=300) as resp2:
+                            if resp2.status_code == 200:
+                                for raw_line in resp2.iter_lines(decode_unicode=True):
+                                    if raw_line is None:
+                                        continue
+                                    line = raw_line.strip()
+                                    if not line or line.startswith(":"):
+                                        continue
+                                    if line.startswith("data:"):
+                                        data_part = line[5:].lstrip()
+                                        token = None
+                                        is_done = False
+                                        try:
+                                            obj = json.loads(data_part)
+                                            if isinstance(obj, dict):
+                                                if obj.get("type") == "Message" and isinstance(obj.get("message"), dict):
+                                                    msg = obj["message"]
+                                                    for c in msg.get("content", []) or []:
+                                                        if isinstance(c, dict) and c.get("type") == "text":
+                                                            t = c.get("text")
+                                                            if t:
+                                                                token = str(t)
+                                                                accumulated.append(token)
+                                                                send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                                                else:
+                                                    token = obj.get("text") or obj.get("token") or obj.get("content")
+                                                    if token:
+                                                        token = str(token)
+                                                        accumulated.append(token)
+                                                        send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                                                    is_done = bool(obj.get("final") or obj.get("done"))
+                                            else:
+                                                token = str(obj)
+                                                accumulated.append(token)
+                                                send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                                        except Exception:
+                                            token = data_part
+                                            accumulated.append(token)
+                                            send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                                        if is_done:
+                                            break
+                                    elif line.lower() == "event: done":
+                                        break
+                            else:
+                                try:
+                                    body2 = resp2.text[:500]
+                                except Exception:
+                                    body2 = "<no body>"
+                                send_event({"type": "error", "error": f"HTTP {resp2.status_code}", "response": body2})
+                except Exception as _e:
+                    logger.debug(f"Auto-followup SSE skipped: {_e}")
 
             send_event({"type": "done", "total": "".join(accumulated), "session": session_name})
         except (BrokenPipeError, ConnectionResetError):
@@ -2081,6 +2276,52 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         else:
             # Універсальна сесія
             return "general_assistant"
+
+    def _should_paraphrase(self, data: dict) -> bool:
+        """Чи вмикати перефразування. Можна вимкнути полем no_paraphrase=true в запиті або змінною оточення."""
+        try:
+            if isinstance(data, dict) and str(data.get("no_paraphrase", "")).lower() in ("1", "true", "yes"):  # явне вимкнення
+                return False
+        except Exception:
+            pass
+        # За замовчуванням вмикаємо; можна глобально вимкнути через ENV
+        return os.getenv("ATLAS_PARAPHRASE", "1") not in ("0", "false", "False")
+
+    def _paraphrase_user_message(self, user_message: str) -> str:
+        """Перефразовує запит у формат від першої особи, з чіткою метою та без потреби підтвердження.
+
+        Без LLM: прості правила формують директиву для Goose. Оригінальний текст додаємо внизу.
+        """
+        msg = (user_message or "").strip()
+
+        # Універсальний шаблон без доменної прив'язки
+        rules = [
+            "Працюю автономно, не прошу додаткових підтверджень.",
+            "Якщо потрібен вибір — приймаю обґрунтоване і безпечне рішення самостійно.",
+            "Уникаю зайвих пауз, доводжу задачу до завершення.",
+            "Перевіряю результат і надаю стислий підсумок наприкінці.",
+        ]
+
+        steps = [
+            "Уточнити внутрішньо вимоги і критерії готовності (Definition of Done).",
+            "Розбити задачу на конкретні кроки і виконати їх послідовно.",
+            "За потреби: самостійно обрати інструменти/ресурси і продовжити без запитань.",
+            "Верифікувати отриманий результат і зафіксувати короткий підсумок.",
+        ]
+
+        rules_lines = "\n".join(f"- {r}" for r in rules)
+        steps_lines = "\n".join(f"- {s}" for s in steps)
+
+        directive = (
+            "Я беру на себе виконання завдання повністю і автономно.\n"
+            "Правила:\n"
+            f"{rules_lines}\n"
+            "План дій:\n"
+            f"{steps_lines}\n"
+            "Оригінальний запит користувача (контекст, не для цитування як є): " + msg
+        )
+
+        return directive
     
     def send_json_response(self, data, status_code=200):
         """Відправка JSON відповіді"""
