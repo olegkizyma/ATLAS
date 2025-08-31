@@ -1,0 +1,1378 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atlas Minimal Interface</title>
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            background: #000000;
+            color: #00ff41;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            overflow: hidden;
+            height: 100vh;
+            width: 100vw;
+        }
+
+        /* 3D Viewer Background Layer */
+        .background-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 1;
+        }
+
+        model-viewer {
+            width: 100%;
+            height: 100%;
+            background-color: #000000;
+            opacity: 0.3;
+        }
+
+        /* Interface Overlay Layer */
+        .interface-layer {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            z-index: 10;
+            pointer-events: none;
+        }
+
+        /* Left Panel - MCP Logs */
+        .logs-panel {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 30%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px; /* рівномірно; текст відступимо всередині контейнера */
+            pointer-events: auto;
+            border-right: none; /* без лінії */
+        }
+
+        .logs-container {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-right: 12px; /* трохи менше, бо скрол схований */
+            /* scrollbar-width: none;  (Removed for broader compatibility) */
+            -ms-overflow-style: none; /* IE / старий Edge */
+        }
+
+        .logs-container::-webkit-scrollbar {
+            width: 0;
+            height: 0;
+        }
+
+        .log-line {
+            color: #4a9c5a;
+            margin: 0;
+            padding: 2px 0 1px 0; /* трохи більше вертикального відступу для більшого шрифту */
+            word-wrap: break-word;
+            font-size: 11px; /* було 10px */
+            line-height: 1.28; /* підлаштовано для читабельності */
+            font-family: 'Courier New', monospace;
+            font-weight: normal; /* не жирний шрифт */
+            white-space: pre-wrap;
+            letter-spacing: 0.3px; /* легке розрідження для хакерського вигляду */
+        }
+
+        .log-line.error {
+            color: #d16969;
+        }
+
+        .log-line.warning {
+            color: #d19a66;
+        }
+
+        .log-line.info {
+            color: #5c9e5c;
+        }
+
+        .log-line.debug {
+            color: #4a7a5a;
+            opacity: 0.7;
+        }
+
+        /* Right Panel - Chat */
+        .chat-panel {
+            position: absolute;
+            right: 0;
+            top: 0;
+            width: 50%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px;
+            pointer-events: auto;
+            border-left: 1px solid rgba(0, 255, 65, 0.1);
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Status Panel - System Status */
+        .status-panel {
+            position: absolute;
+            left: 30%;
+            top: 0;
+            width: 20%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.4);
+            padding: 8px;
+            pointer-events: auto;
+            font-size: 10px;
+            border-left: 1px solid rgba(0, 255, 65, 0.1);
+        }
+
+        .status-container {
+            height: 100%;
+            overflow-y: auto;
+            overflow-x: hidden;
+            padding-right: 8px;
+        }
+
+        .status-section {
+            margin-bottom: 12px;
+            border-bottom: 1px solid rgba(0, 255, 65, 0.2);
+            padding-bottom: 6px;
+        }
+
+        .status-title {
+            color: #00ff41;
+            font-weight: bold;
+            font-size: 11px;
+            margin-bottom: 4px;
+        }
+
+        .status-item {
+            color: #00ff41;
+            margin: 1px 0;
+            font-size: 9px;
+            opacity: 0.8;
+        }
+
+        .status-item.online {
+            color: #00ff41;
+        }
+
+        .status-item.warning {
+            color: #ffff41;
+        }
+
+        .status-item.error {
+            color: #ff4141;
+        }
+
+        .chat-messages {
+            flex: 1;
+            overflow-y: auto;
+            padding: 4px;
+            margin-bottom: 8px;
+        }
+
+        .message {
+            margin-bottom: 6px;
+            padding: 4px 6px;
+            border: 1px solid rgba(0, 255, 65, 0.1);
+            border-radius: 2px;
+            background: rgba(0, 0, 0, 0.2);
+        }
+
+        .message.user {
+            border-color: rgba(0, 255, 65, 0.3);
+            text-align: right;
+        }
+
+        .message.assistant {
+            border-color: rgba(0, 255, 65, 0.2);
+        }
+
+        .message-text {
+            color: #00ff41;
+            font-size: 11px;
+            line-height: 1.3;
+        }
+
+        .message-time {
+            color: #006622;
+            font-size: 9px;
+            margin-top: 2px;
+        }
+
+        /* Badges */
+        .badge {
+            display: inline-block;
+            margin-left: 6px;
+            font-size: 9px;
+            padding: 1px 4px;
+            border-radius: 3px;
+            border: 1px solid rgba(0, 255, 65, 0.3);
+        }
+        .badge.queued {
+            color: #ffff41;
+            border-color: rgba(255, 255, 65, 0.5);
+        }
+
+        /* Chat Input Area */
+        .chat-input-area {
+            display: flex;
+            gap: 6px;
+            align-items: flex-end;
+            position: relative;
+        }
+
+
+
+        .chat-input {
+            flex: 1;
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 65, 0.2);
+            color: #00ff41;
+            padding: 6px;
+            font-family: 'Courier New', monospace;
+            font-size: 11px;
+            resize: none;
+            min-height: 20px;
+            max-height: 60px;
+        }
+
+        .chat-input:focus {
+            outline: none;
+            border-color: rgba(0, 255, 65, 0.4);
+        }
+
+        .voice-button {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 65, 0.2);
+            color: #00ff41;
+            padding: 6px 8px;
+            cursor: pointer;
+            font-family: 'Courier New', monospace;
+            font-size: 10px;
+            transition: all 0.2s;
+        }
+
+        .voice-button:hover {
+            border-color: rgba(0, 255, 65, 0.4);
+            background: rgba(0, 255, 65, 0.1);
+        }
+
+        .voice-button.listening {
+            background: rgba(0, 255, 65, 0.2);
+            border-color: rgba(0, 255, 65, 0.6);
+        }
+
+        .voice-button.continuous {
+            background: rgba(255, 255, 65, 0.2);
+            border-color: rgba(255, 255, 65, 0.6);
+            color: #ffff41;
+        }
+
+        /* Session Controls */
+        .session-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 10px;
+            padding: 8px 12px;
+            background: linear-gradient(135deg, #f8f9fa 0%, #e9ecef 100%);
+            border-radius: 8px;
+            border: 1px solid #dee2e6;
+        }
+
+        .current-session {
+            font-size: 12px;
+            color: #495057;
+            background: #ffffff;
+            padding: 4px 8px;
+            border-radius: 4px;
+            border: 1px solid #ced4da;
+            margin-left: auto;
+            white-space: nowrap;
+        }        .session-btn {
+            background: rgba(0, 0, 0, 0.6);
+            border: 1px solid rgba(0, 255, 65, 0.2);
+            color: #00ff41;
+            padding: 4px 6px;
+            cursor: pointer;
+            font-size: 10px;
+            transition: all 0.2s;
+            min-width: 24px;
+        }
+
+        .session-btn:hover {
+            border-color: rgba(0, 255, 65, 0.4);
+            background: rgba(0, 255, 65, 0.1);
+        }
+
+        .session-btn.active {
+            background: rgba(0, 255, 65, 0.2);
+            border-color: rgba(0, 255, 65, 0.6);
+        }
+
+        .current-session {
+            font-size: 9px;
+            color: rgba(0, 255, 65, 0.6);
+            margin-left: 4px;
+        }
+
+        /* Scrollbar Styling */
+        ::-webkit-scrollbar {
+            width: 4px;
+        }
+
+        ::-webkit-scrollbar-track {
+            background: rgba(0, 0, 0, 0.3);
+        }
+
+        ::-webkit-scrollbar-thumb {
+            background: rgba(0, 255, 65, 0.3);
+            border-radius: 2px;
+        }
+
+        ::-webkit-scrollbar-thumb:hover {
+            background: rgba(0, 255, 65, 0.5);
+        }
+    </style>
+</head>
+<body>
+    <!-- Background 3D Layer -->
+    <div class="background-layer">
+        <model-viewer 
+            src="DamagedHelmet.glb" 
+            alt="Atlas 3D Interface"
+            auto-rotate 
+            camera-controls 
+            environment-image="neutral"
+            exposure="0.1"
+            shadow-intensity="0.02"
+            tone-mapping="neutral">
+        </model-viewer>
+    </div>
+
+    <!-- Interface Overlay -->
+    <div class="interface-layer">
+        <!-- Left Panel - MCP Logs -->
+        <div class="logs-panel">
+            <div class="logs-container" id="logsContainer">
+                <div class="log-line debug">[05:21:07] [ATLAS] System initializing...</div>
+                <div class="log-line debug">[05:21:09] [TTS] Service ready</div>
+                <div class="log-line debug">[05:21:10] [AUTO] Automation ready</div>
+                <div class="log-line debug">[05:21:11] [NET] Ports listening</div>
+            </div>
+        </div>
+
+        <!-- Status Panel - System Status -->
+        <div class="status-panel">
+            <div class="status-container" id="statusContainer">
+                <div class="status-section">
+                    <div class="status-title">PROCESSES</div>
+                    <div id="processStatus">
+                        <div class="status-item">Atlas: 0</div>
+                        <div class="status-item">Goose: 0</div>
+                        <div class="status-item">MCP: 0</div>
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-title">SERVICES</div>
+                    <div id="serviceStatus">
+                        <div class="status-item">Core: offline</div>
+                        <div class="status-item">MCP: offline</div>
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-title">NETWORK</div>
+                    <div id="networkStatus">
+                        <div class="status-item">Connections: 0</div>
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-title">RESOURCES</div>
+                    <div id="resourceStatus">
+                        <div class="status-item">CPU: --</div>
+                        <div class="status-item">Disk: --</div>
+                    </div>
+                </div>
+                
+                <div class="status-section">
+                    <div class="status-title">ATLAS INTELLIGENCE</div>
+                    <div id="atlasIntelligenceStatus">
+                        <div class="status-item">Auto-corrections: --</div>
+                        <div class="status-item">Grisha verifications: --</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Right Panel - Chat -->
+        <div class="chat-panel">
+            <div class="chat-messages" id="chatMessages">
+                <div class="message assistant">
+                    <div class="message-text">Atlas Minimal Interface активний</div>
+                    <div class="message-time">00:00:01</div>
+                </div>
+            </div>
+            
+            <div class="chat-input-area">
+
+                <!-- Кнопки управління сесіями -->
+                <div class="session-controls">
+                    <button id="newSessionBtn" class="session-btn new-session" title="Нове завдання">🆕</button>
+                    <button id="continueSessionBtn" class="session-btn continue-session" title="Продовжити поточне">▶️</button>
+                    <span id="currentSession" class="current-session">Автоматично</span>
+                </div>
+                
+                <textarea 
+                    id="chatInput" 
+                    class="chat-input" 
+                    placeholder="Введіть повідомлення..."
+                    rows="1"></textarea>
+                <button id="voiceButton" class="voice-button">🎤</button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+    class AtlasMinimalInterface {
+            constructor() {
+                this.voiceMode = 'off'; // 'off', 'single', 'continuous'
+                this.recognition = null;
+                this.isListening = false;
+                // Керування порядком повідомлень/стрімів
+                this.isStreaming = false;      // активний стрім відповіді
+                this.messageQueue = [];        // черга повідомлень користувача
+                this.clickCount = 0;
+                this.clickTimer = null;
+                this.singleModeSendTimer = null; // таймер очікування 3s у single режимі
+                this.lastFinalTimestamp = 0;
+                this.TTSBlockTimer = null; // пауза для continuous під час "мовлення"
+                this.TTS_ACTIVE = false;
+                
+                // Система управління сесіями
+                this.sessionMode = 'auto'; // 'auto', 'new', 'continue'
+                this.currentSessionName = null;
+                this.TTSBlockTimer = null; // пауза для continuous під час "мовлення"
+                this.TTS_ACTIVE = false;
+                this.SINGLE_INACTIVITY_MS = 3000; // 3s після останнього фінального результату
+                this.MIN_FINAL_CHARS_TO_SEND = 2;
+                // Автовідповідь (коли Goose питає підтвердження)
+                this.autoReplyTimer = null;
+                this.autoReplyActive = false;
+                
+                this.initializeElements();
+                this.initializeVoiceRecognition();
+                this.startMCPLogging();
+                this.startStatusMonitoring();
+                this.bindEvents();
+            }
+
+            initializeElements() {
+                this.chatInput = document.getElementById('chatInput');
+                this.chatMessages = document.getElementById('chatMessages');
+                this.voiceButton = document.getElementById('voiceButton');
+                this.logsContainer = document.getElementById('logsContainer');
+                this.statusContainer = document.getElementById('statusContainer');
+                this.processStatus = document.getElementById('processStatus');
+                this.serviceStatus = document.getElementById('serviceStatus');
+                this.networkStatus = document.getElementById('networkStatus');
+                this.resourceStatus = document.getElementById('resourceStatus');
+            }
+
+
+
+            initializeVoiceRecognition() {
+                if ('webkitSpeechRecognition' in window || 'SpeechRecognition' in window) {
+                    const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+                    this.recognition = new SpeechRecognition();
+                    // Використовуємо continuous=true, але керуємо автопауза / рестарт вручну
+                    this.recognition.continuous = true;
+                    this.recognition.interimResults = true;
+                    this.recognition.lang = 'uk-UA';
+
+                    this.recognition.onresult = (event) => {
+                        let aggregatedFinal = '';
+                        let aggregatedInterim = '';
+                        for (let i = event.resultIndex; i < event.results.length; i++) {
+                            const res = event.results[i];
+                            if (res.isFinal) {
+                                aggregatedFinal += res[0].transcript;
+                            } else {
+                                aggregatedInterim += res[0].transcript;
+                            }
+                        }
+                        // Оновлюємо textarea (фінальний + поточний інтерім)
+                        this.chatInput.value = (aggregatedFinal + aggregatedInterim).trim();
+
+                        if (aggregatedFinal) {
+                            this.lastFinalTimestamp = Date.now();
+                            // SINGLE MODE: створюємо / переносимо таймер 3s після останнього фінального фрагмента
+                            if (this.voiceMode === 'single') {
+                                if (this.singleModeSendTimer) {
+                                    clearTimeout(this.singleModeSendTimer);
+                                }
+                                if ((aggregatedFinal.trim().length) >= this.MIN_FINAL_CHARS_TO_SEND) {
+                                    this.singleModeSendTimer = setTimeout(() => {
+                                        // Перевіряємо що минуло 3s без нових фінальних
+                                        if (Date.now() - this.lastFinalTimestamp >= this.SINGLE_INACTIVITY_MS - 50) {
+                                            this.stopListening();
+                                            this.sendMessage();
+                                        }
+                                    }, this.SINGLE_INACTIVITY_MS);
+                                }
+                            }
+                        }
+                    };
+
+                    this.recognition.onerror = (event) => {
+                        this.logMessage(`[VOICE] Error: ${event.error}`, 'error');
+                        this.stopListening();
+                    };
+
+                    this.recognition.onend = () => {
+                        // Якщо continuous та не активний TTS – перезапускаємо
+                        if (this.voiceMode === 'continuous' && this.isListening && !this.TTS_ACTIVE) {
+                            try { this.recognition.start(); } catch(e) {}
+                        } else {
+                            if (!this.TTS_ACTIVE) {
+                                this.isListening = false;
+                                this.updateVoiceButton();
+                            }
+                        }
+                    };
+                }
+            }
+
+            bindEvents() {
+                // Chat input events
+                this.chatInput.addEventListener('keydown', (e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                        e.preventDefault();
+                        this.sendMessage();
+                    }
+                });
+
+                this.chatInput.addEventListener('input', () => {
+                    this.autoResizeTextarea();
+                });
+
+                // Voice button events
+                this.voiceButton.addEventListener('click', () => {
+                    this.handleVoiceButtonClick();
+                });
+
+                // Session control events
+                const newSessionBtn = document.getElementById('newSessionBtn');
+                const continueSessionBtn = document.getElementById('continueSessionBtn');
+                
+                newSessionBtn.addEventListener('click', () => {
+                    this.setSessionMode('new');
+                });
+                
+                continueSessionBtn.addEventListener('click', () => {
+                    this.setSessionMode('continue');
+                });
+            }
+
+
+
+            setSessionMode(mode) {
+                this.sessionMode = mode;
+                
+                // Оновлюємо UI
+                const newBtn = document.getElementById('newSessionBtn');
+                const continueBtn = document.getElementById('continueSessionBtn');
+                const currentSession = document.getElementById('currentSession');
+                
+                // Скидаємо всі активні стани
+                newBtn.classList.remove('active');
+                continueBtn.classList.remove('active');
+                
+                // Встановлюємо активний стан
+                if (mode === 'new') {
+                    newBtn.classList.add('active');
+                    currentSession.textContent = 'Нова сесія';
+                } else if (mode === 'continue') {
+                    continueBtn.classList.add('active');
+                    currentSession.textContent = 'Продовжити';
+                } else {
+                    currentSession.textContent = 'Автоматично';
+                }
+                
+                // Автоматично скидаємо режим через 10 секунд
+                setTimeout(() => {
+                    if (this.sessionMode === mode) {
+                        this.setSessionMode('auto');
+                    }
+                }, 10000);
+            }
+
+            handleVoiceButtonClick() {
+                this.clickCount++;
+                
+                if (this.clickTimer) {
+                    clearTimeout(this.clickTimer);
+                }
+
+                this.clickTimer = setTimeout(() => {
+                    if (this.clickCount === 1) {
+                        // Single click - continuous mode
+                        this.toggleContinuousMode();
+                    } else if (this.clickCount === 2) {
+                        // Double click - single mode
+                        this.startSingleMode();
+                    }
+                    this.clickCount = 0;
+                }, 300);
+            }
+
+            toggleContinuousMode() {
+                if (this.voiceMode === 'continuous') {
+                    this.stopListening();
+                    this.voiceMode = 'off';
+                } else {
+                    this.startContinuousMode();
+                }
+            }
+
+            startContinuousMode() {
+                if (!this.recognition) return;
+                
+                this.voiceMode = 'continuous';
+                this.startListening();
+                this.logMessage('[VOICE] Continuous mode activated', 'info');
+            }
+
+            startSingleMode() {
+                if (!this.recognition) return;
+                
+                this.voiceMode = 'single';
+                this.startListening();
+                this.logMessage('[VOICE] Single command mode', 'info');
+            }
+
+            startListening() {
+                if (!this.recognition || this.isListening) return;
+                
+                this.isListening = true;
+                this.recognition.start();
+                this.updateVoiceButton();
+            }
+
+            stopListening() {
+                if (!this.recognition || !this.isListening) return;
+                
+                this.isListening = false;
+                this.recognition.stop();
+                if (this.voiceMode === 'single') {
+                    this.voiceMode = 'off';
+                }
+                this.updateVoiceButton();
+            }
+
+            updateVoiceButton() {
+                this.voiceButton.className = 'voice-button';
+                
+                if (this.voiceMode === 'continuous') {
+                    this.voiceButton.classList.add('continuous');
+                    this.voiceButton.textContent = '🔄🎤';
+                } else if (this.isListening) {
+                    this.voiceButton.classList.add('listening');
+                    this.voiceButton.textContent = '🔴🎤';
+                } else {
+                    this.voiceButton.textContent = '🎤';
+                }
+            }
+
+            autoResizeTextarea() {
+                this.chatInput.style.height = 'auto';
+                this.chatInput.style.height = Math.min(this.chatInput.scrollHeight, 60) + 'px';
+            }
+
+            async sendMessage() {
+                const message = this.chatInput.value.trim();
+                // Блокувати надто короткі або порожні повідомлення
+                if (!message || message.length < 2) {
+                    this.logMessage('[CHAT] Введіть повідомлення (мінімум 2 символи)', 'warning');
+                    return;
+                }
+
+                // Очистити таймер одиночного режиму, якщо користувач відправив вручну
+                if (this.singleModeSendTimer) {
+                    clearTimeout(this.singleModeSendTimer);
+                    this.singleModeSendTimer = null;
+                }
+
+                const userEl = this.addMessage(message, 'user');
+                this.chatInput.value = '';
+                this.autoResizeTextarea();
+
+                // Якщо вже йде стрім попереднього запиту – ставимо у чергу
+                if (this.isStreaming) {
+                    // Додаємо бейдж "у черзі"
+                    const timeDiv = userEl.querySelector('.message-time');
+                    if (timeDiv) {
+                        const badge = document.createElement('span');
+                        badge.className = 'badge queued';
+                        badge.textContent = 'у черзі';
+                        timeDiv.appendChild(badge);
+                    }
+                    this.messageQueue.push({ text: message, el: userEl });
+                    this.logMessage(`[QUEUE] Додано у чергу (len=${this.messageQueue.length})`);
+                    return;
+                }
+
+                // Спочатку намагаємось стрімінгом
+                try {
+                    await this.sendToAtlasStream(message);
+                } catch (error) {
+                    this.logMessage(`[CHAT] Stream error, fallback to non-stream: ${error.message}`, 'warning');
+                    try {
+                        const response = await this.sendToAtlas(message);
+                        this.addMessage(response, 'assistant');
+                    } catch (e2) {
+                        this.addMessage(`Помилка: ${e2.message}`, 'assistant');
+                        this.logMessage(`[CHAT] Error: ${e2.message}`, 'error');
+                    }
+                }
+            }
+
+            async sendToAtlas(message) {
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const url = `${baseUrl}/api/chat`;
+                
+                // Визначаємо тип сесії для відправки
+                let sessionType = null;
+                if (this.sessionMode === 'new') {
+                    sessionType = 'new_session';
+                } else if (this.sessionMode === 'continue') {
+                    sessionType = 'continue_session';
+                }
+                
+                const requestData = { 
+                    message,
+                    session_type: sessionType
+                };
+                
+                try {
+                    // Створюємо AbortController для таймауту (підвищено до 180 сек)
+                    const controller = new AbortController();
+                    const timeoutId = setTimeout(() => controller.abort(), 180000);
+                    
+                    const response = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(requestData),
+                        signal: controller.signal
+                    });
+                    
+                    clearTimeout(timeoutId); // Скасовуємо таймаут якщо запит успішний
+                    
+                    if (response.ok) {
+                        const data = await response.json();
+                        
+                        // Оновлюємо інформацію про поточну сесію
+                        if (data.session_name) {
+                            this.currentSessionName = data.session_name;
+                            if (this.sessionMode === 'auto') {
+                                document.getElementById('currentSession').textContent = data.session_name;
+                            }
+                        }
+                        
+                        // Скидаємо режим після успішного відправлення
+                        if (this.sessionMode !== 'auto') {
+                            this.setSessionMode('auto');
+                        }
+                        
+                        return data.response || data.message || 'Відповідь отримана';
+                    } else {
+                        this.logMessage(`[CHAT] HTTP ${response.status} (${url})`, 'warning');
+                        return 'Помилка сервера';
+                    }
+                } catch (error) {
+                    if (error.name === 'AbortError') {
+                        this.logMessage(`[CHAT] Таймаут запиту (${url})`, 'warning');
+                        return 'Таймаут запиту (180 сек)';
+                    }
+                    this.logMessage(`[CHAT] Network error: ${error.message}`, 'error');
+                    return 'Помилка підключення';
+                }
+            }
+
+            // Новий метод: потоковий стрім відповіді від бекенду
+            async sendToAtlasStream(message, queuedEl = null) {
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const url = `${baseUrl}/api/chat/stream`;
+
+                // Визначаємо тип сесії для відправки
+                let sessionType = null;
+                if (this.sessionMode === 'new') sessionType = 'new_session';
+                else if (this.sessionMode === 'continue') sessionType = 'continue_session';
+
+                const requestData = { message, session_type: sessionType };
+
+                // Створюємо placeholder для асистента, який будемо оновлювати токенами
+                const container = this.chatMessages;
+                const msgDiv = document.createElement('div');
+                msgDiv.className = 'message assistant';
+                const textDiv = document.createElement('div');
+                textDiv.className = 'message-text';
+                textDiv.textContent = '';
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = new Date().toLocaleTimeString();
+                msgDiv.appendChild(textDiv);
+                msgDiv.appendChild(timeDiv);
+                container.appendChild(msgDiv);
+                container.scrollTop = container.scrollHeight;
+
+                const controller = new AbortController();
+                const timeoutId = setTimeout(() => controller.abort(), 5 * 60 * 1000); // 5 хв максимум
+
+                // Позначаємо, що розпочато стрім і блокуємо інпут
+                this.isStreaming = true;
+                if (this.chatInput) this.chatInput.disabled = true;
+                // Якщо це було чергове повідомлення — знімаємо бейдж "у черзі"
+                if (queuedEl) {
+                    try {
+                        const b = queuedEl.querySelector('.badge.queued');
+                        if (b) b.remove();
+                    } catch(_){}
+                }
+
+                const res = await fetch(url, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(requestData),
+                    signal: controller.signal
+                });
+
+                if (!res.ok || !res.body) {
+                    clearTimeout(timeoutId);
+                    throw new Error(`HTTP ${res.status}`);
+                }
+
+                // Читаємо text/event-stream построчно
+                const reader = res.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                let doneReceived = false;
+                let accumulatedText = '';
+
+                const applyToken = (token) => {
+                    if (!token) return;
+                    textDiv.textContent += token;
+                    accumulatedText += token;
+                    container.scrollTop = container.scrollHeight;
+                };
+
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // Події розділяються порожнім рядком. Обробляємо лінії по одній
+                    const lines = buffer.split('\n');
+                    buffer = lines.pop();
+                    for (const raw of lines) {
+                        const line = raw.trim();
+                        if (!line || line.startsWith(':')) continue; // коментар keepalive або порожньо
+                        if (line.startsWith('data:')) {
+                            const jsonStr = line.slice(5).trim();
+                            try {
+                                const obj = JSON.parse(jsonStr);
+                                if (obj.type === 'token') {
+                                    applyToken(obj.token || '');
+                                } else if (obj.type === 'done') {
+                                    doneReceived = true;
+                                } else if (obj.type === 'status') {
+                                    this.logMessage(`[SSE] ${obj.message || 'status'}`);
+                                } else if (obj.type === 'error') {
+                                    throw new Error(obj.error || 'stream error');
+                                }
+                            } catch (e) {
+                                // Якщо прийшов plain text токен
+                                applyToken(jsonStr);
+                            }
+                        }
+                    }
+                }
+
+                clearTimeout(timeoutId);
+                if (!doneReceived) {
+                    // Якщо бекенд не прислав подію done — просто завершуємо
+                    this.logMessage('[SSE] Потік завершено');
+                }
+
+                // Пост-обробка відповіді (парсинг JSON у трійних лапках)
+                try {
+                    this.postProcessAssistantText(textDiv, accumulatedText);
+                    this.maybeScheduleAutoReply(accumulatedText);
+                } catch (e) {
+                    // тихо
+                }
+
+                // Скидаємо режим сесії після відправки
+                if (this.sessionMode !== 'auto') this.setSessionMode('auto');
+
+                // Завершення стріму: розблокуємо інпут та обробляємо чергу
+                this.isStreaming = false;
+                if (this.chatInput) this.chatInput.disabled = false;
+                if (this.messageQueue.length > 0) {
+                    const next = this.messageQueue.shift();
+                    if (typeof next === 'string') {
+                        try { await this.sendToAtlasStream(next); } catch(_){}
+                    } else if (next && next.text) {
+                        try { await this.sendToAtlasStream(next.text, next.el || null); } catch(_){}
+                    }
+                }
+            }
+
+            // Витяг і рендер структурованого JSON із тексту відповіді
+            postProcessAssistantText(textDiv, rawText) {
+                if (!rawText) return;
+                const extractJson = (s) => {
+                    // ```json ... ```
+                    const fence = s.match(/```json\s*([\s\S]*?)```/i);
+                    if (fence && fence[1]) return fence[1];
+                    // голий JSON
+                    const plain = s.trim();
+                    if (plain.startsWith('{') && plain.endsWith('}')) return plain;
+                    return null;
+                };
+                const jsonStr = extractJson(rawText);
+                if (!jsonStr) return;
+                try {
+                    const obj = JSON.parse(jsonStr);
+                    const completed = obj.completed;
+                    const details = obj.details || obj.message || obj.reason || '';
+                    const summary = (completed === false)
+                        ? `Статус: незавершено. Деталі: ${details}`
+                        : (completed === true)
+                            ? `Статус: завершено. ${details ? 'Деталі: ' + details : ''}`
+                            : details || rawText;
+                    textDiv.textContent = summary;
+                } catch (_) {
+                    // якщо JSON битий — лишаємо як є
+                }
+            }
+
+            // Якщо відповідь вимагає підтвердження, плануємо автодоведення через 10с
+            maybeScheduleAutoReply(fullText) {
+                try { if (this.autoReplyTimer) { clearTimeout(this.autoReplyTimer); this.autoReplyTimer = null; } } catch(_){}
+                this.autoReplyActive = false;
+                if (!fullText) return;
+
+                const lower = fullText.toLowerCase();
+                const looksLikeQuestion = /перевір|чи\s+потрібно|хочете|підтверд|перевiр/.test(lower);
+                let jsonFlag = false;
+                try {
+                    const fence = fullText.match(/```json\s*([\s\S]*?)```/i);
+                    if (fence && fence[1]) {
+                        const o = JSON.parse(fence[1]);
+                        jsonFlag = (o && o.completed === false);
+                    }
+                } catch(_){}
+
+                if (!(looksLikeQuestion || jsonFlag)) return;
+
+                this.autoReplyActive = true;
+                this.logMessage('[AUTO] Очікування 10с відповіді користувача… потім автопродовження', 'warning');
+
+                const cancel = () => {
+                    if (this.autoReplyTimer) {
+                        clearTimeout(this.autoReplyTimer);
+                        this.autoReplyTimer = null;
+                        if (this.autoReplyActive) this.logMessage('[AUTO] Скасовано користувачем', 'info');
+                        this.autoReplyActive = false;
+                    }
+                };
+                // Скасування при будь-якому вводі
+                const inputHandler = () => cancel();
+                this.chatInput.addEventListener('input', inputHandler, { once: true });
+
+                this.autoReplyTimer = setTimeout(() => {
+                    this.autoReplyTimer = null;
+                    if (!this.autoReplyActive) return;
+                    this.autoReplyActive = false;
+                    const followup = 'Так, продовжуй без додаткових підтверджень і доведи завдання до кінця автоматично.';
+                    this.chatInput.value = followup;
+                    this.autoResizeTextarea();
+                    this.sendMessage();
+                    this.logMessage('[AUTO] Надіслано автопродовження', 'info');
+                }, 10000);
+            }
+
+            addMessage(text, type) {
+                const messageDiv = document.createElement('div');
+                messageDiv.className = `message ${type}`;
+                
+                const textDiv = document.createElement('div');
+                textDiv.className = 'message-text';
+                textDiv.textContent = text;
+                
+                const timeDiv = document.createElement('div');
+                timeDiv.className = 'message-time';
+                timeDiv.textContent = new Date().toLocaleTimeString();
+                
+                messageDiv.appendChild(textDiv);
+                messageDiv.appendChild(timeDiv);
+                
+                this.chatMessages.appendChild(messageDiv);
+                this.chatMessages.scrollTop = this.chatMessages.scrollHeight;
+
+                // Якщо прийшла відповідь асистента і ми у continuous режимі – пауза щоб не слухати TTS (евристика)
+                if (type === 'assistant' && this.voiceMode === 'continuous') {
+                    this.simulateTTSPause(text);
+                }
+
+                return messageDiv;
+            }
+
+            logMessage(text, type = 'info', customColor = null) {
+                const logDiv = document.createElement('div');
+                logDiv.className = 'log-line';
+                
+                // Застосовуємо кастомний колір або стандартний
+                if (customColor) {
+                    logDiv.style.color = customColor;
+                } else if (type === 'error') {
+                    logDiv.classList.add('error');
+                } else if (type === 'warning') {
+                    logDiv.classList.add('warning');
+                }
+                
+                logDiv.textContent = text;
+                
+                this.logsContainer.appendChild(logDiv);
+                this.logsContainer.scrollTop = this.logsContainer.scrollHeight;
+                
+                // Зберігати тільки останні 300 рядків логів
+                while (this.logsContainer.children.length > 300) {
+                    this.logsContainer.removeChild(this.logsContainer.firstChild);
+                }
+            }
+
+            startMCPLogging() {
+                // Підключення через Server-Sent Events до /logs/stream на frontend сервері
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const streamUrl = `${baseUrl}/logs/stream`;
+                this.logMessage(`[INIT] Підключення до потоку логів: ${streamUrl}`);
+                let retryDelay = 2000;
+                const maxDelay = 15000;
+
+                const connect = () => {
+                    try {
+                        const es = new EventSource(streamUrl);
+                        this._eventSource = es;
+                        es.onopen = () => {
+                            this.logMessage(`[SSE] Підключено (retryDelay=${retryDelay}ms)`);
+                            retryDelay = 2000; // reset
+                        };
+                        es.onmessage = (evt) => {
+                            if (!evt.data) return;
+                            try {
+                                const entry = JSON.parse(evt.data);
+                                const ts = entry.timestamp || new Date().toISOString();
+                                const lvl = (entry.level || 'INFO').toUpperCase();
+                                const src = entry.source || 'atlas';
+                                const msg = entry.message || '';
+                                this.logMessage(`[${ts}] [${lvl}] ${src}: ${msg}`);
+                            } catch (e) {
+                                // raw line fallback
+                                this.logMessage(`[SSE_RAW] ${evt.data}`);
+                            }
+                        };
+                        es.onerror = () => {
+                            es.close();
+                            this.logMessage(`[SSE] Роз'єднано, повторне підключення через ${(retryDelay/1000).toFixed(1)}s`, 'warning');
+                            setTimeout(connect, retryDelay);
+                            retryDelay = Math.min(maxDelay, retryDelay * 1.7);
+                        };
+                    } catch (err) {
+                        this.logMessage(`[SSE] Помилка ініціалізації: ${err.message}`, 'error');
+                        setTimeout(connect, retryDelay);
+                        retryDelay = Math.min(maxDelay, retryDelay * 1.7);
+                    }
+                };
+                connect();
+                // Fallback початкове отримання останніх логів якщо SSE повільно стартує
+                this.pollLiveLogs(true);
+            }
+
+            async pollLiveLogs(initial = false) {
+                // Завантаження логів Goose
+                if (!initial) return;
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const url = `${baseUrl}/logs?limit=100`;
+                try {
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.logs && data.logs.length > 0) {
+                            this.logsContainer.innerHTML = '';
+                            data.logs.forEach(log => {
+                                // Форматуємо повідомлення з кольорами та іконками
+                                let level = log.level.toLowerCase();
+                                let icon = '📄';
+                                let color = '#4a9c5a';
+                                
+                                if (log.source === 'goose_session') {
+                                    icon = '🤖';
+                                    color = '#00ff41';
+                                } else if (log.source === 'goose_task') {
+                                    icon = '📋';
+                                    color = '#61dafb';
+                                } else if (log.source === 'atlas_monitor') {
+                                    icon = '🔍';
+                                    color = '#98fb98';
+                                } else if (level === 'error') {
+                                    icon = '❌';
+                                    color = '#d16969';
+                                } else if (level === 'warning') {
+                                    icon = '⚠️';
+                                    color = '#d19a66';
+                                }
+                                
+                                const message = `[${log.timestamp}] ${icon} ${log.message}`;
+                                this.logMessage(message, level, color);
+                            });
+                        }
+                    }
+                } catch(e) { 
+                    this.logMessage(`[${new Date().toLocaleTimeString()}] ❌ Error fetching logs: ${e.message}`, 'error');
+                }
+                
+                // Запускаємо періодичне оновлення кожні 2 секунди
+                if (initial) {
+                    setInterval(() => this.refreshLogs(), 2000);
+                }
+            }
+            
+            async refreshLogs() {
+                // Метод для періодичного оновлення логів
+                const baseUrl = (window.ATLAS_API_BASE || 'http://localhost:8080').replace(/\/$/, '');
+                const url = `${baseUrl}/logs?limit=50`;
+                try {
+                    const response = await fetch(url);
+                    if (response.ok) {
+                        const data = await response.json();
+                        if (data.logs && data.logs.length > 0) {
+                            // Додаємо тільки нові логи (останні 5)
+                            const recentLogs = data.logs.slice(-5);
+                            recentLogs.forEach(log => {
+                                let level = log.level.toLowerCase();
+                                let icon = '📄';
+                                let color = '#4a9c5a';
+                                
+                                if (log.source === 'goose_session') {
+                                    icon = '🤖';
+                                    color = '#00ff41';
+                                } else if (log.source === 'goose_task') {
+                                    icon = '📋';
+                                    color = '#61dafb';
+                                } else if (log.source === 'atlas_monitor') {
+                                    icon = '🔍';
+                                    color = '#98fb98';
+                                } else if (level === 'error') {
+                                    icon = '❌';
+                                    color = '#d16969';
+                                } else if (level === 'warning') {
+                                    icon = '⚠️';
+                                    color = '#d19a66';
+                                }
+                                
+                                const message = `[${log.timestamp}] ${icon} ${log.message}`;
+                                this.logMessage(message, level, color);
+                            });
+                        }
+                    }
+                } catch(e) { 
+                    // Ігноруємо помилки при періодичному оновленні
+                }
+            }
+
+            simulateTTSPause(text) {
+                // Евристичний час мовлення: ~120 слів/хв ≈ 2 слова/сек; слово ~5 символів
+                const charCount = text.length;
+                const approxSeconds = Math.min(10, Math.max(2, charCount / 11));
+                this.TTS_ACTIVE = true;
+                // Пауза розпізнавання
+                if (this.isListening) {
+                    try { this.recognition.stop(); } catch(e) {}
+                }
+                // Плануємо відновлення
+                if (this.TTSBlockTimer) clearTimeout(this.TTSBlockTimer);
+                this.TTSBlockTimer = setTimeout(() => {
+                    this.TTS_ACTIVE = false;
+                    if (this.voiceMode === 'continuous') {
+                        this.isListening = true;
+                        try { this.recognition.start(); } catch(e) {}
+                        this.updateVoiceButton();
+                    }
+                }, approxSeconds * 1000);
+            }
+
+            startStatusMonitoring() {
+                // Запуск моніторингу статусу системи
+                this.updateSystemStatus();
+                // Оновлення кожні 5 секунд
+                setInterval(() => {
+                    this.updateSystemStatus();
+                }, 5000);
+            }
+
+            async updateSystemStatus() {
+                try {
+                    // Отримуємо стандартний статус системи
+                    const response = await fetch('/api/status');
+                    let status = {};
+                    
+                    if (response.ok) {
+                        status = await response.json();
+                    } else {
+                        status = {
+                            error: "Status unavailable",
+                            timestamp: new Date().toISOString()
+                        };
+                    }
+                    
+                    // Додаємо інформацію про Goose сесії
+                    try {
+                        const gooseResponse = await fetch('/api/goose/sessions');
+                        if (gooseResponse.ok) {
+                            const gooseData = await gooseResponse.json();
+                            status.goose_sessions = {
+                                count: gooseData.count || 0,
+                                latest: gooseData.sessions && gooseData.sessions.length > 0 ? 
+                                    gooseData.sessions[0].name : 'None',
+                                status: gooseData.count > 0 ? 'active' : 'inactive'
+                            };
+                        }
+                    } catch (e) {
+                        status.goose_sessions = {
+                            count: 0,
+                            latest: 'Error',
+                            status: 'error'
+                        };
+                    }
+                    
+                    this.renderSystemStatus(status);
+                } catch (error) {
+                    this.renderSystemStatus({
+                        error: error.message,
+                        timestamp: new Date().toISOString()
+                    });
+                }
+            }
+
+            renderSystemStatus(status) {
+                try {
+                    // Процеси
+                    if (status.processes) {
+                        const processHTML = Object.entries(status.processes).map(([type, info]) => {
+                            const count = info.count || 0;
+                            const statusClass = count > 0 ? 'online' : 'warning';
+                            return `<div class="status-item ${statusClass}">${type}: ${count}</div>`;
+                        }).join('');
+                        this.processStatus.innerHTML = processHTML;
+                    }
+
+                    // Сервіси
+                    if (status.services) {
+                        const serviceHTML = Object.entries(status.services).map(([name, info]) => {
+                            const serviceStatus = info.status || 'unknown';
+                            let statusClass = 'warning';
+                            if (serviceStatus === 'online' || serviceStatus === 'operational' || serviceStatus === 'running') {
+                                statusClass = 'online';
+                            } else if (serviceStatus === 'offline' || serviceStatus === 'error') {
+                                statusClass = 'error';
+                            }
+                            return `<div class="status-item ${statusClass}">${name}: ${serviceStatus}</div>`;
+                        }).join('');
+                        this.serviceStatus.innerHTML = serviceHTML;
+                    }
+
+                    // Мережа
+                    if (status.network && status.network.connections) {
+                        const connCount = status.network.connections.count || 0;
+                        const statusClass = connCount > 0 ? 'online' : 'warning';
+                        this.networkStatus.innerHTML = `<div class="status-item ${statusClass}">Connections: ${connCount}</div>`;
+                    }
+
+                    // Ресурси з додаванням Goose сесій
+                    if (status.resources || status.goose_sessions) {
+                        let resourceHTML = '';
+                        
+                        // CPU та Disk (як раніше)
+                        if (status.resources) {
+                            if (status.resources.cpu && status.resources.cpu.usage_line) {
+                                const cpuInfo = status.resources.cpu.usage_line;
+                                resourceHTML += `<div class="status-item online">CPU: ${cpuInfo.substring(0, 30)}...</div>`;
+                            } else {
+                                resourceHTML += `<div class="status-item warning">CPU: --</div>`;
+                            }
+                            
+                            if (status.resources.disk && status.resources.disk.usage_percent) {
+                                const diskUsage = status.resources.disk.usage_percent;
+                                const usageNum = parseInt(diskUsage);
+                                const statusClass = usageNum > 90 ? 'error' : usageNum > 70 ? 'warning' : 'online';
+                                resourceHTML += `<div class="status-item ${statusClass}">Disk: ${diskUsage}</div>`;
+                            } else {
+                                resourceHTML += `<div class="status-item warning">Disk: --</div>`;
+                            }
+                        }
+                        
+                        // Додаємо інформацію про Goose сесії
+                        if (status.goose_sessions) {
+                            const count = status.goose_sessions.count || 0;
+                            const latest = status.goose_sessions.latest || 'None';
+                            const sessionStatus = status.goose_sessions.status || 'unknown';
+                            
+                            let statusClass = 'warning';
+                            if (sessionStatus === 'active' && count > 0) {
+                                statusClass = 'online';
+                            } else if (sessionStatus === 'error') {
+                                statusClass = 'error';
+                            }
+                            
+                            resourceHTML += `<div class="status-item ${statusClass}">🤖 Goose: ${count} sessions</div>`;
+                            if (latest !== 'None' && latest !== 'Error') {
+                                const shortName = latest.length > 25 ? latest.substring(0, 25) + '...' : latest;
+                                resourceHTML += `<div class="status-item online">📋 Latest: ${shortName}</div>`;
+                            }
+                        }
+                        
+                        this.resourceStatus.innerHTML = resourceHTML;
+                    }
+
+                } catch (error) {
+                    console.error('Status rendering error:', error);
+                }
+            }
+        }
+
+        // Initialize the interface when page loads
+        document.addEventListener('DOMContentLoaded', () => {
+            // Зберігаємо екземпляр глобально, щоб інші скрипти могли звертатися
+            window.atlasInterface = new AtlasMinimalInterface();
+        });
+    </script>
+
+    <!-- Убрали дублюющий нестриминговый скрипт; вся логика чату в AtlasMinimalInterface -->
+</body>
+</html>

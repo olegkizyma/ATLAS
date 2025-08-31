@@ -71,8 +71,6 @@ from http.server import HTTPServer, SimpleHTTPRequestHandler, ThreadingHTTPServe
 import urllib.parse
 import requests
 import os
-from services.goose_client import GooseClient
-from services.log_streamer import LiveLogStreamer
 
 # Налаштування логування
 logging.basicConfig(
@@ -81,29 +79,316 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Використовуємо LiveLogStreamer з services.log_streamer без перевизначення
+class LiveLogStreamer:
+    """Клас для стрімінгу живих логів системи"""
+    
+    def __init__(self):
+        self.log_queue = queue.Queue()
+        self.is_running = False
+        # Читаємо URL з env або fallback на localhost
+        self.atlas_core_url = os.getenv("ATLAS_CORE_URL", "http://localhost:3000")  # Goose сервер на порту 3000
+        
+        # Стан всіх процесів для передачі
+        self.system_status = {
+            "processes": {},
+            "services": {},
+            "network": {},
+            "resources": {},
+            "timestamp": None
+        }
+        
+    def start_streaming(self):
+        """Запуск стрімінгу логів"""
+        self.is_running = True
+        threading.Thread(target=self._system_monitor, daemon=True).start()
+        threading.Thread(target=self._atlas_monitor, daemon=True).start()
+        print("🟢 Live log streaming started")
+        
+    def stop_streaming(self):
+        """Зупинка стрімінгу"""
+        self.is_running = False
+        print("🔴 Live log streaming stopped")
+        
+    def get_logs(self):
+        """Отримання нових логів"""
+        logs = []
+        while not self.log_queue.empty():
+            try:
+                logs.append(self.log_queue.get_nowait())
+            except queue.Empty:
+                break
+        return logs
+    
+    def get_system_status(self):
+        """Отримання поточного стану системи"""
+        return self.system_status.copy()
+        
+    def update_system_status(self, category, key, value):
+        """Оновлення стану системи"""
+        self.system_status[category][key] = value
+        self.system_status["timestamp"] = datetime.now().isoformat()
+        
+    def _add_log(self, message, level="info"):
+        """Додавання логу до черги"""
+        timestamp = datetime.now().strftime("%H:%M:%S")
+        log_entry = f"[{timestamp}] {message}"
+        
+        if self.log_queue.qsize() < 200:  # Обмеження розміру черги
+            self.log_queue.put({
+                "message": log_entry,
+                "level": level,
+                "timestamp": timestamp
+            })
+            
+    def _system_monitor(self):
+        """Моніторинг системи та збереження стану процесів"""
+        while self.is_running:
+            try:
+                # Процеси Atlas
+                result = subprocess.run(
+                    ["ps", "aux"], 
+                    capture_output=True, 
+                    text=True
+                )
+                
+                if result.returncode == 0:
+                    lines = result.stdout.split('\n')
+                    
+                    # Пошук процесів Atlas
+                    atlas_processes = []
+                    goose_processes = []
+                    mcp_processes = []
+                    python_processes = []
+                    
+                    for line in lines:
+                        if line.strip() and 'grep' not in line:
+                            if 'atlas' in line.lower():
+                                atlas_processes.append(self._parse_process_line(line))
+                            elif 'goose' in line.lower():
+                                goose_processes.append(self._parse_process_line(line))
+                            elif 'mcp' in line.lower():
+                                mcp_processes.append(self._parse_process_line(line))
+                            elif 'python' in line and ('atlas' in line or 'mcp' in line):
+                                python_processes.append(self._parse_process_line(line))
+                    
+                    # Оновлення стану процесів
+                    self.update_system_status("processes", "atlas", {
+                        "count": len(atlas_processes),
+                        "details": atlas_processes
+                    })
+                    self.update_system_status("processes", "goose", {
+                        "count": len(goose_processes), 
+                        "details": goose_processes
+                    })
+                    self.update_system_status("processes", "mcp", {
+                        "count": len(mcp_processes),
+                        "details": mcp_processes
+                    })
+                    self.update_system_status("processes", "python", {
+                        "count": len(python_processes),
+                        "details": python_processes
+                    })
+                    
+                    # Логування
+                    total_processes = len(atlas_processes) + len(goose_processes) + len(mcp_processes)
+                    if total_processes > 0:
+                        self._add_log(f"[SYSTEM] {total_processes} Atlas-related processes active")
+                
+                # Мережеві підключення  
+                try:
+                    result = subprocess.run(
+                        ["lsof", "-i", ":3000", "-i", ":8080"], 
+                        capture_output=True, 
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        lines = result.stdout.split('\n')[1:]  # Skip header
+                        active_connections = []
+                        for line in lines:
+                            if line.strip():
+                                active_connections.append(self._parse_network_line(line))
+                        
+                        self.update_system_status("network", "connections", {
+                            "count": len(active_connections),
+                            "details": active_connections
+                        })
+                        
+                        if active_connections:
+                            self._add_log(f"[NET] {len(active_connections)} active connections on Atlas ports")
+                except Exception as e:
+                    self._add_log(f"[NET] Network check failed: {str(e)[:30]}...", "warning")
+                
+                # Використання ресурсів
+                try:
+                    # CPU та Memory
+                    result = subprocess.run(
+                        ["top", "-l", "1", "-n", "0"], 
+                        capture_output=True, 
+                        text=True
+                    )
+                    if result.returncode == 0:
+                        cpu_info = self._parse_cpu_info(result.stdout)
+                        self.update_system_status("resources", "cpu", cpu_info)
+                        
+                        # Disk space
+                        result = subprocess.run(
+                            ["df", "-h", "/"], 
+                            capture_output=True, 
+                            text=True
+                        )
+                        if result.returncode == 0:
+                            disk_info = self._parse_disk_info(result.stdout)
+                            self.update_system_status("resources", "disk", disk_info)
+                            
+                except Exception as e:
+                    self._add_log(f"[RESOURCES] Resource check failed: {str(e)[:30]}...", "warning")
+                    
+                time.sleep(3)
+                
+            except Exception as e:
+                self._add_log(f"[ERROR] System monitor: {str(e)[:30]}...", "error")
+                time.sleep(5)
+            
+    def _atlas_monitor(self):
+        """Моніторинг Atlas Core"""
+        while self.is_running:
+            try:
+                response = requests.get(f"{self.atlas_core_url}/", timeout=3)
+                if response.status_code == 200:
+                    self._add_log("[ATLAS] Core online")
+                    self.update_system_status("services", "atlas_core", {
+                        "status": "online",
+                        "status_code": 200,
+                        "last_check": datetime.now().isoformat()
+                    })
+                else:
+                    self._add_log(f"[ATLAS] Core status: {response.status_code}", "warning")
+                    self.update_system_status("services", "atlas_core", {
+                        "status": "warning", 
+                        "status_code": response.status_code,
+                        "last_check": datetime.now().isoformat()
+                    })
+                    
+            except requests.exceptions.ConnectionError:
+                self._add_log("[ATLAS] Core offline", "warning")
+                self.update_system_status("services", "atlas_core", {
+                    "status": "offline",
+                    "error": "Connection refused",
+                    "last_check": datetime.now().isoformat()
+                })
+            except Exception as e:
+                self._add_log(f"[ATLAS] Error: {str(e)[:40]}...", "error")
+                self.update_system_status("services", "atlas_core", {
+                    "status": "error",
+                    "error": str(e)[:100],
+                    "last_check": datetime.now().isoformat()
+                })
+                
+            time.sleep(6)
+    
+    def _parse_process_line(self, line):
+        """Парсинг рядка процесу з ps aux"""
+        try:
+            parts = line.split()
+            if len(parts) >= 11:
+                return {
+                    "user": parts[0],
+                    "pid": parts[1],
+                    "cpu": parts[2],
+                    "mem": parts[3],
+                    "command": " ".join(parts[10:])[:50] + "..." if len(" ".join(parts[10:])) > 50 else " ".join(parts[10:])
+                }
+        except:
+            return {"raw": line[:50] + "..." if len(line) > 50 else line}
+        return {}
+    
+    def _parse_network_line(self, line):
+        """Парсинг рядка мережевого підключення з lsof"""
+        try:
+            parts = line.split()
+            if len(parts) >= 9:
+                return {
+                    "command": parts[0],
+                    "pid": parts[1],
+                    "user": parts[2],
+                    "type": parts[4],
+                    "node": parts[7],
+                    "name": parts[8] if len(parts) > 8 else ""
+                }
+        except:
+            return {"raw": line[:50] + "..." if len(line) > 50 else line}
+        return {}
+    
+    def _parse_cpu_info(self, top_output):
+        """Парсинг інформації про CPU з top"""
+        try:
+            lines = top_output.split('\n')
+            for line in lines:
+                if 'CPU usage' in line:
+                    # Приклад: CPU usage: 12.34% user, 5.67% sys, 82.01% idle
+                    parts = line.split(':')[1] if ':' in line else line
+                    return {"usage_line": parts.strip()[:100]}
+            return {"usage_line": "CPU info not found"}
+        except:
+            return {"usage_line": "CPU parsing failed"}
+    
+    def _parse_disk_info(self, df_output):
+        """Парсинг інформації про диск з df"""
+        try:
+            lines = df_output.split('\n')
+            if len(lines) > 1:
+                parts = lines[1].split()
+                if len(parts) >= 5:
+                    return {
+                        "filesystem": parts[0],
+                        "size": parts[1],
+                        "used": parts[2],
+                        "available": parts[3],
+                        "usage_percent": parts[4]
+                    }
+            return {"info": "Disk parsing failed"}
+        except:
+            return {"info": "Disk info unavailable"}
 
 class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     """Обробник запитів для Atlas Minimal Interface"""
-
+    
     def __init__(self, *args, **kwargs):
-        # Нова конфігурація Goose через клієнт сервісного шару
-        self.goose_client = GooseClient()
-        self.goose_api_url = self.goose_client.base_url
-        self.goose_secret_key = self.goose_client.secret_key
+        # Конфігурація Goose API: дефолт 3000, fallback 3001 якщо 3000 недоступний (або GOOSE_API_URL з env)
+        env_url = os.getenv("GOOSE_API_URL")
+        if env_url and self._check_base_url(env_url):
+            self.goose_api_url = env_url
+        else:
+            if env_url and not self._check_base_url(env_url):
+                logger.warning(f"⚠️ Недоступний GOOSE_API_URL: {env_url}; виконую автопідбір")
+            self.goose_api_url = self._auto_pick_goose_url()
+        self.goose_secret_key = os.getenv("GOOSE_SECRET_KEY", "test")  # Секретний ключ для автентифікації
         self.session_endpoint = f"{self.goose_api_url}/session"
         self.reply_endpoint = f"{self.goose_api_url}/reply"
-
+        
         # Конфігурація Atlas Core
         self.atlas_core_url = "http://localhost:3000"
-
+        
         # Ініціалізація live streamer без запуску моніторингу
         self.live_streamer = None
-
+        
         super().__init__(*args, **kwargs)
 
-    def _auto_pick_goose_url(self) -> str:  # legacy wrapper
-        return self.goose_client.base_url
+    def _auto_pick_goose_url(self) -> str:
+        """Вибирає базовий URL Goose API: спочатку 3000, потім 3001."""
+        import requests as _req
+        for base in ("http://127.0.0.1:3000", "http://127.0.0.1:3001"):
+            try:
+                for ep in ("/status", "/api/health", "/"):
+                    try:
+                        r = _req.get(f"{base}{ep}", timeout=2)
+                        if r.status_code in (200, 404):
+                            return base
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return "http://127.0.0.1:3000"
 
     def _check_base_url(self, base: str) -> bool:
         try:
@@ -202,8 +487,143 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             return {"success": False, "error": str(e)}
 
     def send_goose_reply_sse(self, session_name: str, message: str, timeout: int = 90) -> dict:
-        # Делегуємо в сервісний клієнт, зберігаючи стару сигнатуру
-        return self.goose_client.send_reply(session_name, message, timeout)
+        """Надсилає повідомлення до Goose, авто-вибір: goose web (WS) або goosed (/reply SSE).
+
+        Повертає dict: { success, response, error? }
+        """
+        try:
+            import time as _time
+            # Визначимо, що працює: goose web чи goosed
+            def _is_web():
+                try:
+                    r = requests.get(f"{self.goose_api_url}/api/health", timeout=3)
+                    return r.status_code == 200
+                except Exception:
+                    return False
+
+            def _is_goosed():
+                try:
+                    r = requests.get(f"{self.goose_api_url}/status", timeout=3)
+                    return r.status_code == 200
+                except Exception:
+                    return False
+
+            if _is_web():
+                # Використовуємо WebSocket /ws у goose web
+                try:
+                    import aiohttp, asyncio
+
+                    async def _via_ws():
+                        ws_url = self.goose_api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+                        payload = {
+                            "type": "message",
+                            "content": message,
+                            "session_id": session_name,
+                            "timestamp": int(_time.time() * 1000),
+                        }
+                        timeout_total = aiohttp.ClientTimeout(total=timeout)
+                        chunks = []
+                        async with aiohttp.ClientSession(timeout=timeout_total) as session:
+                            async with session.ws_connect(ws_url, heartbeat=30) as ws:
+                                await ws.send_str(json.dumps(payload))
+                                async for msg in ws:
+                                    if msg.type == aiohttp.WSMsgType.TEXT:
+                                        try:
+                                            obj = json.loads(msg.data)
+                                        except Exception:
+                                            obj = None
+                                        if isinstance(obj, dict):
+                                            t = obj.get("type")
+                                            if t == "response":
+                                                content = obj.get("content")
+                                                if content:
+                                                    chunks.append(str(content))
+                                            elif t in ("complete", "cancelled"):
+                                                break
+                                            elif t == "error":
+                                                return {"success": False, "error": obj.get("message", "websocket error")}
+                                        else:
+                                            chunks.append(str(msg.data))
+                                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                        break
+                        return {"success": True, "response": "".join(chunks).strip()}
+
+                    try:
+                        return asyncio.run(_via_ws())
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        try:
+                            asyncio.set_event_loop(loop)
+                            return loop.run_until_complete(_via_ws())
+                        finally:
+                            asyncio.set_event_loop(None)
+                            loop.close()
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            # Fallback: goosed /reply SSE
+            url = f"{self.goose_api_url}/reply"
+            headers = {
+                "Accept": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "X-Secret-Key": self.goose_secret_key,
+            }
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "created": int(_time.time()),
+                        "content": [{"type": "text", "text": message}],
+                    }
+                ],
+                "session_id": session_name,
+                "session_working_dir": os.getcwd(),
+            }
+
+            with requests.post(url, json=payload, headers=headers, stream=True, timeout=timeout) as resp:
+                if resp.status_code != 200:
+                    text = None
+                    try:
+                        text = resp.text[:500]
+                    except Exception:
+                        text = "<no body>"
+                    return {"success": False, "error": f"HTTP {resp.status_code}", "response": text}
+
+                chunks = []
+                for raw_line in resp.iter_lines(decode_unicode=True):
+                    if raw_line is None:
+                        continue
+                    line = raw_line.strip()
+                    if not line or line.startswith(":"):
+                        continue
+                    if line.startswith("data:"):
+                        data_part = line[5:].lstrip()
+                        try:
+                            obj = json.loads(data_part)
+                            if isinstance(obj, dict):
+                                if obj.get("type") == "Message" and isinstance(obj.get("message"), dict):
+                                    msg = obj["message"]
+                                    for c in msg.get("content", []) or []:
+                                        if isinstance(c, dict) and c.get("type") == "text":
+                                            t = c.get("text")
+                                            if t:
+                                                chunks.append(str(t))
+                                else:
+                                    token = obj.get("text") or obj.get("token") or obj.get("content")
+                                    if token:
+                                        chunks.append(str(token))
+                                    if obj.get("final") is True or obj.get("done") is True:
+                                        break
+                            else:
+                                chunks.append(str(obj))
+                        except Exception:
+                            chunks.append(data_part)
+                    elif line.lower() == "event: done":
+                        break
+
+                return {"success": True, "response": "".join(chunks).strip()}
+        except requests.exceptions.RequestException as e:
+            return {"success": False, "error": str(e)}
 
     @classmethod
     def set_live_streamer(cls, streamer):
@@ -1855,7 +2275,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             # Використання HTTP API замість CLI
             try:
                 # На goosed завжди використовуємо /reply з session_id
-                reply_result = self.goose_client.send_reply(session_name, user_message)
+                reply_result = self.send_goose_reply_sse(session_name, user_message)
                 
                 # Обробка результату
                 if reply_result["success"]:
