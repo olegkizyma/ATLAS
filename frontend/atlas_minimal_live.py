@@ -354,8 +354,8 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     """Обробник запитів для Atlas Minimal Interface"""
     
     def __init__(self, *args, **kwargs):
-        # Конфігурація Goose API
-        self.goose_api_url = os.getenv("GOOSE_API_URL", "http://localhost:3000")
+        # Конфігурація Goose API (goosed за замовчуванням на 3001)
+        self.goose_api_url = os.getenv("GOOSE_API_URL", "http://127.0.0.1:3001")
         self.goose_secret_key = os.getenv("GOOSE_SECRET_KEY", "test")  # Секретний ключ для автентифікації
         self.session_endpoint = f"{self.goose_api_url}/session"
         self.reply_endpoint = f"{self.goose_api_url}/reply"
@@ -363,7 +363,34 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         # Конфігурація Atlas Core
         self.atlas_core_url = "http://localhost:3000"
         
+        # Ініціалізація live streamer без запуску моніторингу
+        self.live_streamer = None
+        
         super().__init__(*args, **kwargs)
+    
+    def handle_one_request(self):
+        """Override to handle connection resets gracefully"""
+        try:
+            super().handle_one_request()
+        except ConnectionResetError:
+            # Client disconnected, ignore silently
+            pass
+        except BrokenPipeError:
+            # Client disconnected while writing response
+            pass
+        except OSError as e:
+            if e.errno == 54:  # Connection reset by peer on macOS
+                pass
+            else:
+                raise
+    
+    def log_error(self, format, *args):
+        """Override to suppress connection reset error logs"""
+        if "Connection reset by peer" in format % args:
+            return
+        if "Broken pipe" in format % args:
+            return
+        super().log_error(format, *args)
     
     def send_goose_request(self, endpoint: str, method: str = "GET", data: dict = None) -> dict:
         """Відправка запиту до Goose API"""
@@ -392,7 +419,9 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             url = f"{self.goose_api_url}{endpoint}"
             headers = {"X-Secret-Key": self.goose_secret_key}
             
-            async with aiohttp.ClientSession(headers=headers) as session:
+            timeout = aiohttp.ClientTimeout(total=30)  # 30 секунд таймаут
+            
+            async with aiohttp.ClientSession(headers=headers, timeout=timeout) as session:
                 if method == "POST":
                     async with session.post(url, json=data) as response:
                         if response.status == 200:
@@ -419,6 +448,57 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                             return {"success": False, "error": f"HTTP {response.status}", "response": text}
                             
         except Exception as e:
+            return {"success": False, "error": str(e)}
+
+    def send_goose_reply_sse(self, session_name: str, message: str, timeout: int = 90) -> dict:
+        """Надсилає повідомлення до goosed /reply і агрегує SSE-відповідь у текст.
+
+        Повертає dict: { success, response, error? }
+        """
+        try:
+            url = f"{self.goose_api_url}/reply"
+            headers = {
+                "Accept": "text/event-stream",
+                "Cache-Control": "no-cache",
+                "X-Secret-Key": self.goose_secret_key,
+            }
+            payload = {"message": message, "session_id": session_name}
+
+            with requests.post(url, json=payload, headers=headers, stream=True, timeout=timeout) as resp:
+                if resp.status_code != 200:
+                    text = None
+                    try:
+                        text = resp.text[:500]
+                    except Exception:
+                        text = "<no body>"
+                    return {"success": False, "error": f"HTTP {resp.status_code}", "response": text}
+
+                chunks = []
+                for raw_line in resp.iter_lines(decode_unicode=True):
+                    if raw_line is None:
+                        continue
+                    line = raw_line.strip()
+                    if not line or line.startswith(":"):
+                        continue
+                    if line.startswith("data:"):
+                        data_part = line[5:].lstrip()
+                        try:
+                            obj = json.loads(data_part)
+                            if isinstance(obj, dict):
+                                token = obj.get("text") or obj.get("token") or obj.get("content")
+                                if token:
+                                    chunks.append(str(token))
+                                if obj.get("final") is True or obj.get("done") is True:
+                                    break
+                            else:
+                                chunks.append(str(obj))
+                        except Exception:
+                            chunks.append(data_part)
+                    elif line.lower() == "event: done":
+                        break
+
+                return {"success": True, "response": "".join(chunks).strip()}
+        except requests.exceptions.RequestException as e:
             return {"success": False, "error": str(e)}
 
     @classmethod
@@ -449,7 +529,10 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         elif self.path == "/favicon.ico":
             self.serve_favicon()
         elif self.path.startswith("/logs"):
-            self.serve_live_logs()
+            if self.path == "/logs/stream":
+                self.serve_logs_stream()  # SSE endpoint
+            else:
+                self.serve_live_logs()    # Regular logs
         elif self.path == "/api/status":
             self.serve_system_status()
         elif self.path == "/api/atlas/status":
@@ -464,6 +547,12 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             # Отримання історії конкретної сесії: /api/atlas/corrections/session_name
             session_name = self.path.replace("/api/atlas/corrections/", "")
             self.serve_session_corrections(session_name)
+        elif self.path == "/api/atlas/diagnostics":
+            self.serve_api_diagnostics()
+        elif self.path == "/api/atlas/health":
+            self.serve_health_check()
+        elif self.path == "/api/atlas/test-mode-analysis":
+            self.serve_test_mode_analysis()
         else:
             super().do_GET()
 
@@ -473,6 +562,8 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.handle_chat()
         elif self.path == "/api/tts/speak":
             self.handle_tts()
+        elif self.path == "/api/atlas/analyze-prompt":
+            self.handle_analyze_prompt()
         else:
             self.send_error(404, "Not Found")
 
@@ -586,6 +677,68 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         except Exception as e:
             logger.error(f"Health check error: {e}")
             self.send_error(500, str(e))
+
+    def serve_logs_stream(self):
+        """🔄 ВИМКНЕНО: SSE потік для live логів (тимчасово відключено)"""
+        try:
+            self.send_response(200)
+            self.send_header('Content-type', 'application/json')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            # Повертаємо простий JSON замість SSE потоку
+            response = {
+                "status": "disabled",
+                "message": "Log streaming temporarily disabled",
+                "timestamp": datetime.now().isoformat()
+            }
+
+            self.wfile.write(json.dumps(response, ensure_ascii=False).encode('utf-8'))
+
+        except Exception as e:
+            logger.error(f"Log stream error: {e}")
+            self.send_error(500, str(e))
+
+    def _get_recent_logs(self, limit: int = 10):
+        """Отримання останніх логів"""
+        logs = []
+        
+        # Додаємо системні логи
+        logs.append({
+            "message": "🔍 Monitoring Goose sessions in real-time...",
+            "level": "info",
+            "timestamp": datetime.now().strftime("%H:%M:%S"),
+            "source": "atlas_monitor"
+        })
+        
+        # Можна додати реальні логи з сесій Goose тут
+        try:
+            sessions_dir = Path.home() / ".local/share/goose/sessions"
+            if sessions_dir.exists():
+                jsonl_files = list(sessions_dir.glob("*.jsonl"))
+                if jsonl_files:
+                    latest_session = max(jsonl_files, key=lambda f: f.stat().st_mtime)
+                    with open(latest_session, 'r', encoding='utf-8') as f:
+                        lines = f.readlines()[-5:]  # Останні 5 рядків
+                    
+                    for line in lines:
+                        if line.strip():
+                            try:
+                                data = json.loads(line.strip())
+                                if "role" in data and "content" in data:
+                                    content = str(data.get("content", ""))[:100]
+                                    logs.append({
+                                        "message": f"🤖 {data['role'].upper()}: {content}...",
+                                        "level": "info",
+                                        "timestamp": datetime.now().strftime("%H:%M:%S"),
+                                        "source": "goose_session"
+                                    })
+                            except:
+                                continue
+        except:
+            pass
+        
+        return logs[-limit:]
 
     def serve_live_logs(self):
         """Отримання логів Goose з останньої сесії"""
@@ -1034,6 +1187,239 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(response)
 
+    def serve_api_diagnostics(self):
+        """
+        🔧 НОВИЙ API ENDPOINT: Детальна діагностика API стану
+        GET /api/atlas/diagnostics - повна інформація про стан HTTP API та fallback
+        """
+        try:
+            if hasattr(self.server, 'session_manager'):
+                sm = self.server.session_manager
+                
+                # Збираємо діагностичну інформацію
+                diagnostics = {
+                    "api_configuration": {
+                        "api_url": sm.api_url,
+                        "use_http_api": sm.use_http_api,
+                        "secret_key_configured": bool(sm.secret_key)
+                    },
+                    "api_status": {
+                        "failure_count": getattr(sm, 'api_failure_count', 0),
+                        "fallback_active": getattr(sm, 'fallback_active', False),
+                        "last_api_check": getattr(sm, 'last_api_check', None),
+                        "recovery_interval": getattr(sm, 'api_recovery_interval', 30)
+                    },
+                    "status_history": getattr(sm, 'api_status_history', [])[-10:],  # останні 10 записів
+                    "live_validation": None
+                }
+                
+                # Проводимо живу валідацію
+                try:
+                    if hasattr(sm, '_validate_api_availability'):
+                        live_check = sm._validate_api_availability()
+                        diagnostics["live_validation"] = live_check
+                except Exception as val_error:
+                    diagnostics["live_validation"] = {"error": str(val_error)}
+                
+                response_data = {
+                    "diagnostics": diagnostics,
+                    "recommendations": self._generate_api_recommendations(diagnostics),
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                response = json.dumps(response_data, ensure_ascii=False, indent=2).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+                
+            else:
+                self._send_error_response(503, "Session manager not available")
+                
+        except Exception as e:
+            logger.error(f"API diagnostics error: {e}")
+            self._send_error_response(500, str(e))
+
+    def serve_health_check(self):
+        """
+        💓 НОВИЙ API ENDPOINT: Швидка перевірка здоров'я системи
+        GET /api/atlas/health - базовий health check для моніторингу
+        """
+        try:
+            health_status = {
+                "status": "healthy",
+                "timestamp": datetime.now().isoformat(),
+                "components": {}
+            }
+            
+            # Перевірка Session Manager
+            if hasattr(self.server, 'session_manager'):
+                sm = self.server.session_manager
+                fallback_active = getattr(sm, 'fallback_active', False)
+                
+                health_status["components"]["session_manager"] = {
+                    "status": "degraded" if fallback_active else "healthy",
+                    "fallback_active": fallback_active,
+                    "mode": "CLI" if fallback_active else "HTTP_API"
+                }
+                
+                if fallback_active:
+                    health_status["status"] = "degraded"
+            else:
+                health_status["components"]["session_manager"] = {
+                    "status": "unavailable",
+                    "error": "Session manager not initialized"
+                }
+                health_status["status"] = "unhealthy"
+            
+            # Перевірка Goose процесу
+            try:
+                import subprocess
+                result = subprocess.run(['pgrep', '-f', 'goose web'], 
+                                      capture_output=True, text=True, timeout=5)
+                if result.returncode == 0:
+                    health_status["components"]["goose_web"] = {
+                        "status": "healthy",
+                        "processes": len(result.stdout.strip().split('\n')) if result.stdout.strip() else 0
+                    }
+                else:
+                    health_status["components"]["goose_web"] = {
+                        "status": "unavailable",
+                        "error": "No goose web processes found"
+                    }
+                    if health_status["status"] == "healthy":
+                        health_status["status"] = "degraded"
+                        
+            except Exception as e:
+                health_status["components"]["goose_web"] = {
+                    "status": "unknown", 
+                    "error": str(e)
+                }
+            
+            # Відповідь з відповідним HTTP статусом
+            status_code = 200 if health_status["status"] == "healthy" else (
+                503 if health_status["status"] == "unhealthy" else 200
+            )
+            
+            response = json.dumps(health_status, ensure_ascii=False, indent=2).encode('utf-8')
+            self.send_response(status_code)
+            self.send_header('Content-type', 'application/json; charset=utf-8')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.send_header('Content-Length', str(len(response)))
+            self.end_headers()
+            self.wfile.write(response)
+            
+        except Exception as e:
+            logger.error(f"Health check error: {e}")
+            self._send_error_response(500, str(e))
+
+    def serve_test_mode_analysis(self):
+        """
+        🧪 НОВИЙ API ENDPOINT: Тестування системи інтелектуального аналізу режиму
+        GET /api/atlas/test-mode-analysis - тестування аналізу промптів
+        """
+        try:
+            if hasattr(self.server, 'session_manager'):
+                sm = self.server.session_manager
+                
+                # Запускаємо тестування
+                test_results = sm.test_intelligent_mode_analysis()
+                
+                # Формуємо детальну відповідь
+                response_data = {
+                    "test_results": test_results,
+                    "summary": {
+                        "total_tests": test_results["total_tests"],
+                        "http_api_percentage": round((test_results["http_api_recommended"] / test_results["total_tests"]) * 100, 1),
+                        "cli_percentage": round((test_results["cli_recommended"] / test_results["total_tests"]) * 100, 1)
+                    },
+                    "system_status": {
+                        "intelligent_analysis": "active",
+                        "mode_detection": "enabled",
+                        "current_default": "http_api" if sm.use_http_api else "cli"
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                response = json.dumps(response_data, ensure_ascii=False, indent=2).encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json; charset=utf-8')
+                self.send_header('Access-Control-Allow-Origin', '*')
+                self.send_header('Content-Length', str(len(response)))
+                self.end_headers()
+                self.wfile.write(response)
+                
+            else:
+                self._send_error_response(503, "Session manager not available")
+                
+        except Exception as e:
+            logger.error(f"Mode analysis test error: {e}")
+            self._send_error_response(500, str(e))
+
+    def _generate_api_recommendations(self, diagnostics: dict) -> list:
+        """🧠 Генерація рекомендацій на основі діагностики"""
+        recommendations = []
+        
+        api_status = diagnostics.get("api_status", {})
+        config = diagnostics.get("api_configuration", {})
+        
+        if api_status.get("fallback_active"):
+            recommendations.append({
+                "priority": "high",
+                "issue": "HTTP API fallback активний",
+                "solution": "Перевірте чи працює Goose web сервер на порту 3000",
+                "command": "ps aux | grep 'goose web'"
+            })
+        
+        if api_status.get("failure_count", 0) > 5:
+            recommendations.append({
+                "priority": "medium", 
+                "issue": f"Багато помилок API ({api_status.get('failure_count')})",
+                "solution": "Перезапустіть Goose сервер або перевірте мережеве з'єднання"
+            })
+        
+        if not config.get("secret_key_configured"):
+            recommendations.append({
+                "priority": "low",
+                "issue": "Secret key не налаштований",
+                "solution": "Встановіть GOOSE_SECRET_KEY в змінних середовища"
+            })
+        
+        live_validation = diagnostics.get("live_validation", {})
+        if not live_validation.get("available"):
+            reason = live_validation.get("reason", "unknown")
+            if reason == "network_unreachable":
+                recommendations.append({
+                    "priority": "critical",
+                    "issue": "Мережевий порт недоступний",
+                    "solution": "Запустіть Goose web сервер: './target/release/goose web --port 3000'"
+                })
+            elif reason == "http_timeout":
+                recommendations.append({
+                    "priority": "high", 
+                    "issue": "HTTP таймаути",
+                    "solution": "Goose сервер може бути перевантажений - перезапустіть його"
+                })
+        
+        return recommendations
+
+    def _send_error_response(self, status_code: int, error_message: str):
+        """📤 Відправка стандартизованої відповіді про помилку"""
+        error_response = {
+            "error": error_message,
+            "status_code": status_code,
+            "timestamp": datetime.now().isoformat()
+        }
+        response = json.dumps(error_response, ensure_ascii=False).encode('utf-8')
+        self.send_response(status_code)
+        self.send_header('Content-type', 'application/json; charset=utf-8')
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Content-Length', str(len(response)))
+        self.end_headers()
+        self.wfile.write(response)
+
     def handle_chat(self):
         """Обробка чат запитів через Atlas Core (Atlas LLM1 + Goose + Гріша LLM3)"""
         try:
@@ -1158,29 +1544,12 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             
             # Використання HTTP API замість CLI
             try:
-                if session_type == "new_session":
-                    # Створюємо нову сесію та одразу відправляємо повідомлення
-                    reply_result = self.send_goose_request("/sessions", "POST", {
-                        "name": session_name,
-                        "message": user_message
-                    })
-                elif session_type == "continue_session":
-                    # Надсилаємо повідомлення у вже існуючу сесію
-                    reply_result = self.send_goose_request(f"/sessions/{session_name}/message", "POST", {
-                        "message": user_message,
-                        "resume": True
-                    })
-                else:
-                    # Якщо тип не визначений — поводимось як для нової сесії
-                    reply_result = self.send_goose_request("/sessions", "POST", {
-                        "name": session_name,
-                        "message": user_message
-                    })
+                # На goosed завжди використовуємо /reply з session_id
+                reply_result = self.send_goose_reply_sse(session_name, user_message)
                 
                 # Обробка результату
                 if reply_result["success"]:
-                    response_data = reply_result["data"]
-                    answer = response_data.get("response", response_data.get("message", "Відповідь отримана"))
+                    answer = reply_result.get("response", "Відповідь отримана")
                     
                     result_data = {
                         "response": answer,
@@ -1472,6 +1841,47 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 
         except Exception as e:
             logger.error(f"TTS error: {e}")
+            self.send_json_response({"error": str(e)}, 500)
+
+    def handle_analyze_prompt(self):
+        """
+        Аналізує окремий промпт для визначення режиму
+        POST /api/atlas/analyze-prompt
+        Body: {"prompt": "текст для аналізу"}
+        """
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8'))
+            
+            prompt = data.get("prompt", "")
+            if not prompt:
+                self.send_json_response({"error": "Prompt is required"}, 400)
+                return
+            
+            if hasattr(self.server, 'session_manager'):
+                sm = self.server.session_manager
+                
+                # Проводимо аналіз
+                analysis = sm.analyze_user_mode_preference(prompt)
+                
+                response_data = {
+                    "prompt": prompt,
+                    "analysis": analysis,
+                    "system_info": {
+                        "current_default": "http_api" if sm.use_http_api else "cli",
+                        "intelligent_switching": "enabled"
+                    },
+                    "timestamp": datetime.now().isoformat()
+                }
+                
+                self.send_json_response(response_data)
+                
+            else:
+                self.send_json_response({"error": "Session manager not available"}, 503)
+                
+        except Exception as e:
+            logger.error(f"Prompt analysis error: {e}")
             self.send_json_response({"error": str(e)}, 500)
 
     
