@@ -80,6 +80,15 @@ from services.handlers import chat as h_chat
 from services.handlers import tts as h_tts
 from services.handlers import atlas as h_atlas
 
+# Імпорт TutorialChat інтеграції
+try:
+    from integration.chat_integration import chat_integration, setup_tutorialchat_integration
+    TUTORIALCHAT_INTEGRATION_AVAILABLE = True
+    logger.info("🚀 TutorialChat інтеграція успішно завантажена!")
+except ImportError as e:
+    TUTORIALCHAT_INTEGRATION_AVAILABLE = False
+    logger.warning(f"⚠️ TutorialChat інтеграція недоступна: {e}")
+
 # Налаштування логування
 logging.basicConfig(
     level=logging.INFO,
@@ -131,6 +140,22 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             h_assets.serve_3d_model(self)
         elif self.path == "/favicon.ico":
             h_assets.serve_favicon(self)
+        elif self.path == "/tutorialchat" or self.path == "/tutorialchat/":
+            # Обслуговування TutorialChat інтерфейсу
+            if TUTORIALCHAT_INTEGRATION_AVAILABLE:
+                h_assets.serve_file(self, Path(__file__).parent / "integration" / "tutorialchat.html")
+            else:
+                self.send_error(503, "TutorialChat integration not available")
+        elif self.path.startswith("/tutorialchat/") and TUTORIALCHAT_INTEGRATION_AVAILABLE:
+            # Обслуговування статичних файлів TutorialChat
+            chat_integration.serve_tutorial_chat_static(self, self.path)
+        elif self.path == "/api/tutorialchat/config" and TUTORIALCHAT_INTEGRATION_AVAILABLE:
+            # Конфігурація TutorialChat
+            config = chat_integration.get_tutorial_chat_config()
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.end_headers()
+            self.wfile.write(json.dumps(config, ensure_ascii=False).encode('utf-8'))
         elif self.path.startswith("/logs"):
             if self.path == "/logs/stream":
                 h_logs.serve_logs_stream(self)
@@ -168,6 +193,13 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             h_tts.handle_tts(self)
         elif self.path == "/api/atlas/analyze-prompt":
             h_atlas.handle_analyze_prompt(self)
+        elif TUTORIALCHAT_INTEGRATION_AVAILABLE and (
+            self.path.startswith("/api/chat/reply") or 
+            self.path.startswith("/api/session") or 
+            self.path.startswith("/api/message")
+        ):
+            # TutorialChat API маршрути
+            chat_integration.handle_tutorial_chat_api(self, self.path)
         else:
             self.send_error(404, "Not Found")
 

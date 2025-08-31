@@ -7,9 +7,14 @@ Atlas Chat Integration Module
 import json
 import logging
 import os
+import sys
 from pathlib import Path
 from typing import Dict, Any, Optional
 from datetime import datetime
+
+# Додаємо frontend до sys.path для імпорту services
+frontend_path = Path(__file__).parent.parent
+sys.path.insert(0, str(frontend_path))
 
 from services.goose_client import GooseClient
 from services import config as cfg
