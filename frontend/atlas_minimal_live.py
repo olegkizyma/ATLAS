@@ -354,8 +354,14 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
     """Обробник запитів для Atlas Minimal Interface"""
     
     def __init__(self, *args, **kwargs):
-        # Конфігурація Goose API (goosed за замовчуванням на 3001)
-        self.goose_api_url = os.getenv("GOOSE_API_URL", "http://127.0.0.1:3001")
+        # Конфігурація Goose API: дефолт 3000, fallback 3001 якщо 3000 недоступний (або GOOSE_API_URL з env)
+        env_url = os.getenv("GOOSE_API_URL")
+        if env_url and self._check_base_url(env_url):
+            self.goose_api_url = env_url
+        else:
+            if env_url and not self._check_base_url(env_url):
+                logger.warning(f"⚠️ Недоступний GOOSE_API_URL: {env_url}; виконую автопідбір")
+            self.goose_api_url = self._auto_pick_goose_url()
         self.goose_secret_key = os.getenv("GOOSE_SECRET_KEY", "test")  # Секретний ключ для автентифікації
         self.session_endpoint = f"{self.goose_api_url}/session"
         self.reply_endpoint = f"{self.goose_api_url}/reply"
@@ -367,6 +373,36 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         self.live_streamer = None
         
         super().__init__(*args, **kwargs)
+
+    def _auto_pick_goose_url(self) -> str:
+        """Вибирає базовий URL Goose API: спочатку 3000, потім 3001."""
+        import requests as _req
+        for base in ("http://127.0.0.1:3000", "http://127.0.0.1:3001"):
+            try:
+                for ep in ("/status", "/api/health", "/"):
+                    try:
+                        r = _req.get(f"{base}{ep}", timeout=2)
+                        if r.status_code in (200, 404):
+                            return base
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        return "http://127.0.0.1:3000"
+
+    def _check_base_url(self, base: str) -> bool:
+        try:
+            import requests as _req
+            for ep in ("/status", "/api/health", "/"):
+                try:
+                    r = _req.get(f"{base}{ep}", timeout=2)
+                    if r.status_code in (200, 404):
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            return False
+        return False
     
     def handle_one_request(self):
         """Override to handle connection resets gracefully"""
@@ -451,18 +487,98 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             return {"success": False, "error": str(e)}
 
     def send_goose_reply_sse(self, session_name: str, message: str, timeout: int = 90) -> dict:
-        """Надсилає повідомлення до goosed /reply і агрегує SSE-відповідь у текст.
+        """Надсилає повідомлення до Goose, авто-вибір: goose web (WS) або goosed (/reply SSE).
 
         Повертає dict: { success, response, error? }
         """
         try:
+            import time as _time
+            # Визначимо, що працює: goose web чи goosed
+            def _is_web():
+                try:
+                    r = requests.get(f"{self.goose_api_url}/api/health", timeout=3)
+                    return r.status_code == 200
+                except Exception:
+                    return False
+
+            def _is_goosed():
+                try:
+                    r = requests.get(f"{self.goose_api_url}/status", timeout=3)
+                    return r.status_code == 200
+                except Exception:
+                    return False
+
+            if _is_web():
+                # Використовуємо WebSocket /ws у goose web
+                try:
+                    import aiohttp, asyncio
+
+                    async def _via_ws():
+                        ws_url = self.goose_api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+                        payload = {
+                            "type": "message",
+                            "content": message,
+                            "session_id": session_name,
+                            "timestamp": int(_time.time() * 1000),
+                        }
+                        timeout_total = aiohttp.ClientTimeout(total=timeout)
+                        chunks = []
+                        async with aiohttp.ClientSession(timeout=timeout_total) as session:
+                            async with session.ws_connect(ws_url, heartbeat=30) as ws:
+                                await ws.send_str(json.dumps(payload))
+                                async for msg in ws:
+                                    if msg.type == aiohttp.WSMsgType.TEXT:
+                                        try:
+                                            obj = json.loads(msg.data)
+                                        except Exception:
+                                            obj = None
+                                        if isinstance(obj, dict):
+                                            t = obj.get("type")
+                                            if t == "response":
+                                                content = obj.get("content")
+                                                if content:
+                                                    chunks.append(str(content))
+                                            elif t in ("complete", "cancelled"):
+                                                break
+                                            elif t == "error":
+                                                return {"success": False, "error": obj.get("message", "websocket error")}
+                                        else:
+                                            chunks.append(str(msg.data))
+                                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                        break
+                        return {"success": True, "response": "".join(chunks).strip()}
+
+                    try:
+                        return asyncio.run(_via_ws())
+                    except RuntimeError:
+                        loop = asyncio.new_event_loop()
+                        try:
+                            asyncio.set_event_loop(loop)
+                            return loop.run_until_complete(_via_ws())
+                        finally:
+                            asyncio.set_event_loop(None)
+                            loop.close()
+                except Exception as e:
+                    return {"success": False, "error": str(e)}
+
+            # Fallback: goosed /reply SSE
             url = f"{self.goose_api_url}/reply"
             headers = {
                 "Accept": "text/event-stream",
                 "Cache-Control": "no-cache",
                 "X-Secret-Key": self.goose_secret_key,
             }
-            payload = {"message": message, "session_id": session_name}
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "created": int(_time.time()),
+                        "content": [{"type": "text", "text": message}],
+                    }
+                ],
+                "session_id": session_name,
+                "session_working_dir": os.getcwd(),
+            }
 
             with requests.post(url, json=payload, headers=headers, stream=True, timeout=timeout) as resp:
                 if resp.status_code != 200:
@@ -485,11 +601,19 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                         try:
                             obj = json.loads(data_part)
                             if isinstance(obj, dict):
-                                token = obj.get("text") or obj.get("token") or obj.get("content")
-                                if token:
-                                    chunks.append(str(token))
-                                if obj.get("final") is True or obj.get("done") is True:
-                                    break
+                                if obj.get("type") == "Message" and isinstance(obj.get("message"), dict):
+                                    msg = obj["message"]
+                                    for c in msg.get("content", []) or []:
+                                        if isinstance(c, dict) and c.get("type") == "text":
+                                            t = c.get("text")
+                                            if t:
+                                                chunks.append(str(t))
+                                else:
+                                    token = obj.get("text") or obj.get("token") or obj.get("content")
+                                    if token:
+                                        chunks.append(str(token))
+                                    if obj.get("final") is True or obj.get("done") is True:
+                                        break
                             else:
                                 chunks.append(str(obj))
                         except Exception:
@@ -560,6 +684,8 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         """Обробка POST запитів"""
         if self.path == "/api/chat":
             self.handle_chat()
+        elif self.path == "/api/chat/stream":
+            self.handle_chat_stream()
         elif self.path == "/api/tts/speak":
             self.handle_tts()
         elif self.path == "/api/atlas/analyze-prompt":
@@ -1532,6 +1658,199 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
                 "error": str(e),
                 "atlas_core": False
             }, 500)
+
+    def handle_chat_stream(self):
+        """Стрімовий чат: проксування у реальному часі (goose web WS або goosed /reply SSE).
+
+        Запит: POST /api/chat/stream
+        Body: {"message": str, optional: "session_type", "session_name"}
+
+        Відповідь: text/event-stream з подіями:
+          - data: {"type":"status","message":"..."}
+          - data: {"type":"token","token":"...","accumulated":"..."}
+          - data: {"type":"done","total":"..."}
+          - data: {"type":"error","error":"..."}
+        """
+        try:
+            content_length = int(self.headers.get('Content-Length', 0))
+            post_data = self.rfile.read(content_length)
+            data = json.loads(post_data.decode('utf-8')) if post_data else {}
+
+            user_message = data.get("message") or data.get("prompt")
+            if not user_message:
+                self._send_error_response(400, "Message is required")
+                return
+
+            session_type = self.determine_session_type(user_message, data.get("session_type"))
+            session_name = data.get("session_name") or self.get_session_name(user_message, session_type)
+
+            self.send_response(200)
+            self.send_header('Content-Type', 'text/event-stream; charset=utf-8')
+            self.send_header('Cache-Control', 'no-cache')
+            self.send_header('Connection', 'keep-alive')
+            self.send_header('Access-Control-Allow-Origin', '*')
+            self.end_headers()
+
+            def send_event(obj: dict):
+                try:
+                    payload = json.dumps(obj, ensure_ascii=False)
+                    self.wfile.write(f"data: {payload}\n\n".encode('utf-8'))
+                    try:
+                        self.wfile.flush()
+                    except Exception:
+                        pass
+                except (BrokenPipeError, ConnectionResetError):
+                    raise
+                except Exception as e:
+                    logger.error(f"SSE write error: {e}")
+
+            send_event({"type": "status", "message": "connected", "session": session_name})
+
+            accumulated: list[str] = []
+
+            def _is_web():
+                try:
+                    r = requests.get(f"{self.goose_api_url}/api/health", timeout=3)
+                    return r.status_code == 200
+                except Exception:
+                    return False
+
+            if _is_web():
+                import aiohttp, asyncio
+
+                async def _via_ws_and_stream():
+                    ws_url = self.goose_api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+                    payload = {
+                        "type": "message",
+                        "content": user_message,
+                        "session_id": session_name,
+                        "timestamp": int(time.time() * 1000),
+                    }
+                    timeout_total = aiohttp.ClientTimeout(total=300)
+                    async with aiohttp.ClientSession(timeout=timeout_total) as session:
+                        async with session.ws_connect(ws_url, heartbeat=30) as ws:
+                            await ws.send_str(json.dumps(payload))
+                            async for msg in ws:
+                                if msg.type == aiohttp.WSMsgType.TEXT:
+                                    try:
+                                        obj = json.loads(msg.data)
+                                    except Exception:
+                                        obj = None
+                                    if isinstance(obj, dict):
+                                        t = obj.get("type")
+                                        if t == "response":
+                                            content = obj.get("content")
+                                            if content:
+                                                token = str(content)
+                                                accumulated.append(token)
+                                                send_event({
+                                                    "type": "token",
+                                                    "token": token,
+                                                    "accumulated": "".join(accumulated)
+                                                })
+                                        elif t in ("complete", "cancelled"):
+                                            break
+                                        elif t == "error":
+                                            send_event({"type": "error", "error": obj.get("message", "websocket error")})
+                                            return
+                                elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                    break
+
+                try:
+                    import asyncio
+                    asyncio.run(_via_ws_and_stream())
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    try:
+                        asyncio.set_event_loop(loop)
+                        loop.run_until_complete(_via_ws_and_stream())
+                    finally:
+                        asyncio.set_event_loop(None)
+                        loop.close()
+            else:
+                url = f"{self.goose_api_url}/reply"
+                headers = {
+                    "Accept": "text/event-stream",
+                    "Cache-Control": "no-cache",
+                    "X-Secret-Key": self.goose_secret_key,
+                }
+                payload = {
+                    "messages": [
+                        {
+                            "role": "user",
+                            "created": int(time.time()),
+                            "content": [{"type": "text", "text": user_message}],
+                        }
+                    ],
+                    "session_id": session_name,
+                    "session_working_dir": os.getcwd(),
+                }
+
+                with requests.post(url, json=payload, headers=headers, stream=True, timeout=300) as resp:
+                    if resp.status_code != 200:
+                        try:
+                            body = resp.text[:500]
+                        except Exception:
+                            body = "<no body>"
+                        send_event({"type": "error", "error": f"HTTP {resp.status_code}", "response": body})
+                        return
+
+                    for raw_line in resp.iter_lines(decode_unicode=True):
+                        if raw_line is None:
+                            continue
+                        line = raw_line.strip()
+                        if not line or line.startswith(":"):
+                            continue
+                        if line.startswith("data:"):
+                            data_part = line[5:].lstrip()
+                            token = None
+                            is_done = False
+                            try:
+                                obj = json.loads(data_part)
+                                if isinstance(obj, dict):
+                                    if obj.get("type") == "Message" and isinstance(obj.get("message"), dict):
+                                        msg = obj["message"]
+                                        for c in msg.get("content", []) or []:
+                                            if isinstance(c, dict) and c.get("type") == "text":
+                                                t = c.get("text")
+                                                if t:
+                                                    token = str(t)
+                                                    accumulated.append(token)
+                                                    send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                                    else:
+                                        token = obj.get("text") or obj.get("token") or obj.get("content")
+                                        if token:
+                                            token = str(token)
+                                            accumulated.append(token)
+                                            send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                                        is_done = bool(obj.get("final") or obj.get("done"))
+                                else:
+                                    token = str(obj)
+                                    accumulated.append(token)
+                                    send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                            except Exception:
+                                token = data_part
+                                accumulated.append(token)
+                                send_event({"type": "token", "token": token, "accumulated": "".join(accumulated)})
+                            if is_done:
+                                break
+                        elif line.lower() == "event: done":
+                            break
+
+            send_event({"type": "done", "total": "".join(accumulated), "session": session_name})
+        except (BrokenPipeError, ConnectionResetError):
+            return
+        except requests.exceptions.RequestException as e:
+            try:
+                send_event({"type": "error", "error": str(e)})
+            except Exception:
+                pass
+        except Exception as e:
+            logger.error(f"Chat stream error: {e}")
+            try:
+                send_event({"type": "error", "error": str(e)})
+            except Exception:
+                pass
 
     def handle_chat_legacy(self, user_message: str, data: dict, user_context: dict, atlas_error: str = None):
         """Legacy обробка чату через HTTP API Goose замість CLI"""
