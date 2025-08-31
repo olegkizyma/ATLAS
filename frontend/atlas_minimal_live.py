@@ -114,6 +114,13 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             self.ATLAS_CORE_AVAILABLE = ATLAS_CORE_AVAILABLE
         except NameError:
             self.ATLAS_CORE_AVAILABLE = False
+        # Додатково дозволяємо вимикати Atlas Core через ENV, щоб примусово використовувати Goose
+        try:
+            if cfg.get_env_bool("ATLAS_DISABLE_CORE", False):
+                self.ATLAS_CORE_AVAILABLE = False
+                logger.info("ATLAS_DISABLE_CORE=1 — Atlas Core вимкнено, використовується лише Goose")
+        except Exception:
+            pass
         # Лог-стрімер може бути ініціалізований пізніше; зберігаємо посилання
         self.live_streamer = None
         super().__init__(*args, **kwargs)
@@ -194,7 +201,11 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         if norm == "/api/chat":
             self.handle_chat()
         elif norm == "/api/chat/stream":
-            self.handle_chat_stream()
+            # Переключено на Atlas Core замість Goose
+            self.handle_chat_stream_core()
+        elif norm == "/api/chat/reply":
+            # Проксі 1:1 до Goose /reply для ідентичного стрімінгу, як на порту 3000
+            h_chat.handle_goose_reply_proxy(self)
         elif norm == "/api/tts/speak":
             h_tts.handle_tts(self)
         elif norm == "/api/chat/stream_core":

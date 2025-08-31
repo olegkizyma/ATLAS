@@ -115,7 +115,8 @@ if [ ! -f "atlas_minimal_live.py" ]; then
 fi
 
 log "🚀 Запускаю Atlas Frontend..."
-"$FRONTEND_DIR/venv/bin/python" "$FRONTEND_DIR/atlas_minimal_live.py" &
+# Запуск через bash з активованим venv для правильного використання віртуального середовища
+cd "$FRONTEND_DIR" && bash -c "source venv/bin/activate && export PYTHONPATH='$FRONTEND_DIR:\${PYTHONPATH:-}' && python atlas_minimal_live.py" &
 FRONTEND_PID=$!
 log "✅ Atlas Frontend запущено (PID: $FRONTEND_PID)"
 

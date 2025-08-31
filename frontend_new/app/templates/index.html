@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATLAS Minimal Interface v2.0</title>
+    <link rel="icon" href="{{ url_for('static', filename='assets/favicon.ico') }}" type="image/x-icon">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='assets/apple-touch-icon.png') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+    <!-- 3D Model Background -->
+    <div class="model-container">
+        <model-viewer 
+            id="model-viewer"
+            src="{{ url_for('static', filename='assets/DamagedHelmet.glb') }}"
+            auto-rotate
+            auto-rotate-delay="500"
+            rotation-per-second="30deg"
+            camera-controls
+            poster="{{ url_for('static', filename='assets/atlas-icon.svg') }}"
+            shadow-intensity="0.3"
+            shadow-softness="0.8"
+            environment-image="neutral"
+            disable-zoom
+            style="--poster-color: transparent;">
+        </model-viewer>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+        <!-- Header -->
+        <div class="header">
+            <div class="logo-container">
+                <img src="{{ url_for('static', filename='assets/atlas-icon.svg') }}" alt="ATLAS" class="logo">
+                <h1>ATLAS</h1>
+                <span class="version">v2.0</span>
+            </div>
+            <div class="status-container">
+                <div id="connection-status" class="status disconnected">
+                    <span class="status-dot"></span>
+                    <span class="status-text">Connecting...</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Left Panel - Logs Stream (без заголовків) -->
+            <div class="logs-panel">
+                <div id="logs-container" class="logs-container">
+                    <div class="log-item system">
+                        <span class="timestamp">[{{ current_time }}]</span>
+                        <span class="level">INFO</span>
+                        <span class="message">ATLAS Frontend v2.0 initialized</span>
+                    </div>
+                    <div class="log-item system">
+                        <span class="timestamp">[{{ current_time }}]</span>
+                        <span class="level">INFO</span>
+                        <span class="message">Waiting for Atlas Core connection...</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Center Panel - 3D Visualization (visible through transparent overlay) -->
+            <div class="center-panel">
+                <div class="visualization-overlay">
+                    <div class="system-info">
+                        <div class="info-item">
+                            <span class="label">Status:</span>
+                            <span id="system-status" class="value">Online</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">Mode:</span>
+                            <span id="system-mode" class="value">Standby</span>
+                        </div>
+                        <div class="info-item">
+                            <span class="label">Core:</span>
+                            <span id="core-status" class="value">Disconnected</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Panel - Chat -->
+            <div class="chat-panel">
+                <div class="panel-header">
+                    <h3>Atlas Interface</h3>
+                    <div class="controls">
+                        <button id="clear-chat" class="btn btn-small">Clear</button>
+                        <button id="toggle-chat" class="btn btn-small active">Auto</button>
+                    </div>
+                </div>
+                
+                <div id="chat-container" class="chat-container">
+                    <div class="message system">
+                        <div class="message-header">
+                            <span class="sender">ATLAS</span>
+                            <span class="timestamp">{{ current_time }}</span>
+                        </div>
+                        <div class="message-content">
+                            Система ініціалізована. Очікую підключення до Atlas Core...
+                        </div>
+                    </div>
+                </div>
+
+                <div class="input-container">
+                    <input 
+                        type="text" 
+                        id="message-input" 
+                        placeholder="Введіть ваше повідомлення..." 
+                        autocomplete="off"
+                        maxlength="1000"
+                    >
+                    <button id="send-button" class="btn btn-primary">
+                        <span class="btn-text">Send</span>
+                        <span class="btn-shortcut">↵</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Footer -->
+        <div class="footer">
+            <div class="footer-left">
+                <span>ATLAS Minimal Interface v2.0</span>
+                <span class="separator">|</span>
+                <span id="footer-status">Ready</span>
+            </div>
+            <div class="footer-right">
+                <span id="current-time">{{ current_time }}</span>
+                <span class="separator">|</span>
+                <span>Build: 20250901</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Initializing ATLAS...</div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/logger-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/status-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/chat-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <!-- Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('{{ url_for("static", filename="js/service-worker.js") }}')
+                .then(registration => console.log('SW registered:', registration))
+                .catch(error => console.log('SW registration failed:', error));
+        }
+    </script>
+</body>
+</html>
