@@ -453,6 +453,9 @@
                 this.TTS_ACTIVE = false;
                 this.SINGLE_INACTIVITY_MS = 3000; // 3s після останнього фінального результату
                 this.MIN_FINAL_CHARS_TO_SEND = 2;
+                // Автовідповідь (коли Goose питає підтвердження)
+                this.autoReplyTimer = null;
+                this.autoReplyActive = false;
                 
                 this.initializeElements();
                 this.initializeVoiceRecognition();
@@ -734,9 +737,9 @@
                 };
                 
                 try {
-                    // Створюємо AbortController для таймауту
+                    // Створюємо AbortController для таймауту (підвищено до 180 сек)
                     const controller = new AbortController();
-                    const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 секунд таймаут
+                    const timeoutId = setTimeout(() => controller.abort(), 180000);
                     
                     const response = await fetch(url, {
                         method: 'POST',
@@ -771,7 +774,7 @@
                 } catch (error) {
                     if (error.name === 'AbortError') {
                         this.logMessage(`[CHAT] Таймаут запиту (${url})`, 'warning');
-                        return 'Таймаут запиту (30 сек)';
+                        return 'Таймаут запиту (180 сек)';
                     }
                     this.logMessage(`[CHAT] Network error: ${error.message}`, 'error');
                     return 'Помилка підключення';
@@ -825,10 +828,12 @@
                 const decoder = new TextDecoder('utf-8');
                 let buffer = '';
                 let doneReceived = false;
+                let accumulatedText = '';
 
                 const applyToken = (token) => {
                     if (!token) return;
                     textDiv.textContent += token;
+                    accumulatedText += token;
                     container.scrollTop = container.scrollHeight;
                 };
 
@@ -870,8 +875,91 @@
                     this.logMessage('[SSE] Потік завершено');
                 }
 
+                // Пост-обробка відповіді (парсинг JSON у трійних лапках)
+                try {
+                    this.postProcessAssistantText(textDiv, accumulatedText);
+                    this.maybeScheduleAutoReply(accumulatedText);
+                } catch (e) {
+                    // тихо
+                }
+
                 // Скидаємо режим сесії після відправки
                 if (this.sessionMode !== 'auto') this.setSessionMode('auto');
+            }
+
+            // Витяг і рендер структурованого JSON із тексту відповіді
+            postProcessAssistantText(textDiv, rawText) {
+                if (!rawText) return;
+                const extractJson = (s) => {
+                    // ```json ... ```
+                    const fence = s.match(/```json\s*([\s\S]*?)```/i);
+                    if (fence && fence[1]) return fence[1];
+                    // голий JSON
+                    const plain = s.trim();
+                    if (plain.startsWith('{') && plain.endsWith('}')) return plain;
+                    return null;
+                };
+                const jsonStr = extractJson(rawText);
+                if (!jsonStr) return;
+                try {
+                    const obj = JSON.parse(jsonStr);
+                    const completed = obj.completed;
+                    const details = obj.details || obj.message || obj.reason || '';
+                    const summary = (completed === false)
+                        ? `Статус: незавершено. Деталі: ${details}`
+                        : (completed === true)
+                            ? `Статус: завершено. ${details ? 'Деталі: ' + details : ''}`
+                            : details || rawText;
+                    textDiv.textContent = summary;
+                } catch (_) {
+                    // якщо JSON битий — лишаємо як є
+                }
+            }
+
+            // Якщо відповідь вимагає підтвердження, плануємо автодоведення через 10с
+            maybeScheduleAutoReply(fullText) {
+                try { if (this.autoReplyTimer) { clearTimeout(this.autoReplyTimer); this.autoReplyTimer = null; } } catch(_){}
+                this.autoReplyActive = false;
+                if (!fullText) return;
+
+                const lower = fullText.toLowerCase();
+                const looksLikeQuestion = /перевір|чи\s+потрібно|хочете|підтверд|перевiр/.test(lower);
+                let jsonFlag = false;
+                try {
+                    const fence = fullText.match(/```json\s*([\s\S]*?)```/i);
+                    if (fence && fence[1]) {
+                        const o = JSON.parse(fence[1]);
+                        jsonFlag = (o && o.completed === false);
+                    }
+                } catch(_){}
+
+                if (!(looksLikeQuestion || jsonFlag)) return;
+
+                this.autoReplyActive = true;
+                this.logMessage('[AUTO] Очікування 10с відповіді користувача… потім автопродовження', 'warning');
+
+                const cancel = () => {
+                    if (this.autoReplyTimer) {
+                        clearTimeout(this.autoReplyTimer);
+                        this.autoReplyTimer = null;
+                        if (this.autoReplyActive) this.logMessage('[AUTO] Скасовано користувачем', 'info');
+                        this.autoReplyActive = false;
+                    }
+                };
+                // Скасування при будь-якому вводі
+                const inputHandler = () => cancel();
+                this.chatInput.addEventListener('input', inputHandler, { once: true });
+
+                this.autoReplyTimer = setTimeout(() => {
+                    this.autoReplyTimer = null;
+                    if (!this.autoReplyActive) return;
+                    this.autoReplyActive = false;
+                    const followup = 'Так, продовжуй без додаткових підтверджень і доведи завдання до кінця автоматично.';
+                    this.chatInput.value = followup;
+                    this.autoResizeTextarea();
+                    this.sendMessage();
+                    this.logMessage('[AUTO] Надіслано автопродовження', 'info');
+                }, 10000);
             }
 
             addMessage(text, type) {
