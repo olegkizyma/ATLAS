@@ -53,9 +53,47 @@ class ChatStreamer:
         if use_paraphrase and message_to_send != user_message:
             yield {"type": "status", "role": "atlas", "event": "paraphrase", "say": "Перефразую для виконання:", "content": message_to_send}
 
-        # Пряма прокладка стріму через Goose SSE (/reply) як простой базовый путь
+        # Выбор транспорта: если Goose в режиме web (ws), используем WS-фоллбек с финальным сообщением;
+        # иначе пробуем SSE /reply. При 404/405 переключаемся на WS как фоллбек.
         client = self.goose
         base_url = goose_base_url or client.base_url
+
+        def _ws_fallback_emit():
+            try:
+                # Используем уже реализованный WS-клиент (возвращает финальный ответ)
+                import asyncio
+                timeout = cfg.stream_timeout_seconds() or 90
+                try:
+                    result = asyncio.run(client._via_ws(session_name, message_to_send, timeout))
+                except RuntimeError:
+                    loop = asyncio.new_event_loop()
+                    try:
+                        asyncio.set_event_loop(loop)
+                        result = loop.run_until_complete(client._via_ws(session_name, message_to_send, timeout))
+                    finally:
+                        asyncio.set_event_loop(None)
+                        loop.close()
+                if isinstance(result, dict) and result.get("success"):
+                    text = result.get("response", "")
+                    if text:
+                        yield {"type": "token", "token": text, "accumulated": text}
+                    yield {"type": "done", "total": text}
+                else:
+                    err = (result or {}).get("error", "websocket error")
+                    yield {"type": "error", "error": err, "response": (result or {}).get("response", "")}
+            except Exception as e:
+                yield {"type": "error", "error": str(e)}
+
+        # Если это Goose Web, сразу идем по WS фоллбеку
+        try:
+            if client._is_web():
+                for ev in _ws_fallback_emit():
+                    yield ev
+                return
+        except Exception:
+            pass
+
+        # Иначе пробуем SSE /reply
         url = f"{base_url}/reply"
         headers = {"Accept": "text/event-stream", "Cache-Control": "no-cache", "X-Secret-Key": client.secret_key}
         payload_req = {
@@ -65,6 +103,11 @@ class ChatStreamer:
         }
         with requests.post(url, json=payload_req, headers=headers, stream=True, timeout=cfg.stream_timeout_seconds()) as resp:
             if resp.status_code != 200:
+                # Для 404/405 пробуем WS-фоллбек
+                if resp.status_code in (404, 405):
+                    for ev in _ws_fallback_emit():
+                        yield ev
+                    return
                 try:
                     body = resp.text[:500]
                 except Exception:

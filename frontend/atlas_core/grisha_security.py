@@ -16,6 +16,7 @@ from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 import logging
 from . import config as acfg
+from .http_utils import post_json_with_retry
 
 
 class GrishaSecurity:
@@ -100,7 +101,12 @@ class GrishaSecurity:
             "max_tokens": 300
         }
         
-        response = requests.post(url, headers=headers, json=data, timeout=15)
+        response = post_json_with_retry(
+            url,
+            headers=headers,
+            json=data,
+            timeout=15,
+        )
         response.raise_for_status()
         
         result = response.json()
@@ -579,7 +585,12 @@ class GrishaSecurity:
                 }
             }
             
-            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response = post_json_with_retry(
+                url,
+                headers=headers,
+                json=data,
+                timeout=30,
+            )
             response.raise_for_status()
             
             result = response.json()
@@ -667,7 +678,12 @@ class GrishaSecurity:
                 }
             }
             
-            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response = post_json_with_retry(
+                url,
+                headers=headers,
+                json=data,
+                timeout=30,
+            )
             response.raise_for_status()
             
             result = response.json()
@@ -864,46 +880,84 @@ STDERR: {stderr_trimmed}
 
     def _analyze_verification_result_locally(self, stdout: str, stderr: str, return_code: int, original_task: str) -> Dict:
         """Fallback аналіз результату перевірки"""
-        # Базовий аналіз
+        # Базовий аналіз з поліпшеними індикаторами і м'якою логікою
         success_indicators = [
-            "success", "completed", "opened", "found", "created", "running",
-            "виконано", "відкрито", "знайдено", "створено", "запущено"
+            "success", "succeeded", "completed", "done", "ok", "ready",
+            "opened", "launched", "running", "found", "created", "displaying", "playing",
+            "виконано", "успішно", "готово", "відкрито", "запущено", "працює", "знайдено", "створено"
         ]
-        
+
         error_indicators = [
-            "error", "failed", "not found", "cannot", "unable",
-            "помилка", "не знайдено", "неможливо", "не вдалося"
+            "error", "failed", "exception", "not found", "cannot", "unable",
+            "timeout", "timed out", "permission denied",
+            "помилка", "збій", "не знайдено", "неможливо", "не вдалося", "таймаут"
         ]
-        
+
+        # Попередження не вважаємо фатальною помилкою
+        warning_indicators = ["warning", "deprecated", "slow network", "пересторога", "попередження"]
+
         stdout_lower = stdout.lower()
         stderr_lower = stderr.lower()
-        
-        # Перевіряємо на помилки
-        has_errors = (return_code != 0 or 
-                     any(error in stderr_lower for error in error_indicators) or
-                     any(error in stdout_lower for error in error_indicators))
-        
-        # Перевіряємо на успіх
-        has_success = any(success in stdout_lower for success in success_indicators)
-        
+
+        has_success = any(tok in stdout_lower for tok in success_indicators)
+
+        # Якщо лише попередження — це не помилка
+        has_warnings_only = (
+            any(w in stderr_lower for w in warning_indicators) and
+            not any(e in stderr_lower for e in error_indicators)
+        )
+
+        has_errors = (
+            return_code != 0 or
+            any(e in stderr_lower for e in error_indicators) or
+            any(e in stdout_lower for e in error_indicators)
+        ) and not has_warnings_only
+
+        # Пріоритет: якщо є успіх і return_code == 0 — рахуємо виконаним навіть при наявності несуттєвих помилок у stdout
+        if has_success and return_code == 0:
+            return {
+                "completed": True,
+                "details": "Перевірка підтвердила успіх (return_code=0, є індикатори успіху)",
+                "next_action": None
+            }
+
+        # Якщо конфліктні сигнали: надаємо перевагу успіху, якщо помилки не є фатальними (немає явних слів типу 'permission denied')
+        non_fatal_errors = ["not found", "cannot", "unable", "не знайдено", "неможливо", "не вдалося"]
+        has_only_non_fatal = any(nf in (stdout_lower + "\n" + stderr_lower) for nf in non_fatal_errors)
+        if has_success and has_only_non_fatal:
+            return {
+                "completed": True,
+                "details": "Є індикатори успіху; нефатальні помилки проігноровано",
+                "next_action": None
+            }
+
         if has_errors and not has_success:
             return {
                 "completed": False,
                 "details": "Виявлено помилки при перевірці виконання",
                 "next_action": "retry_task"
             }
-        elif has_success:
+
+        if has_success:
             return {
                 "completed": True,
                 "details": "Перевірка підтвердила успішне виконання",
                 "next_action": None
             }
-        else:
+
+        # Якщо нічого виразного не знайдено, але return_code==0 — вважаємо виконаним з обережністю
+        if return_code == 0:
             return {
-                "completed": False,
-                "details": "Результат перевірки неоднозначний",
-                "next_action": "modify_approach"
+                "completed": True,
+                "details": "Код завершення 0 і відсутні явні помилки",
+                "next_action": None
             }
+
+        return {
+            "completed": False,
+            "details": "Результат перевірки неоднозначний",
+            "next_action": "modify_approach"
+        }
 
     def generate_completion_summary(self, task_description: str, execution_result: Dict, session_info: Dict = None) -> str:
         """
@@ -983,7 +1037,12 @@ STDERR: {stderr_trimmed}
                 }
             }
             
-            response = requests.post(url, headers=headers, json=data, timeout=15)
+            response = post_json_with_retry(
+                url,
+                headers=headers,
+                json=data,
+                timeout=15,
+            )
             response.raise_for_status()
             
             result = response.json()

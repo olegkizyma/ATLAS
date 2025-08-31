@@ -50,6 +50,11 @@ class SessionManager:
         self.intelligent_mode_detection = True  # інтелектуальний аналіз промптів
         # Фактичний перемикач режиму виконання (HTTP API vs CLI)
         self.use_http_api = True  # за замовчуванням використовуємо HTTP API
+        # Глобальный запрет CLI fallback (строгие окружения)
+        try:
+            self.cli_fallback_disabled = acfg.disable_cli_fallback()
+        except Exception:
+            self.cli_fallback_disabled = False
         
         # 🆕 Покращена діагностика та відновлення
         self.api_failure_count = 0
@@ -66,6 +71,42 @@ class SessionManager:
         logger.info(f"🧠 SessionManager: Інтелектуальний режим, пріоритет HTTP API: {self.api_url}")
         # Початкова перевірка API
         self._validate_api_availability()
+
+    def _should_cli_fallback_on_error(self, error_text: str | None) -> bool:
+        """Визначає, чи слід падати у CLI на основі типу помилки HTTP API/стріму.
+
+        Правила:
+        - Повертаємо True лише для мережевих/таймаутних збоїв, відмови у з'єднанні, або HTTP 5xx.
+        - Для HTTP 4xx (400/401/403/404/405/409/422 тощо) — НЕ виконуємо CLI fallback (це логічні/вхідні помилки).
+        - Якщо немає зрозумілої класифікації — обираємо обережну поведінку та не падаємо у CLI.
+        """
+        try:
+            if not error_text:
+                return False
+            e = str(error_text).lower()
+            # Явні мережеві/таймаутні сигнали
+            net_markers = [
+                "timeout", "timed out", "network", "connection", "connection refused",
+                "connection reset", "broken pipe", "temporarily unavailable", "dns", "name or service not known",
+            ]
+            if any(m in e for m in net_markers):
+                return not getattr(self, 'cli_fallback_disabled', False)
+
+            # Класифікація HTTP кодів
+            # очікуємо формату "HTTP XXX" у тексті помилки
+            import re
+            m = re.search(r"http\s+(\d{3})", e)
+            if m:
+                code = int(m.group(1))
+                if 500 <= code <= 599:
+                    return not getattr(self, 'cli_fallback_disabled', False)  # 5xx — пробуем CLI, если не запрещено
+                if 400 <= code <= 499:
+                    return False  # 4xx — НЕ переходимо на CLI
+
+            # Якщо не розпізнали — не фолбекати у CLI
+            return False
+        except Exception:
+            return False
 
     def _auto_select_api_url(self) -> str:
         """Автоматично обирає URL Goose API: спочатку порт 3000, далі 3001.
@@ -352,17 +393,17 @@ class SessionManager:
         return False
 
     def _stream_reply(self, session_name: str, message: str, timeout: int = 90) -> Dict:
-        """Надсилає повідомлення до Goose, авто-вибір транспорту:
-        - Якщо це goosed: POST /reply (SSE)
-        - Якщо це goose web: WebSocket /ws
+        """Надсилає повідомлення до Goose с одним источником истины по транспорту.
 
-        Контракт: success, response, stderr, return_code або error
+        Предпочтение: если доступен goose web — WebSocket /ws; иначе — SSE POST /reply.
+        Плюс: мягкий авто-ретрай — при 400 с намеком на vision/header пробуем WS перед возвратом ошибки.
+
+        Контракт: {success, response, stderr, return_code} или {success: False, error}
         """
         import requests
         import os
         import time
         import asyncio
-        from urllib.parse import urlparse
 
         def _is_goose_web() -> bool:
             try:
@@ -371,20 +412,13 @@ class SessionManager:
             except Exception:
                 return False
 
-        def _is_goosed() -> bool:
-            try:
-                r = requests.get(f"{self.api_url}/status", timeout=3)
-                return r.status_code == 200
-            except Exception:
-                return False
+        # Универсальный запуск WS один раз (без стрима токенов)
+        def _run_ws_once() -> Dict[str, Any]:
+            import threading
+            import queue as _q
+            result_q: _q.Queue = _q.Queue(maxsize=1)
 
-        # 1) Спробуємо визначити goose web vs goosed
-        try_web = _is_goose_web()
-        try_goosed = _is_goosed() if not try_web else False
-
-        if try_web:
-            # WebSocket шлях для goose web — виконуємо в окремому потоці з власним event loop
-            async def _stream_via_ws() -> Dict[str, Any]:
+            async def _ws_once() -> Dict[str, Any]:
                 import aiohttp
                 ws_url = self.api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
                 timeout_total = aiohttp.ClientTimeout(total=timeout)
@@ -428,14 +462,9 @@ class SessionManager:
                     "return_code": 0,
                 }
 
-            # Запуск корутины у фоновому потоці, щоб уникнути конфликтов с активным event loop
-            import threading
-            import queue as _q
-            result_q: _q.Queue = _q.Queue(maxsize=1)
-
             def _worker():
                 try:
-                    res = asyncio.run(_stream_via_ws())
+                    res = asyncio.run(_ws_once())
                 except Exception as e:
                     res = {"success": False, "error": str(e)}
                 result_q.put(res)
@@ -443,12 +472,15 @@ class SessionManager:
             t = threading.Thread(target=_worker, daemon=True)
             t.start()
             try:
-                res = result_q.get(timeout=timeout + 5)
+                return result_q.get(timeout=timeout + 5)
             except Exception:
-                res = {"success": False, "error": "WebSocket thread timeout"}
-            return res
+                return {"success": False, "error": "WebSocket thread timeout"}
 
-        # 2) Fallback: goosed /reply (SSE)
+        # 1) Если это goose web — используем WS
+        if _is_goose_web():
+            return _run_ws_once()
+
+        # 2) Иначе пробуем SSE /reply (goosed)
         try:
             url = f"{self.api_url}/reply"
             headers = {
@@ -472,12 +504,18 @@ class SessionManager:
             logger.info(f"🕸️ POST {url} session={session_name}")
             with requests.post(url, json=payload, headers=headers, stream=True, timeout=timeout) as resp:
                 if resp.status_code != 200:
-                    text = None
+                    # Мягкий ретрай: если 400 и намекает на vision/header — пробуем WS
                     try:
-                        text = resp.text[:500]
+                        body_preview = resp.text[:500]
                     except Exception:
-                        text = "<no body>"
-                    return {"success": False, "error": f"HTTP {resp.status_code}", "response": text}
+                        body_preview = "<no body>"
+                    if resp.status_code == 400:
+                        bp = (body_preview or "").lower()
+                        if any(k in bp for k in ("vision", "copilot-vision", "header", "missing", "requires")):
+                            ws_res = _run_ws_once()
+                            if ws_res.get("success"):
+                                return ws_res
+                    return {"success": False, "error": f"HTTP {resp.status_code}", "response": body_preview}
 
                 chunks: list[str] = []
                 for raw_line in resp.iter_lines(decode_unicode=True):
@@ -916,9 +954,18 @@ class SessionManager:
                         "return_code": result.get("return_code", 0)
                     }
                 else:
-                    logger.warning(f"⚠️ HTTP API недоступний для виконання завдання: {result.get('error')}")
-                    # Fallback до CLI
-                    return self._execute_task_attempt_cli(session_name, task_message)
+                    err = result.get('error') or ''
+                    logger.warning(f"⚠️ Помилка HTTP API при виконанні завдання: {err}")
+                    # Рішення про CLI fallback приймаємо за класифікатором
+                    if self._should_cli_fallback_on_error(err):
+                        logger.warning("🚨 Активую CLI fallback (мережева/5xx помилка)")
+                        return self._execute_task_attempt_cli(session_name, task_message)
+                    # Інакше повертаємо помилку без переходу на CLI
+                    return {
+                        "success": False,
+                        "error": f"HTTP API error: {err}",
+                        "session_name": session_name
+                    }
             else:
                 # Використовуємо CLI
                 return self._execute_task_attempt_cli(session_name, task_message)
@@ -1542,9 +1589,16 @@ class SessionManager:
                         "return_code": result.get("return_code", 0)
                     }
                 else:
-                    logger.warning(f"⚠️ HTTP API недоступний для повторної спроби: {result.get('error')}")
-                    # Fallback до CLI
-                    return self._execute_task_retry_cli(session_name, retry_message)
+                    err = result.get('error') or ''
+                    logger.warning(f"⚠️ Помилка HTTP API при повторній спробі: {err}")
+                    if self._should_cli_fallback_on_error(err):
+                        logger.warning("🚨 Активую CLI fallback на повторній спробі (мережева/5xx помилка)")
+                        return self._execute_task_retry_cli(session_name, retry_message)
+                    return {
+                        "success": False,
+                        "error": f"HTTP API error: {err}",
+                        "session_name": session_name
+                    }
             else:
                 # Використовуємо CLI
                 return self._execute_task_retry_cli(session_name, retry_message)

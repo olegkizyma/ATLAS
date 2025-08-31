@@ -26,29 +26,75 @@ def serve_system_status(h):
     send_json(h, status)
 
 def serve_atlas_core_status(h):
+    """Возвращает статус Atlas Core с точной детекцией доступности и (опционально) пингами внешних API."""
+    # Базовые флаги и креды
     try:
-        ATLAS_CORE_AVAILABLE = h.__class__.__dict__.get('ATLAS_CORE_AVAILABLE', False) or globals().get('ATLAS_CORE_AVAILABLE', False)
+        from atlas_core import config as acfg
+        creds = {
+            "gemini_key_present": bool(acfg.gemini_api_key()),
+            "mistral_key_present": bool(acfg.mistral_api_key()),
+        }
     except Exception:
-        ATLAS_CORE_AVAILABLE = False
+        creds = {"gemini_key_present": False, "mistral_key_present": False}
+
+    # Детекция наличия Atlas Core по факту импорта и рабочей инициализации
+    core_available = False
+    status = None
+    health = None
+    errors = []
     try:
-        if ATLAS_CORE_AVAILABLE:
-            from atlas_core import get_atlas_core
-            core = get_atlas_core(str((Path(__file__).resolve().parents[3] / "goose")))
+        from atlas_core import get_atlas_core
+        core = get_atlas_core(str((Path(__file__).resolve().parents[3] / "goose")))
+        try:
             status = core.get_system_status()
             health = core.health_check()
-            response_data = {
-                "atlas_core": {"available": True, "status": status, "health": health},
-                "timestamp": datetime.now().isoformat(),
-            }
-        else:
-            response_data = {
-                "atlas_core": {"available": False, "error": "Atlas Core недоступний", "legacy_mode": True},
-                "timestamp": datetime.now().isoformat(),
-            }
-        send_json(h, response_data)
+            core_available = True
+        except Exception as inner:
+            errors.append(str(inner))
+            core_available = False
     except Exception as e:
-        logger.error(f"Atlas Core status error: {e}")
-        send_json(h, {"atlas_core": {"available": False, "error": str(e)}, "timestamp": datetime.now().isoformat()}, 500)
+        errors.append(str(e))
+        core_available = False
+
+    # Опциональные быстрые пинги внешних API (таймауты короткие)
+    external = {"gemini_ping": None, "mistral_ping": None}
+    try:
+        # Пинги только если ключи есть
+        import requests
+        if creds.get("gemini_key_present"):
+            from atlas_core import config as acfg2
+            url = f"{acfg2.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')}/models"
+            headers = {"x-goog-api-key": acfg2.gemini_api_key() or ""}
+            try:
+                r = requests.get(url, headers=headers, timeout=2)
+                external["gemini_ping"] = {"ok": r.status_code < 500, "status": r.status_code}
+            except Exception as ge:
+                external["gemini_ping"] = {"ok": False, "error": str(ge)}
+        if creds.get("mistral_key_present"):
+            # Универсальный лёгкий ping: /v1/models
+            mistral_url = "https://api.mistral.ai/v1/models"
+            headers = {"Authorization": f"Bearer {acfg.mistral_api_key() or ''}"}
+            try:
+                r = requests.get(mistral_url, headers=headers, timeout=2)
+                external["mistral_ping"] = {"ok": r.status_code < 500, "status": r.status_code}
+            except Exception as me:
+                external["mistral_ping"] = {"ok": False, "error": str(me)}
+    except Exception:
+        # Не критично
+        pass
+
+    response_data = {
+        "atlas_core": {
+            "available": bool(core_available),
+            "status": status if status else None,
+            "health": health if health else None,
+            "credentials": creds,
+            "external": external,
+            "errors": errors,
+        },
+        "timestamp": datetime.now().isoformat(),
+    }
+    send_json(h, response_data)
 
 def serve_atlas_sessions(h):
     try:

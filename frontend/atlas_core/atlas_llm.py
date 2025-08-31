@@ -14,6 +14,7 @@ import requests
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
 from . import config as acfg
+from .http_utils import post_json_with_retry
 
 
 class AtlasLLM:
@@ -155,7 +156,12 @@ class AtlasLLM:
                 }
             }
             
-            response = requests.post(url, headers=headers, json=data, timeout=15)
+            response = post_json_with_retry(
+                url,
+                headers=headers,
+                json=data,
+                timeout=15,
+            )
             response.raise_for_status()
             
             result = response.json()
@@ -779,7 +785,12 @@ class AtlasLLM:
                 }
             }
             
-            response = requests.post(url, headers=headers, json=data, timeout=30)
+            response = post_json_with_retry(
+                url,
+                headers=headers,
+                json=data,
+                timeout=30,
+            )
             response.raise_for_status()
             
             result = response.json()
@@ -953,7 +964,12 @@ class AtlasLLM:
                 }
             }
             
-            response = requests.post(url, headers=headers, json=payload, timeout=10)
+            response = post_json_with_retry(
+                url,
+                headers=headers,
+                json=payload,
+                timeout=10,
+            )
             
             if response.status_code == 200:
                 data = response.json()
@@ -1052,7 +1068,12 @@ class AtlasLLM:
             }
         }
         
-        response = requests.post(url, headers=headers, json=data, timeout=10)
+        response = post_json_with_retry(
+            url,
+            headers=headers,
+            json=data,
+            timeout=10,
+        )
         response.raise_for_status()
         
         result = response.json()
@@ -1222,7 +1243,12 @@ class AtlasLLM:
                 }
             }
             
-            response = requests.post(url, headers=headers, json=data, timeout=15)
+            response = post_json_with_retry(
+                url,
+                headers=headers,
+                json=data,
+                timeout=15,
+            )
             response.raise_for_status()
             
             result = response.json()

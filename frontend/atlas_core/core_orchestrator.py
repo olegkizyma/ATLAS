@@ -326,6 +326,170 @@ class CoreOrchestrator:
         
         return error_response
 
+    async def process_user_message_stream(self, user_message: str, user_context: Dict = None):
+        """Асинхронний генератор подій для покрокового SSE-стріму.
+        Yield-ить словники подій: {"event": str, ...}
+        """
+        start_time = datetime.now()
+        try:
+            # 1) Команди керування сесіями
+            session_analysis = self.atlas_llm._analyze_session_management_intent(user_message)
+            if session_analysis["is_session_command"]:
+                yield {
+                    "event": "session_command_detected",
+                    "data": session_analysis,
+                    "timestamp": start_time.isoformat(),
+                }
+                result = self._handle_session_command(session_analysis, user_context, start_time)
+                result.update({"event": "final"})
+                yield result
+                return
+
+            # 2) Atlas LLM1 розумна обробка
+            yield {"event": "atlas_processing_start", "timestamp": datetime.now().isoformat()}
+            atlas_processing = self.atlas_llm.process_user_message(user_message, user_context or {}, [])
+            yield {
+                "event": "atlas_processing",
+                "data": {
+                    "response_type": atlas_processing.get("response_type"),
+                    "auto_enriched": atlas_processing.get("auto_enriched", False),
+                    "clarification_handled": atlas_processing.get("clarification_handled", False),
+                    "intent": atlas_processing.get("intent_analysis", {}).get("intent"),
+                    "confidence": atlas_processing.get("intent_analysis", {}).get("confidence"),
+                },
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            if atlas_processing.get("response_type") == "direct":
+                yield {
+                    "event": "final",
+                    "response_type": "chat",
+                    "atlas_response": atlas_processing.get("response"),
+                    "success": True,
+                    "atlas_core": True,
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                }
+                return
+
+            # 3) Перевірка безпеки (Гріша)
+            yield {"event": "security_check_start", "timestamp": datetime.now().isoformat()}
+            working_message = atlas_processing.get("working_message", user_message)
+            detailed_instruction = atlas_processing.get("detailed_instruction", working_message)
+            security_check = self.grisha_security.analyze_security_risk(
+                detailed_instruction, atlas_processing.get("intent_analysis", {}), user_context
+            )
+            yield {
+                "event": "security_check_result",
+                "data": security_check,
+                "timestamp": datetime.now().isoformat(),
+            }
+            if security_check.get("risk_level") == "HIGH" and security_check.get("block_execution"):
+                yield {
+                    "event": "final",
+                    "response_type": "security_block",
+                    "security_analysis": security_check,
+                    "blocked": True,
+                    "success": False,
+                    "atlas_core": True,
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                    "error": "Command blocked by security system",
+                }
+                return
+
+            # 4) Виконання завдання (Goose)
+            session_strategy = atlas_processing.get("session_action", {})
+            session_name = session_strategy.get("session_name", f"smart_session_{int(datetime.now().timestamp())}")
+            yield {
+                "event": "execution_start",
+                "session": {"name": session_name, "strategy": session_strategy.get("strategy")},
+                "timestamp": datetime.now().isoformat(),
+            }
+            execution_result = self.session_manager.execute_command(
+                atlas_processing.get("detailed_instruction"),
+                atlas_processing.get("intent_analysis", {}),
+                session_strategy,
+                self.grisha_security,
+            )
+            yield {
+                "event": "execution_result",
+                "data": {
+                    "success": execution_result.get("success"),
+                    "execution_type": execution_result.get("execution_type"),
+                    "session_name": execution_result.get("session_name"),
+                },
+                "timestamp": datetime.now().isoformat(),
+            }
+
+            if execution_result.get("success"):
+                task_completed = execution_result.get("task_completed")
+                session_alive = execution_result.get("session_alive", False)
+                verification_details = execution_result.get("verification_details", "")
+                if task_completed is not None:
+                    if task_completed:
+                        compact_summary = verification_details or self.grisha_security.generate_completion_summary(
+                            working_message, execution_result, {"session_name": session_name, "verified": True, "session_alive": session_alive}
+                        )
+                    else:
+                        compact_summary = f"❌ Завдання не вдалося виконати. {verification_details}"
+                else:
+                    compact_summary = self.grisha_security.generate_completion_summary(
+                        working_message, execution_result, {"session_name": session_name, "auto_enriched": atlas_processing.get("auto_enriched", False)}
+                    )
+
+                yield {
+                    "event": "final",
+                    "response_type": "task_execution",
+                    "response": compact_summary,
+                    "success": True,
+                    "task_completed": task_completed,
+                    "session_alive": session_alive,
+                    "verification_details": verification_details,
+                    "execution_type": execution_result.get("execution_type", "unknown"),
+                    "session_info": {"strategy": session_strategy.get("strategy"), "session_name": session_name, "alive": session_alive},
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                    "atlas_core": True,
+                    "intent": atlas_processing.get("intent_analysis", {}).get("intent"),
+                    "confidence": atlas_processing.get("intent_analysis", {}).get("confidence"),
+                }
+                return
+
+            # 5) Випадки відмови
+            execution_output = execution_result.get("output", "")
+            execution_error = execution_result.get("error", "")
+            goose_response = (execution_output + " " + execution_error).strip()
+            is_ethical_refusal = self._analyze_ethical_refusal(user_message, goose_response)
+            if is_ethical_refusal:
+                ethical_explanation = self._generate_ethical_explanation(user_message, goose_response)
+                yield {
+                    "event": "final",
+                    "response_type": "ethical_refusal",
+                    "response": ethical_explanation,
+                    "success": True,
+                    "ethical_refusal": True,
+                    "goose_explanation": goose_response,
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                    "atlas_core": True,
+                }
+            else:
+                yield {
+                    "event": "final",
+                    "response_type": "task_execution",
+                    "response": "⚠️ Виникла технічна помилка при виконанні завдання. Спробуйте пізніше або переформулюйте запит.",
+                    "success": False,
+                    "error_details": execution_result.get("error", ""),
+                    "processing_time": (datetime.now() - start_time).total_seconds(),
+                    "atlas_core": True,
+                }
+        except Exception as e:
+            yield {
+                "event": "final",
+                "response_type": "error",
+                "success": False,
+                "error": str(e),
+                "atlas_core": True,
+                "timestamp": datetime.now().isoformat(),
+            }
+
     def _analyze_ethical_refusal(self, user_request: str, goose_response: str) -> bool:
         """Розумний аналіз чи Goose відмовився з етичних причин через Gemini"""
         
