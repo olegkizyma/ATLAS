@@ -1,9 +1,13 @@
 #!/bin/bash
 
-# 🚀 Atlas Optimized Startup Script
+# 🚀 Atlas Optimized Startup Script (portable)
 # Повний перезапуск системи Atlas з правильною послідовністю
 
-set -e  # Зупинити при помилці
+set -euo pipefail  # Зупинятись при помилці/неоголошеній змінній/pipe-ошибке
+
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+FRONTEND_DIR="$REPO_ROOT/frontend"
+GOOSE_DIR="$REPO_ROOT/goose"
 
 echo "🚀 Atlas Optimized Startup - Повний перезапуск системи"
 echo "════════════════════════════════════════════════════════"
@@ -36,7 +40,7 @@ check_process() {
 
 # Крок 1: Зупинка всіх процесів
 log "🛑 Зупиняю всі процеси Atlas..."
-cd /Users/dev/Documents/GitHub/ATLAS
+cd "$REPO_ROOT"
 
 if [ -f "./kill_atlas.sh" ]; then
     chmod +x ./kill_atlas.sh
@@ -54,7 +58,7 @@ sleep 3
 
 # Крок 2: Запуск Goose Web (UI) на 3000
 log "🤖 Запускаю Goose Web..."
-cd /Users/dev/Documents/GitHub/ATLAS/goose
+cd "$GOOSE_DIR"
 
 # Перевірка наявності hermit
 if [ ! -f "bin/activate-hermit" ]; then
@@ -66,12 +70,12 @@ fi
 source bin/activate-hermit
 log "✅ Hermit environment активовано"
 
-log "� Відкриваю Goose Web на порту 3000 (з браузером)"
+log "🌐 Відкриваю Goose Web на порту 3000 (з браузером)"
 # Узгодити секрет для фронтенду (Atlas читає GOOSE_SECRET_KEY)
 export GOOSE_SECRET_KEY="${GOOSE_SECRET_KEY:-test}"
 
 # Запуск Goose Web рівно як запитано (абсолютний шлях до бинаря)
-/Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose web --port 3000 --open &
+"$GOOSE_DIR/target/release/goose" web --port 3000 --open &
 GOOSE_PID=$!
 log "✅ Goose Web запущено (PID: $GOOSE_PID)"
 
@@ -81,17 +85,27 @@ sleep 5
 
 # Крок 3: Запуск Atlas Frontend
 log "🌐 Запускаю Atlas Frontend..."
-cd /Users/dev/Documents/GitHub/ATLAS/frontend
+cd "$FRONTEND_DIR"
 
 # Перевірка наявності venv
+# Переконаємось, що venv існує; якщо ні — створимо
 if [ ! -d "venv" ]; then
-    log "❌ Python venv не знайдено в $(pwd)/venv"
-    log "💡 Створіть віртуальне середовище: python -m venv venv"
-    exit 1
+    log "🐍 Створюю локальне Python venv..."
+    if command -v python3 >/dev/null 2>&1; then PYBIN=python3; else PYBIN=python; fi
+    "$PYBIN" -m venv venv
+    # Оновлюємо pip і ставимо залежності
+    "venv/bin/pip" install --upgrade pip >/dev/null
+    if [ -f "requirements.txt" ]; then
+        log "� Встановлюю залежності з requirements.txt"
+        "venv/bin/pip" install -r requirements.txt
+    fi
+else
+    # Обновление зависимостей опционально — можно включить по флагу
+    :
 fi
 
-# Активація Python venv
-source venv/bin/activate
+# Активація Python venv (тільки для дочірніх процесів цього скрипта)
+source "venv/bin/activate"
 log "✅ Python venv активовано"
 
 # Перевірка наявності atlas_minimal_live.py
@@ -101,7 +115,7 @@ if [ ! -f "atlas_minimal_live.py" ]; then
 fi
 
 log "🚀 Запускаю Atlas Frontend..."
-python atlas_minimal_live.py &
+"$FRONTEND_DIR/venv/bin/python" "$FRONTEND_DIR/atlas_minimal_live.py" &
 FRONTEND_PID=$!
 log "✅ Atlas Frontend запущено (PID: $FRONTEND_PID)"
 

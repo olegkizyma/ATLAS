@@ -90,7 +90,7 @@ class GrishaSecurity:
         }
         
         data = {
-            "model": "mistral-small-latest",
+            "model": acfg.mistral_model('mistral-small-latest'),
             "messages": [
                 {
                     "role": "user",
