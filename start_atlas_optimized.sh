@@ -52,8 +52,8 @@ fi
 log "⏳ Очікування завершення процесів..."
 sleep 3
 
-# Крок 2: Запуск Goose AI Agent
-log "🤖 Запускаю Goose AI Agent..."
+# Крок 2: Запуск Goose Web (UI) на 3000
+log "🤖 Запускаю Goose Web..."
 cd /Users/dev/Documents/GitHub/ATLAS/goose
 
 # Перевірка наявності hermit
@@ -66,19 +66,14 @@ fi
 source bin/activate-hermit
 log "✅ Hermit environment активовано"
 
-# Перевірка наявності goosed
-if [ ! -f "./target/release/goosed" ]; then
-    log "❌ goosed не знайдено в $(pwd)/target/release/goosed"
-    log "💡 Спробуйте зібрати: cargo build --release"
-    exit 1
-fi
+log "� Відкриваю Goose Web на порту 3000 (з браузером)"
+# Узгодити секрет для фронтенду (Atlas читає GOOSE_SECRET_KEY)
+export GOOSE_SECRET_KEY="${GOOSE_SECRET_KEY:-test}"
 
-log "🚀 Запускаю Goose web сервер з локальним конфігом на порту 3000..."
-# Використовуємо локальний config.yaml замість глобального
-export XDG_CONFIG_HOME="/Users/dev/Documents/GitHub/ATLAS/goose"
-./target/release/goose web --port 3000 --open &
+# Запуск Goose Web рівно як запитано (абсолютний шлях до бинаря)
+/Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose web --port 3000 --open &
 GOOSE_PID=$!
-log "✅ Goose запущено (PID: $GOOSE_PID)"
+log "✅ Goose Web запущено (PID: $GOOSE_PID)"
 
 # Очікування запуску Goose
 log "⏳ Очікування запуску Goose..."
@@ -118,7 +113,7 @@ echo ""
 echo "🔍 Перевірка статусу системи:"
 echo "────────────────────────────────"
 
-check_process "goose" "3000"
+check_process "goose web" "3000"
 check_process "atlas_minimal_live.py" "8080"
 
 # Перевірка API

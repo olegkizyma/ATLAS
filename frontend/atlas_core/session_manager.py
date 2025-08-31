@@ -30,8 +30,17 @@ class SessionManager:
         self.active_sessions = {}
         self.session_contexts = {}
         
-        # Конфігурація HTTP API (goosed сервер за замовчуванням на 3001)
-        self.api_url = os.getenv("GOOSE_API_URL", "http://127.0.0.1:3001")
+        # Конфігурація HTTP API (goosed: за замовчуванням пробуємо 3000, потім 3001)
+        env_api = os.getenv("GOOSE_API_URL")
+        if env_api:
+            # Якщо явно задано, перевіряємо доступність; якщо ні — автопідбір (3000 ➜ 3001)
+            if self._is_base_url_available(env_api):
+                self.api_url = env_api
+            else:
+                logger.warning(f"⚠️ Вказаний GOOSE_API_URL недоступний: {env_api} — виконую автопідбір")
+                self.api_url = self._auto_select_api_url()
+        else:
+            self.api_url = self._auto_select_api_url()
         self.secret_key = os.getenv("GOOSE_SECRET_KEY", "test")
         
         # 🆕 ІНТЕЛЕКТУАЛЬНЕ УПРАВЛІННЯ РЕЖИМАМИ
@@ -56,6 +65,46 @@ class SessionManager:
         logger.info(f"🧠 SessionManager: Інтелектуальний режим, пріоритет HTTP API: {self.api_url}")
         # Початкова перевірка API
         self._validate_api_availability()
+
+    def _auto_select_api_url(self) -> str:
+        """Автоматично обирає URL Goose API: спочатку порт 3000, далі 3001.
+
+        Повертає перший доступний або, якщо обидва недоступні, "http://127.0.0.1:3000" як базовий.
+        """
+        candidates = [
+            "http://127.0.0.1:3000",
+            "http://127.0.0.1:3001",
+        ]
+        for base in candidates:
+            try:
+                import requests as _req
+                for ep in ("/status", "/api/health", "/"):
+                    try:
+                        r = _req.get(f"{base}{ep}", timeout=2)
+                        if r.status_code in (200, 404):
+                            logger.info(f"🔎 Обрано Goose API: {base} ({ep} -> {r.status_code})")
+                            return base
+                    except Exception:
+                        continue
+            except Exception:
+                continue
+        logger.warning("⚠️ Goose API не знайдено на 3000/3001, використовую 3000 за замовчуванням")
+        return "http://127.0.0.1:3000"
+
+    def _is_base_url_available(self, base: str) -> bool:
+        """Швидка перевірка доступності базового URL Goose API."""
+        try:
+            import requests as _req
+            for ep in ("/status", "/api/health", "/"):
+                try:
+                    r = _req.get(f"{base}{ep}", timeout=2)
+                    if r.status_code in (200, 404):
+                        return True
+                except Exception:
+                    continue
+        except Exception:
+            return False
+        return False
 
     def _send_api_request(self, endpoint: str, method: str = "GET", data: dict = None) -> dict:
         """🔧 ПОКРАЩЕНА відправка запиту до Goose HTTP API з валідацією"""
@@ -302,14 +351,103 @@ class SessionManager:
         return False
 
     def _stream_reply(self, session_name: str, message: str, timeout: int = 90) -> Dict:
-        """Надсилає повідомлення на goosed /reply (SSE) і збирає відповідь як суцільний текст.
+        """Надсилає повідомлення до Goose, авто-вибір транспорту:
+        - Якщо це goosed: POST /reply (SSE)
+        - Якщо це goose web: WebSocket /ws
 
-        Контракт:
-        - Вхід: session_name (ідентифікатор сесії), message (текст запиту)
-        - Вихід: dict з ключами success, response, stderr, return_code
-        - Помилки: таймаут/мережа -> success False з описом
+        Контракт: success, response, stderr, return_code або error
         """
         import requests
+        import os
+        import time
+        import asyncio
+        from urllib.parse import urlparse
+
+        def _is_goose_web() -> bool:
+            try:
+                r = requests.get(f"{self.api_url}/api/health", timeout=3)
+                return r.status_code == 200
+            except Exception:
+                return False
+
+        def _is_goosed() -> bool:
+            try:
+                r = requests.get(f"{self.api_url}/status", timeout=3)
+                return r.status_code == 200
+            except Exception:
+                return False
+
+        # 1) Спробуємо визначити goose web vs goosed
+        try_web = _is_goose_web()
+        try_goosed = _is_goosed() if not try_web else False
+
+        if try_web:
+            # WebSocket шлях для goose web — виконуємо в окремому потоці з власним event loop
+            async def _stream_via_ws() -> Dict[str, Any]:
+                import aiohttp
+                ws_url = self.api_url.replace("http://", "ws://").replace("https://", "wss://") + "/ws"
+                timeout_total = aiohttp.ClientTimeout(total=timeout)
+                payload = {
+                    "type": "message",
+                    "content": message,
+                    "session_id": session_name,
+                    "timestamp": int(time.time() * 1000),
+                }
+                chunks: list[str] = []
+                async with aiohttp.ClientSession(timeout=timeout_total) as session:
+                    async with session.ws_connect(ws_url, heartbeat=30) as ws:
+                        await ws.send_str(json.dumps(payload))
+                        start = time.time()
+                        async for msg in ws:
+                            if msg.type == aiohttp.WSMsgType.TEXT:
+                                try:
+                                    obj = json.loads(msg.data)
+                                except Exception:
+                                    obj = None
+                                if isinstance(obj, dict):
+                                    t = obj.get("type")
+                                    if t == "response":
+                                        content = obj.get("content")
+                                        if content:
+                                            chunks.append(str(content))
+                                    elif t in ("complete", "cancelled"):
+                                        break
+                                    elif t == "error":
+                                        return {"success": False, "error": obj.get("message", "websocket error")}
+                                else:
+                                    chunks.append(str(msg.data))
+                            elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                                break
+                            if time.time() - start > timeout:
+                                return {"success": False, "error": "WebSocket timeout"}
+                return {
+                    "success": True,
+                    "response": "".join(chunks).strip(),
+                    "stderr": "",
+                    "return_code": 0,
+                }
+
+            # Запуск корутины у фоновому потоці, щоб уникнути конфликтов с активным event loop
+            import threading
+            import queue as _q
+            result_q: _q.Queue = _q.Queue(maxsize=1)
+
+            def _worker():
+                try:
+                    res = asyncio.run(_stream_via_ws())
+                except Exception as e:
+                    res = {"success": False, "error": str(e)}
+                result_q.put(res)
+
+            t = threading.Thread(target=_worker, daemon=True)
+            t.start()
+            try:
+                res = result_q.get(timeout=timeout + 5)
+            except Exception:
+                res = {"success": False, "error": "WebSocket thread timeout"}
+            return res
+
+        # 2) Fallback: goosed /reply (SSE)
         try:
             url = f"{self.api_url}/reply"
             headers = {
@@ -317,7 +455,18 @@ class SessionManager:
                 "Cache-Control": "no-cache",
                 "X-Secret-Key": self.secret_key,
             }
-            payload = {"message": message, "session_id": session_name}
+            working_dir = os.getenv("GOOSE_WORKDIR") or os.getcwd()
+            payload = {
+                "messages": [
+                    {
+                        "role": "user",
+                        "created": int(time.time()),
+                        "content": [{"type": "text", "text": message}],
+                    }
+                ],
+                "session_id": session_name,
+                "session_working_dir": working_dir,
+            }
 
             logger.info(f"🕸️ POST {url} session={session_name}")
             with requests.post(url, json=payload, headers=headers, stream=True, timeout=timeout) as resp:
@@ -334,28 +483,30 @@ class SessionManager:
                     if raw_line is None:
                         continue
                     line = raw_line.strip()
-                    # SSE keep-alives start with ':'
                     if not line or line.startswith(":"):
                         continue
-                    # We only care about data lines
                     if line.startswith("data:"):
                         data_part = line[5:].lstrip()
-                        # Try JSON first
                         try:
                             obj = json.loads(data_part)
-                            # Common fields: token/text/content/final
                             if isinstance(obj, dict):
-                                token = obj.get("text") or obj.get("token") or obj.get("content")
-                                if token:
-                                    chunks.append(str(token))
-                                if obj.get("final") is True or obj.get("done") is True:
-                                    break
+                                if obj.get("type") == "Message" and isinstance(obj.get("message"), dict):
+                                    msg = obj["message"]
+                                    for c in msg.get("content", []) or []:
+                                        if isinstance(c, dict) and c.get("type") == "text":
+                                            t = c.get("text")
+                                            if t:
+                                                chunks.append(str(t))
+                                else:
+                                    token = obj.get("text") or obj.get("token") or obj.get("content")
+                                    if token:
+                                        chunks.append(str(token))
+                                    if obj.get("final") is True or obj.get("done") is True:
+                                        break
                             else:
                                 chunks.append(str(obj))
                         except Exception:
-                            # Treat as raw text
                             chunks.append(data_part)
-                    # Optional stop if server sends explicit done marker
                     elif line.lower() == "event: done":
                         break
 
@@ -859,13 +1010,17 @@ class SessionManager:
                 )
                 
                 logger.info(f"📊 Результат перевірки Гріші: {verification_result}")
+
+                # Нормалізуємо результат перевірки, щоб уникнути хибнопозитивних висновків
+                normalized_verification = self._normalize_verification_result(verification_result)
+                logger.info(f"📊 Нормалізований результат перевірки: {normalized_verification}")
                 
                 # Якщо завдання виконано успішно
-                if verification_result.get("task_completed", False):
+                if normalized_verification.get("task_completed", False):
                     logger.info(f"✅ Гріша підтвердив успішне виконання завдання!")
                     
                     # Перевіряємо чи треба залишити сесію активною
-                    should_keep_alive = verification_result.get("should_continue_session", False)
+                    should_keep_alive = normalized_verification.get("should_continue_session", False)
                     
                     if should_keep_alive:
                         logger.info(f"⏳ Сесія '{session_name}' залишається активною")
@@ -875,7 +1030,7 @@ class SessionManager:
                             "response": execution_result.get("response", ""),
                             "task_completed": True,
                             "session_alive": True,
-                            "verification_details": verification_result.get("verification_details", "")
+                            "verification_details": normalized_verification.get("verification_details", "")
                         }
                     else:
                         logger.info(f"🔚 Сесія '{session_name}' може бути закрита")
@@ -885,15 +1040,15 @@ class SessionManager:
                             "response": execution_result.get("response", ""),
                             "task_completed": True,
                             "session_alive": False,
-                            "verification_details": verification_result.get("verification_details", "")
+                            "verification_details": normalized_verification.get("verification_details", "")
                         }
                 
                 # Якщо завдання не виконано - пробуємо ще раз
                 else:
-                    logger.warning(f"❌ Гріша визначив що завдання не виконано: {verification_result.get('verification_details', '')}")
+                    logger.warning(f"❌ Гріша визначив що завдання не виконано: {normalized_verification.get('verification_details', '')}")
                     
                     # 🆕 НОВА ФУНКЦІОНАЛЬНІСТЬ: Atlas автоматично створює детальне завдання на основі аналізу Гріші
-                    detailed_task = self._create_detailed_correction_task(original_task, verification_result, attempt)
+                    detailed_task = self._create_detailed_correction_task(original_task, normalized_verification, attempt)
                     logger.info(f"📋 Atlas створив детальне завдання для виправлення: {detailed_task[:200]}...")
                     
                     # Зберігаємо детальне завдання в контекст сесії
@@ -901,12 +1056,12 @@ class SessionManager:
                         self.session_contexts[session_name] = {}
                     self.session_contexts[session_name][f"correction_attempt_{attempt}"] = {
                         "detailed_task": detailed_task,
-                        "grisha_feedback": verification_result.get("verification_details", ""),
+                        "grisha_feedback": normalized_verification.get("verification_details", ""),
                         "timestamp": datetime.now().isoformat()
                     }
                     
                     # Підтримуємо обидва ключі: next_action та next_action_needed (сумісність з Грішею)
-                    next_action = verification_result.get("next_action") or verification_result.get("next_action_needed")
+                    next_action = normalized_verification.get("next_action") or normalized_verification.get("next_action_needed")
                     
                     if next_action == "retry_task" and attempt < max_attempts:
                         logger.info(f"🔄 Atlas: Даю детальне завдання для сесії '{session_name}'")
@@ -961,6 +1116,70 @@ class SessionManager:
             "error": f"Завдання не виконано після {max_attempts} спроб перевірки",
             "verification_details": "Максимальна кількість спроб перевищена"
         }
+
+    def _normalize_verification_result(self, verification_result: Dict) -> Dict:
+        """Нормалізує результат перевірки від Гріші, узгоджуючи прапори з деталями.
+
+        Правила:
+        - Якщо в тексті деталей явно є JSON з полем completed, він має пріоритет.
+        - Якщо є суперечність (task_completed=True, але completed=false у деталях) => вважаємо невиконано.
+        - Додатково евристично шукаємо заперечення у повідомленні ("не виконано", "not completed", etc.).
+        """
+        normalized = dict(verification_result or {})
+        try:
+            # Приводимо булеві значення до типу bool
+            normalized["task_completed"] = bool(normalized.get("task_completed", False))
+            normalized["should_continue_session"] = bool(normalized.get("should_continue_session", False))
+        except Exception:
+            pass
+
+        details_text = normalized.get("verification_details", "") or ""
+
+        # Спроба видобути JSON з тексту
+        json_obj = self._extract_json_from_text(details_text)
+        if isinstance(json_obj, dict) and "completed" in json_obj:
+            completed_from_details = bool(json_obj.get("completed"))
+            if completed_from_details is False and normalized.get("task_completed", False) is True:
+                # Конфлікт: довіряємо details і вважаємо невиконано
+                normalized["task_completed"] = False
+        else:
+            # Евристичні перевірки, якщо JSON не знайдено
+            neg_markers = [
+                "не виконано", "не виконав", "not completed", "not done", "failed",
+                "goose не завершив", "goose почав сесію, але не виконав"
+            ]
+            low = details_text.lower()
+            if any(m in low for m in neg_markers) and normalized.get("task_completed", False) is True:
+                normalized["task_completed"] = False
+
+        return normalized
+
+    def _extract_json_from_text(self, text: str) -> Optional[Dict[str, Any]]:
+        """Пробує знайти і розпарсити JSON об'єкт усередині довільного тексту (в т.ч. у трійних бектиках)."""
+        if not text:
+            return None
+        try:
+            # Типові формати: ```json ... ``` або просто json-блок
+            import re
+            candidates = []
+            # Витягуємо вміст у блоках ```json ... ```
+            for m in re.finditer(r"```json\s*(\{[\s\S]*?\})\s*```", text, flags=re.IGNORECASE):
+                candidates.append(m.group(1))
+            # Також шукаємо перший { ... } блок, якщо немає маркерів
+            if not candidates:
+                m2 = re.search(r"(\{[\s\S]*\})", text)
+                if m2:
+                    candidates.append(m2.group(1))
+
+            import json as _json
+            for c in candidates:
+                try:
+                    return _json.loads(c)
+                except Exception:
+                    continue
+        except Exception:
+            return None
+        return None
 
     def _generate_retry_message(self, original_task: str, verification_result: Dict, attempt: int) -> str:
         """Генерує повідомлення для повторної спроби"""
@@ -1174,12 +1393,6 @@ class SessionManager:
         # Fallback: адаптивна генерація на основі аналізу
         return self._adaptive_solution_generation(original_task, problem_analysis, attempt)
 
-    def _ai_generate_solution_steps(self, original_task: str, problem_analysis: str, attempt: int) -> str:
-        """🤖 AI генерація кроків рішення через LLM"""
-        # TODO: Інтеграція з Gemini/GPT для розумної генерації кроків
-        # Поки що повертаємо None для використання adaptive fallback
-        return None
-
     def _adaptive_solution_generation(self, original_task: str, problem_analysis: str, attempt: int) -> str:
         """🔄 Адаптивна генерація рішень на основе аналізу"""
         
@@ -1234,11 +1447,6 @@ class SessionManager:
         
         # Fallback: семантичне визначення мети
         return self._semantic_goal_extraction(original_task)
-
-    def _ai_define_expected_outcome(self, original_task: str) -> str:
-        """🤖 AI визначення очікуваного результату через LLM"""
-        # TODO: Інтеграція з LLM для розумного визначення мети
-        return None
 
     def _semantic_goal_extraction(self, original_task: str) -> str:
         """🔍 Семантичне визначення мети завдання"""
