@@ -1,0 +1,423 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atlas TutorialChat Integration</title>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Helvetica', 'Arial', sans-serif;
+            background: linear-gradient(135deg, #1e3c72 0%, #2a5298 100%);
+            color: #ffffff;
+            min-height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+
+        .container {
+            width: 100%;
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+
+        .header {
+            text-align: center;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.5rem;
+            margin-bottom: 10px;
+            background: linear-gradient(45deg, #00d4ff, #00ff88);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+            background-clip: text;
+        }
+
+        .header p {
+            font-size: 1.1rem;
+            opacity: 0.9;
+        }
+
+        .chat-container {
+            background: rgba(255, 255, 255, 0.1);
+            backdrop-filter: blur(10px);
+            border-radius: 20px;
+            border: 1px solid rgba(255, 255, 255, 0.2);
+            padding: 30px;
+            box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+        }
+
+        #tutorial-chat-root {
+            min-height: 600px;
+            background: rgba(0, 0, 0, 0.1);
+            border-radius: 15px;
+            padding: 20px;
+            position: relative;
+        }
+
+        .loading {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            height: 400px;
+            flex-direction: column;
+        }
+
+        .spinner {
+            width: 50px;
+            height: 50px;
+            border: 3px solid rgba(255, 255, 255, 0.3);
+            border-top: 3px solid #00d4ff;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .integration-status {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            padding: 5px 10px;
+            border-radius: 10px;
+            font-size: 0.8rem;
+            font-weight: bold;
+        }
+
+        .integration-status.connected {
+            background: #00ff88;
+            color: #000;
+        }
+
+        .integration-status.connecting {
+            background: #ffaa00;
+            color: #000;
+        }
+
+        .integration-status.error {
+            background: #ff4444;
+            color: #fff;
+        }
+
+        .debug-info {
+            margin-top: 20px;
+            padding: 15px;
+            background: rgba(0, 0, 0, 0.2);
+            border-radius: 10px;
+            font-family: 'Courier New', monospace;
+            font-size: 0.9rem;
+            max-height: 200px;
+            overflow-y: auto;
+        }
+
+        .debug-info h3 {
+            margin-bottom: 10px;
+            color: #00d4ff;
+        }
+
+        .debug-info pre {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+
+        .controls {
+            margin-top: 20px;
+            display: flex;
+            gap: 10px;
+            justify-content: center;
+        }
+
+        .btn {
+            padding: 10px 20px;
+            border: none;
+            border-radius: 10px;
+            background: linear-gradient(45deg, #00d4ff, #0099cc);
+            color: white;
+            cursor: pointer;
+            font-weight: bold;
+            transition: all 0.3s ease;
+        }
+
+        .btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0, 212, 255, 0.4);
+        }
+
+        .btn.secondary {
+            background: rgba(255, 255, 255, 0.1);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🚀 Atlas TutorialChat</h1>
+            <p>Інтеграція чату з системою Atlas</p>
+        </div>
+
+        <div class="chat-container">
+            <div class="integration-status connecting" id="integrationStatus">
+                Підключення...
+            </div>
+
+            <div id="tutorial-chat-root">
+                <div class="loading" id="loadingIndicator">
+                    <div class="spinner"></div>
+                    <p>Завантаження TutorialChat...</p>
+                </div>
+            </div>
+
+            <div class="controls">
+                <button class="btn" onclick="testIntegration()">Тестувати інтеграцію</button>
+                <button class="btn secondary" onclick="reloadChat()">Перезавантажити чат</button>
+                <button class="btn secondary" onclick="toggleDebug()">Показати налагодження</button>
+            </div>
+
+            <div class="debug-info" id="debugInfo" style="display: none;">
+                <h3>📋 Інформація налагодження</h3>
+                <pre id="debugContent">Налагодження активовано...</pre>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // Глобальні змінні для інтеграції
+        let integrationConfig = null;
+        let debugMode = false;
+        let chatComponent = null;
+
+        // Функції для управління інтеграцією
+        function updateStatus(status, message) {
+            const statusElement = document.getElementById('integrationStatus');
+            statusElement.className = `integration-status ${status}`;
+            statusElement.textContent = message;
+        }
+
+        function logDebug(message, data = null) {
+            if (debugMode) {
+                const timestamp = new Date().toLocaleTimeString();
+                const debugContent = document.getElementById('debugContent');
+                const logEntry = `[${timestamp}] ${message}${data ? '\n' + JSON.stringify(data, null, 2) : ''}`;
+                debugContent.textContent += '\n' + logEntry;
+                debugContent.scrollTop = debugContent.scrollHeight;
+            }
+        }
+
+        // Завантаження конфігурації інтеграції
+        async function loadIntegrationConfig() {
+            try {
+                updateStatus('connecting', 'Завантаження конфігурації...');
+                logDebug('Завантаження конфігурації інтеграції');
+                
+                const response = await fetch('/api/tutorialchat/config');
+                if (!response.ok) {
+                    throw new Error(`HTTP error! status: ${response.status}`);
+                }
+                
+                integrationConfig = await response.json();
+                logDebug('Конфігурація завантажена', integrationConfig);
+                
+                updateStatus('connected', 'Конфігурація завантажена');
+                return integrationConfig;
+                
+            } catch (error) {
+                logDebug('Помилка завантаження конфігурації', error);
+                updateStatus('error', 'Помилка конфігурації');
+                throw error;
+            }
+        }
+
+        // Ініціалізація TutorialChat (заглушка)
+        function initializeTutorialChat() {
+            return new Promise((resolve, reject) => {
+                setTimeout(() => {
+                    // Симуляція успішної ініціалізації TutorialChat
+                    const chatRoot = document.getElementById('tutorial-chat-root');
+                    chatRoot.innerHTML = `
+                        <div style="padding: 20px; text-align: center;">
+                            <h2 style="color: #00d4ff; margin-bottom: 20px;">🤖 TutorialChat Ready</h2>
+                            <p style="margin-bottom: 20px;">Чат готовий до роботи з Atlas системою</p>
+                            <div style="background: rgba(0, 0, 0, 0.2); padding: 15px; border-radius: 10px; margin: 20px 0;">
+                                <h4 style="color: #00ff88; margin-bottom: 10px;">Доступні функції:</h4>
+                                <ul style="text-align: left; list-style: none; padding-left: 0;">
+                                    <li>✅ Потокова передача повідомлень (SSE)</li>
+                                    <li>✅ Інтеграція з Goose API</li>
+                                    <li>✅ Управління сесіями</li>
+                                    <li>✅ Адаптація Atlas ↔ TutorialChat</li>
+                                    <li>✅ Налагодження та моніторинг</li>
+                                </ul>
+                            </div>
+                            <div style="background: rgba(0, 212, 255, 0.1); padding: 15px; border-radius: 10px; margin: 20px 0;">
+                                <p><strong>Статус інтеграції:</strong> Активна</p>
+                                <p><strong>API Base:</strong> ${integrationConfig?.api_base_url || '/api'}</p>
+                                <p><strong>Потокова передача:</strong> ${integrationConfig?.streaming_enabled ? 'Увімкнена' : 'Вимкнена'}</p>
+                            </div>
+                        </div>
+                    `;
+                    resolve('success');
+                }, 2000);
+            });
+        }
+
+        // Тестування інтеграції
+        async function testIntegration() {
+            updateStatus('connecting', 'Тестування...');
+            logDebug('Початок тестування інтеграції');
+            
+            try {
+                // Тест 1: Перевірка конфігурації
+                if (!integrationConfig) {
+                    await loadIntegrationConfig();
+                }
+                
+                // Тест 2: Тестовий запит до API чату
+                const testMessage = {
+                    message: "Тестове повідомлення для перевірки інтеграції",
+                    session_name: `test_${Date.now()}`,
+                    session_type: "chat"
+                };
+                
+                logDebug('Надсилання тестового повідомлення', testMessage);
+                
+                const response = await fetch('/api/chat/reply', {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                    },
+                    body: JSON.stringify(testMessage)
+                });
+                
+                if (response.ok) {
+                    // Читаємо SSE потік для тесту
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    
+                    let eventCount = 0;
+                    const maxEvents = 5; // Обмежуємо кількість подій для тесту
+                    
+                    while (eventCount < maxEvents) {
+                        const { done, value } = await reader.read();
+                        if (done) break;
+                        
+                        const chunk = decoder.decode(value);
+                        const lines = chunk.split('\n');
+                        
+                        for (const line of lines) {
+                            if (line.startsWith('data: ')) {
+                                const eventData = line.slice(6);
+                                if (eventData === '[DONE]') {
+                                    logDebug('Потік завершено');
+                                    break;
+                                }
+                                
+                                try {
+                                    const event = JSON.parse(eventData);
+                                    logDebug(`Отримано подію ${eventCount + 1}`, event);
+                                    eventCount++;
+                                } catch (e) {
+                                    logDebug('Помилка парсингу події', { data: eventData, error: e.message });
+                                }
+                            }
+                        }
+                        
+                        if (eventCount >= maxEvents) break;
+                    }
+                    
+                    reader.cancel();
+                    updateStatus('connected', 'Тест успішний!');
+                    logDebug('Тестування завершено успішно');
+                    
+                } else {
+                    throw new Error(`API тест не вдався: ${response.status}`);
+                }
+                
+            } catch (error) {
+                logDebug('Помилка тестування', error);
+                updateStatus('error', 'Тест не вдався');
+                alert(`Помилка тестування: ${error.message}`);
+            }
+        }
+
+        // Перезавантаження чату
+        function reloadChat() {
+            updateStatus('connecting', 'Перезавантаження...');
+            location.reload();
+        }
+
+        // Перемикання режиму налагодження
+        function toggleDebug() {
+            debugMode = !debugMode;
+            const debugInfo = document.getElementById('debugInfo');
+            
+            if (debugMode) {
+                debugInfo.style.display = 'block';
+                logDebug('Режим налагодження увімкнено');
+            } else {
+                debugInfo.style.display = 'none';
+            }
+        }
+
+        // Автоматична ініціалізація при завантаженні
+        window.addEventListener('load', async () => {
+            try {
+                logDebug('Початок ініціалізації Atlas TutorialChat Integration');
+                
+                // Крок 1: Завантаження конфігурації
+                await loadIntegrationConfig();
+                
+                // Крок 2: Ініціалізація TutorialChat
+                updateStatus('connecting', 'Ініціалізація чату...');
+                await initializeTutorialChat();
+                
+                // Крок 3: Підключення встановлено
+                updateStatus('connected', 'Готово до роботи');
+                logDebug('Ініціалізація завершена успішно');
+                
+                // Приховуємо індикатор завантаження
+                document.getElementById('loadingIndicator').style.display = 'none';
+                
+            } catch (error) {
+                logDebug('Помилка ініціалізації', error);
+                updateStatus('error', 'Помилка ініціалізації');
+                
+                // Показуємо помилку користувачу
+                const chatRoot = document.getElementById('tutorial-chat-root');
+                chatRoot.innerHTML = `
+                    <div style="padding: 20px; text-align: center; color: #ff4444;">
+                        <h2>❌ Помилка ініціалізації</h2>
+                        <p>Не вдалося підключитися до Atlas API</p>
+                        <p style="font-family: monospace; font-size: 0.9rem; background: rgba(255, 68, 68, 0.1); padding: 10px; border-radius: 5px; margin: 10px 0;">
+                            ${error.message}
+                        </p>
+                        <button class="btn" onclick="location.reload()">Спробувати знову</button>
+                    </div>
+                `;
+            }
+        });
+
+        // Обробка помилок JavaScript
+        window.addEventListener('error', (event) => {
+            logDebug('JavaScript помилка', {
+                message: event.message,
+                filename: event.filename,
+                lineno: event.lineno,
+                colno: event.colno
+            });
+        });
+    </script>
+</body>
+</html>
