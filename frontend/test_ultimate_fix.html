@@ -1,0 +1,345 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>🛠️ Atlas Debug Ultimate Test</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+            margin: 20px;
+            background: linear-gradient(135deg, #1e3c72, #2a5298);
+            color: white;
+            min-height: 100vh;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            padding: 20px;
+        }
+        .test-panel {
+            background: rgba(255,255,255,0.1);
+            border-radius: 10px;
+            padding: 20px;
+            margin: 20px 0;
+            backdrop-filter: blur(10px);
+        }
+        .chat-container {
+            max-height: 400px;
+            overflow-y: auto;
+            background: rgba(0,0,0,0.3);
+            border-radius: 10px;
+            padding: 15px;
+            margin: 15px 0;
+        }
+        .input-group {
+            display: flex;
+            gap: 10px;
+            align-items: center;
+        }
+        input[type="text"] {
+            flex: 1;
+            padding: 10px;
+            border-radius: 5px;
+            border: none;
+            background: rgba(255,255,255,0.9);
+            color: black;
+        }
+        button {
+            padding: 10px 15px;
+            border-radius: 5px;
+            border: none;
+            background: #4CAF50;
+            color: white;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        button:hover { background: #45a049; }
+        button:disabled { 
+            background: #666; 
+            cursor: not-allowed; 
+        }
+        .status-indicator {
+            width: 20px;
+            height: 20px;
+            border-radius: 50%;
+            display: inline-block;
+            margin-right: 10px;
+            transition: all 0.3s;
+        }
+        .status-green { background: #4CAF50; box-shadow: 0 0 10px #4CAF50; }
+        .status-red { background: #f44336; box-shadow: 0 0 10px #f44336; }
+        .status-yellow { background: #FF9800; box-shadow: 0 0 10px #FF9800; }
+        .log-entry {
+            padding: 5px 0;
+            border-bottom: 1px solid rgba(255,255,255,0.1);
+            font-family: 'Courier New', monospace;
+            font-size: 12px;
+        }
+        .log-info { color: #80DEEA; }
+        .log-warning { color: #FFB74D; }
+        .log-error { color: #EF5350; }
+        .log-success { color: #81C784; }
+        .emergency-button {
+            background: #f44336;
+            margin-left: 10px;
+            font-size: 12px;
+        }
+        .emergency-button:hover { background: #d32f2f; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🛠️ Atlas Ultimate Fix Test</h1>
+        
+        <div class="test-panel">
+            <h3>🔍 Input Field State Monitoring</h3>
+            <div>
+                <span class="status-indicator" id="inputStatus"></span>
+                <span id="inputStatusText">Initializing...</span>
+            </div>
+            <div style="margin-top: 10px;">
+                <strong>Flags:</strong>
+                isStreaming: <span id="isStreaming">false</span> | 
+                isStreamPending: <span id="isStreamPending">false</span> |
+                disabled: <span id="inputDisabled">false</span>
+                <button class="emergency-button" onclick="emergencyUnlock()">🆘 EMERGENCY UNLOCK</button>
+            </div>
+        </div>
+
+        <div class="test-panel">
+            <h3>💬 Chat Test</h3>
+            <div class="input-group">
+                <input type="text" id="testInput" placeholder="Введіть тестове повідомлення..." 
+                       onkeypress="if(event.key==='Enter') sendTestMessage()">
+                <button onclick="sendTestMessage()" id="sendButton">Відправити</button>
+            </div>
+            <div class="chat-container" id="chatContainer">
+                <div class="log-entry log-info">Готовий до тестування...</div>
+            </div>
+        </div>
+
+        <div class="test-panel">
+            <h3>📊 System Logs</h3>
+            <div class="chat-container" id="systemLogs">
+                <div class="log-entry log-info">System monitoring started...</div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        class UltimateFixTester {
+            constructor() {
+                this.isStreaming = false;
+                this.isStreamPending = false;
+                this.logs = [];
+                this.maxLogs = 100;
+                this.testInput = document.getElementById('testInput');
+                this.sendButton = document.getElementById('sendButton');
+                this.chatContainer = document.getElementById('chatContainer');
+                this.systemLogsContainer = document.getElementById('systemLogs');
+                
+                this.init();
+            }
+
+            init() {
+                // Запуск моніторингу кожні 500ms
+                setInterval(() => this.updateInputStatus(), 500);
+                
+                // Автоматична фіксація кожні 2 секунди
+                setInterval(() => this.autoFix(), 2000);
+                
+                this.log('Ultimate Fix Tester initialized', 'success');
+            }
+
+            log(message, type = 'info') {
+                const timestamp = new Date().toLocaleTimeString();
+                const entry = { timestamp, message, type };
+                this.logs.push(entry);
+                
+                if (this.logs.length > this.maxLogs) {
+                    this.logs.shift();
+                }
+                
+                this.renderLogs();
+            }
+
+            renderLogs() {
+                const html = this.logs.map(log => 
+                    `<div class="log-entry log-${log.type}">[${log.timestamp}] ${log.message}</div>`
+                ).join('');
+                this.systemLogsContainer.innerHTML = html;
+                this.systemLogsContainer.scrollTop = this.systemLogsContainer.scrollHeight;
+            }
+
+            updateInputStatus() {
+                const statusIndicator = document.getElementById('inputStatus');
+                const statusText = document.getElementById('inputStatusText');
+                const isStreamingSpan = document.getElementById('isStreaming');
+                const isStreamPendingSpan = document.getElementById('isStreamPending');
+                const inputDisabledSpan = document.getElementById('inputDisabled');
+
+                const disabled = this.testInput.disabled;
+                
+                // Оновлення UI
+                isStreamingSpan.textContent = this.isStreaming;
+                isStreamPendingSpan.textContent = this.isStreamPending;
+                inputDisabledSpan.textContent = disabled;
+
+                if (!disabled && !this.isStreaming && !this.isStreamPending) {
+                    statusIndicator.className = 'status-indicator status-green';
+                    statusText.textContent = 'Input Ready ✅';
+                } else if (this.isStreaming || this.isStreamPending) {
+                    statusIndicator.className = 'status-indicator status-yellow';
+                    statusText.textContent = 'Streaming in progress...';
+                } else {
+                    statusIndicator.className = 'status-indicator status-red';
+                    statusText.textContent = 'Input BLOCKED! ⚠️';
+                }
+            }
+
+            autoFix() {
+                // Перевірка на заблоковане поле без активного стріму
+                if (this.testInput.disabled && !this.isStreaming && !this.isStreamPending) {
+                    this.testInput.disabled = false;
+                    this.log('AUTO-FIX: Input field unlocked', 'warning');
+                }
+            }
+
+            async sendTestMessage() {
+                const message = this.testInput.value.trim();
+                
+                if (!message) {
+                    this.log('Empty message ignored', 'warning');
+                    return;
+                }
+
+                if (this.isStreaming || this.isStreamPending) {
+                    this.log('Stream already in progress, ignoring', 'warning');
+                    return;
+                }
+
+                this.log(`Sending message: "${message}"`, 'info');
+                this.addChatMessage(`User: ${message}`, 'user');
+                this.testInput.value = '';
+
+                // Симуляція стріму
+                this.startStream();
+
+                try {
+                    const response = await fetch('/api/chat/stream', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ message })
+                    });
+
+                    if (!response.ok) {
+                        throw new Error(`HTTP ${response.status}`);
+                    }
+
+                    const reader = response.body.getReader();
+                    const decoder = new TextDecoder();
+                    let buffer = '';
+                    let assistantText = '';
+
+                    while (true) {
+                        const { value, done } = await reader.read();
+                        if (done) break;
+
+                        buffer += decoder.decode(value, { stream: true });
+                        const lines = buffer.split('\n');
+                        buffer = lines.pop();
+
+                        for (const line of lines) {
+                            const trimmed = line.trim();
+                            if (!trimmed || trimmed.startsWith(':')) continue;
+                            
+                            if (trimmed.startsWith('data:')) {
+                                const jsonStr = trimmed.slice(5).trim();
+                                try {
+                                    const obj = JSON.parse(jsonStr);
+                                    if (obj.type === 'token') {
+                                        assistantText += obj.token || '';
+                                    } else if (obj.type === 'done') {
+                                        this.log('Stream completed successfully', 'success');
+                                    } else if (obj.event === 'final') {
+                                        assistantText = obj.atlas_response || obj.response || assistantText;
+                                    }
+                                } catch (e) {
+                                    // Plain text token
+                                    assistantText += jsonStr;
+                                }
+                            }
+                        }
+                    }
+
+                    this.addChatMessage(`Atlas: ${assistantText || 'No response'}`, 'assistant');
+
+                } catch (error) {
+                    this.log(`Stream error: ${error.message}`, 'error');
+                    this.addChatMessage(`Error: ${error.message}`, 'error');
+                } finally {
+                    this.endStream();
+                }
+            }
+
+            startStream() {
+                this.isStreamPending = false;
+                this.isStreaming = true;
+                this.testInput.disabled = true;
+                this.sendButton.disabled = true;
+                this.log('Stream started - input disabled', 'info');
+            }
+
+            endStream() {
+                this.isStreaming = false;
+                this.isStreamPending = false;
+                this.testInput.disabled = false;
+                this.sendButton.disabled = false;
+                this.log('Stream ended - input enabled', 'success');
+            }
+
+            addChatMessage(text, type) {
+                const className = type === 'user' ? 'log-info' : 
+                                type === 'assistant' ? 'log-success' : 'log-error';
+                const div = document.createElement('div');
+                div.className = `log-entry ${className}`;
+                div.textContent = text;
+                this.chatContainer.appendChild(div);
+                this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+            }
+        }
+
+        // Глобальні функції
+        function emergencyUnlock() {
+            const tester = window.ultimateTester;
+            const input = document.getElementById('testInput');
+            const button = document.getElementById('sendButton');
+            
+            input.disabled = false;
+            button.disabled = false;
+            tester.isStreaming = false;
+            tester.isStreamPending = false;
+            
+            tester.log('🆘 EMERGENCY UNLOCK executed!', 'warning');
+        }
+
+        function sendTestMessage() {
+            window.ultimateTester.sendTestMessage();
+        }
+
+        // Ініціалізація
+        document.addEventListener('DOMContentLoaded', () => {
+            window.ultimateTester = new UltimateFixTester();
+        });
+
+        // Глобальні hotkeys
+        document.addEventListener('keydown', (e) => {
+            if (e.ctrlKey && e.shiftKey && e.key === 'U') {
+                e.preventDefault();
+                emergencyUnlock();
+            }
+        });
+    </script>
+</body>
+</html>

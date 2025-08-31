@@ -1,0 +1,352 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Atlas Input Debugger</title>
+    <style>
+        body { font-family: monospace; background: #000; color: #00ff41; padding: 20px; }
+        .container { max-width: 800px; margin: 0 auto; }
+        .section { margin: 20px 0; padding: 15px; border: 1px solid #00ff41; border-radius: 5px; }
+        .status { padding: 5px; margin: 5px 0; border-left: 3px solid #00ff41; padding-left: 10px; }
+        .error { border-left-color: #ff0000; color: #ff6666; }
+        .success { border-left-color: #00ff00; color: #66ff66; }
+        .warning { border-left-color: #ffaa00; color: #ffcc66; }
+        button { 
+            background: #003300; color: #00ff41; border: 1px solid #00ff41; 
+            padding: 8px 15px; margin: 5px; cursor: pointer; border-radius: 3px; 
+        }
+        button:hover { background: #005500; }
+        .log { 
+            background: #001100; border: 1px solid #003300; padding: 10px; 
+            height: 300px; overflow-y: auto; margin-top: 10px; 
+        }
+        .input-test { padding: 10px; border: 1px solid #00ff41; margin: 10px 0; }
+        input, textarea { 
+            background: #000; color: #00ff41; border: 1px solid #00ff41; 
+            padding: 5px; width: 100%; margin: 5px 0; 
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>🔧 Atlas Input Field Debugger</h1>
+        
+        <div class="section">
+            <h2>📊 System Status</h2>
+            <div id="systemStatus">Завантаження...</div>
+            <button onclick="checkSystemStatus()">🔄 Оновити статус</button>
+        </div>
+        
+        <div class="section">
+            <h2>🎯 Input Field Status</h2>
+            <div id="inputStatus">Перевірка...</div>
+            <button onclick="checkInputField()">🔍 Перевірити поле вводу</button>
+            <button onclick="forceUnlockInput()">🔓 Примусово розблокувати</button>
+            <button onclick="resetAllFlags()">🔄 Скинути всі прапорці</button>
+        </div>
+        
+        <div class="section">
+            <h2>🧪 Test Input Field</h2>
+            <div class="input-test">
+                <textarea id="testInput" placeholder="Введіть тестове повідомлення..." rows="3"></textarea>
+                <button onclick="sendTestMessage()">📤 Надіслати тест</button>
+                <button onclick="simulateStreaming()">📡 Симулювати стрімінг</button>
+            </div>
+        </div>
+        
+        <div class="section">
+            <h2>🔧 Emergency Tools</h2>
+            <button onclick="emergencyReset()">🚨 Аварійний скид</button>
+            <button onclick="reloadInterface()">🔄 Перезавантажити інтерфейс</button>
+            <button onclick="clearLogs()">🧹 Очистити логи</button>
+        </div>
+        
+        <div class="section">
+            <h2>📋 Debug Log</h2>
+            <div class="log" id="debugLog"></div>
+        </div>
+    </div>
+
+    <script>
+        let debugLog = document.getElementById('debugLog');
+        let logCount = 0;
+        
+        function log(message, type = 'info') {
+            const timestamp = new Date().toLocaleTimeString();
+            const className = type === 'error' ? 'error' : type === 'success' ? 'success' : type === 'warning' ? 'warning' : '';
+            debugLog.innerHTML += `<div class="status ${className}">[${timestamp}] ${message}</div>`;
+            debugLog.scrollTop = debugLog.scrollHeight;
+            logCount++;
+            if (logCount > 200) {
+                const lines = debugLog.innerHTML.split('</div>');
+                debugLog.innerHTML = lines.slice(-100).join('</div>');
+                logCount = 100;
+            }
+        }
+        
+        function getMainWindow() {
+            // Спробуємо знайти головне вікно Atlas
+            if (window.opener && window.opener.atlasInterface) return window.opener;
+            if (window.parent && window.parent.atlasInterface) return window.parent;
+            if (window.top && window.top.atlasInterface) return window.top;
+            
+            // Спробуємо через портал
+            try {
+                const atlasWindow = window.open('http://localhost:8080', 'atlas');
+                if (atlasWindow && atlasWindow.atlasInterface) return atlasWindow;
+            } catch (e) {}
+            
+            return null;
+        }
+        
+        async function checkSystemStatus() {
+            log('🔍 Перевіряю статус системи...');
+            try {
+                const response = await fetch('http://localhost:8080/api/status');
+                if (response.ok) {
+                    const data = await response.json();
+                    document.getElementById('systemStatus').innerHTML = `
+                        <div class="status success">✅ Atlas Frontend: ${data.services?.atlas_frontend || 'unknown'}</div>
+                        <div class="status success">✅ Atlas Core: ${data.services?.atlas_core_available ? 'available' : 'unavailable'}</div>
+                        <div class="status">📊 Processes: ${JSON.stringify(data.processes)}</div>
+                        <div class="status">⏰ Timestamp: ${data.services?.timestamp}</div>
+                    `;
+                    log('✅ Системний статус отримано', 'success');
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                document.getElementById('systemStatus').innerHTML = `<div class="status error">❌ Помилка: ${error.message}</div>`;
+                log(`❌ Помилка системного статусу: ${error.message}`, 'error');
+            }
+        }
+        
+        function checkInputField() {
+            log('🎯 Перевіряю стан поля вводу...');
+            const mainWindow = getMainWindow();
+            
+            if (!mainWindow || !mainWindow.atlasInterface) {
+                const status = `
+                    <div class="status error">❌ Не вдалося знайти головне вікно Atlas</div>
+                    <div class="status warning">⚠️ Відкрийте Atlas в іншій вкладці: <a href="http://localhost:8080" target="_blank">http://localhost:8080</a></div>
+                `;
+                document.getElementById('inputStatus').innerHTML = status;
+                log('❌ Головне вікно Atlas не знайдено', 'error');
+                return;
+            }
+            
+            const iface = mainWindow.atlasInterface;
+            const input = mainWindow.document.getElementById('chatInput');
+            
+            const status = `
+                <div class="status ${iface.isStreaming ? 'error' : 'success'}">📡 isStreaming: ${iface.isStreaming}</div>
+                <div class="status ${iface.isStreamPending ? 'error' : 'success'}">⏳ isStreamPending: ${iface.isStreamPending}</div>
+                <div class="status ${input?.disabled ? 'error' : 'success'}">🔐 input.disabled: ${input?.disabled || 'not found'}</div>
+                <div class="status ${iface._autoBlockedBySessions ? 'warning' : 'success'}">🔒 _autoBlockedBySessions: ${iface._autoBlockedBySessions}</div>
+                <div class="status">⏰ _lastStreamFinishedAt: ${iface._lastStreamFinishedAt ? new Date(iface._lastStreamFinishedAt).toLocaleTimeString() : 'never'}</div>
+                <div class="status">🛡️ _autoBlockGraceUntil: ${iface._autoBlockGraceUntil ? new Date(iface._autoBlockGraceUntil).toLocaleTimeString() : 'none'}</div>
+            `;
+            
+            document.getElementById('inputStatus').innerHTML = status;
+            
+            if (input?.disabled || iface.isStreaming || iface.isStreamPending) {
+                log('⚠️ Поле вводу заблоковано або стрім активний', 'warning');
+            } else {
+                log('✅ Поле вводу в нормальному стані', 'success');
+            }
+        }
+        
+        function forceUnlockInput() {
+            log('🔓 Примусове розблокування поля вводу...');
+            const mainWindow = getMainWindow();
+            
+            if (!mainWindow || !mainWindow.atlasInterface) {
+                log('❌ Головне вікно Atlas не знайдено', 'error');
+                return;
+            }
+            
+            const iface = mainWindow.atlasInterface;
+            const input = mainWindow.document.getElementById('chatInput');
+            
+            // Скидаємо всі прапорці блокування
+            iface.isStreaming = false;
+            iface.isStreamPending = false;
+            iface._autoBlockedBySessions = false;
+            
+            // Розблоковуємо поле вводу
+            if (input) {
+                input.disabled = false;
+                log('✅ Поле вводу примусово розблоковано', 'success');
+            } else {
+                log('❌ Поле вводу не знайдено', 'error');
+            }
+            
+            // Оновлюємо статус
+            setTimeout(checkInputField, 100);
+        }
+        
+        function resetAllFlags() {
+            log('🔄 Скидання всіх прапорців...');
+            const mainWindow = getMainWindow();
+            
+            if (!mainWindow || !mainWindow.atlasInterface) {
+                log('❌ Головне вікно Atlas не знайдено', 'error');
+                return;
+            }
+            
+            const iface = mainWindow.atlasInterface;
+            
+            // Повний скид
+            iface.isStreaming = false;
+            iface.isStreamPending = false;
+            iface._autoBlockedBySessions = false;
+            iface.autoReplyActive = false;
+            iface.TTS_ACTIVE = false;
+            iface._lastStreamFinishedAt = Date.now();
+            iface._autoBlockGraceUntil = 0;
+            
+            // Очищуємо черги та таймери
+            if (iface.messageQueue) iface.messageQueue.length = 0;
+            if (iface.autoReplyTimer) {
+                clearTimeout(iface.autoReplyTimer);
+                iface.autoReplyTimer = null;
+            }
+            if (iface.TTSBlockTimer) {
+                clearTimeout(iface.TTSBlockTimer);
+                iface.TTSBlockTimer = null;
+            }
+            
+            log('✅ Всі прапорці скинуто', 'success');
+            setTimeout(checkInputField, 100);
+        }
+        
+        async function sendTestMessage() {
+            const testInput = document.getElementById('testInput');
+            const message = testInput.value.trim();
+            
+            if (!message) {
+                log('❌ Введіть тестове повідомлення', 'error');
+                return;
+            }
+            
+            log(`📤 Відправляю тестове повідомлення: "${message}"`);
+            
+            try {
+                const response = await fetch('http://localhost:8080/api/chat', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Тестове повідомлення успішно надіслано', 'success');
+                    log(`📨 Відповідь: ${data.atlas_processing?.response?.substring(0, 100) || JSON.stringify(data).substring(0, 100)}...`);
+                } else {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+            } catch (error) {
+                log(`❌ Помилка відправки: ${error.message}`, 'error');
+            }
+            
+            // Перевіряємо стан після відправки
+            setTimeout(checkInputField, 1000);
+        }
+        
+        function simulateStreaming() {
+            log('📡 Симулюю стрімінг для тестування...');
+            const mainWindow = getMainWindow();
+            
+            if (!mainWindow || !mainWindow.atlasInterface) {
+                log('❌ Головне вікно Atlas не знайдено', 'error');
+                return;
+            }
+            
+            const iface = mainWindow.atlasInterface;
+            const input = mainWindow.document.getElementById('chatInput');
+            
+            // Симулюємо початок стрімінгу
+            iface.isStreamPending = true;
+            if (input) input.disabled = true;
+            log('🔒 Симуляція: поле заблоковано', 'warning');
+            
+            setTimeout(() => {
+                iface.isStreamPending = false;
+                iface.isStreaming = true;
+                log('📡 Симуляція: стрімінг активний', 'warning');
+            }, 1000);
+            
+            setTimeout(() => {
+                // Симулюємо завершення стрімінгу
+                iface.isStreaming = false;
+                iface.isStreamPending = false;
+                if (input) input.disabled = false;
+                log('✅ Симуляція: стрімінг завершено, поле розблоковано', 'success');
+                checkInputField();
+            }, 3000);
+        }
+        
+        function emergencyReset() {
+            log('🚨 Аварійний скид системи...');
+            resetAllFlags();
+            forceUnlockInput();
+            
+            // Додатковий скид через DOM
+            try {
+                const mainWindow = getMainWindow();
+                if (mainWindow) {
+                    const input = mainWindow.document.getElementById('chatInput');
+                    if (input) {
+                        input.disabled = false;
+                        input.style.opacity = '1';
+                        input.style.pointerEvents = 'auto';
+                        input.removeAttribute('readonly');
+                    }
+                }
+            } catch (e) {
+                log(`⚠️ Додатковий DOM скид не вдався: ${e.message}`, 'warning');
+            }
+            
+            log('🚨 Аварійний скид завершено', 'success');
+        }
+        
+        function reloadInterface() {
+            log('🔄 Перезавантаження інтерфейсу Atlas...');
+            const mainWindow = getMainWindow();
+            if (mainWindow) {
+                mainWindow.location.reload();
+                log('✅ Інтерфейс перезавантажується...', 'success');
+            } else {
+                window.open('http://localhost:8080', '_blank');
+                log('📖 Відкриваю новий інтерфейс...', 'success');
+            }
+        }
+        
+        function clearLogs() {
+            debugLog.innerHTML = '';
+            logCount = 0;
+            log('🧹 Логи очищено');
+        }
+        
+        // Ініціалізація при завантаженні
+        window.addEventListener('DOMContentLoaded', () => {
+            log('🔧 Atlas Input Debugger завантажено');
+            checkSystemStatus();
+            setTimeout(checkInputField, 500);
+            
+            // Автооновлення кожні 10 секунд
+            setInterval(checkInputField, 10000);
+        });
+        
+        // Гаряча клавіша F5 для оновлення
+        window.addEventListener('keydown', (e) => {
+            if (e.key === 'F5') {
+                e.preventDefault();
+                checkSystemStatus();
+                checkInputField();
+            }
+        });
+    </script>
+</body>
+</html>

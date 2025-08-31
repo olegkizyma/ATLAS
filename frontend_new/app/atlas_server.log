@@ -1,0 +1,396 @@
+2025-09-01 01:02:01,713 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 01:02:01,714 [atlas.server] ERROR: Could not import AtlasAPI: No module named 'atlas_api'
+2025-09-01 01:02:01,714 [atlas.server] INFO: API endpoints not available
+2025-09-01 01:02:01,714 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 01:02:01,714 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 01:02:01,714 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 01:02:01,721 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 01:02:01,721 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 01:02:05,877 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET / HTTP/1.1" 200 -
+2025-09-01 01:02:05,906 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 01:02:05,907 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 01:02:05,908 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 01:02:05,909 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 01:02:05,910 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 01:02:05,911 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:05,912 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:02:05,945 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:05,945 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:05,954 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:05,954 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 01:02:05,955 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:05,956 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:02:05,956 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:05] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 01:02:06,066 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "GET / HTTP/1.1" 200 -
+2025-09-01 01:02:06,080 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 01:02:06,081 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:06,082 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:02:06,082 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:02:06,083 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:02:06,083 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:02:06,083 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 01:02:06,084 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:06,084 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:06] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 01:02:08,953 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:08,954 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:08] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:11,955 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:11,955 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:11] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:14,958 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:14,959 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:14] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:17,952 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:17,953 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:17] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:20,958 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:20,959 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:20] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:23,954 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:23,955 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:23] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:26,955 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:26,955 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:26] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:29,956 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:29,956 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:29] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:30,579 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:30] "GET / HTTP/1.1" 200 -
+2025-09-01 01:02:30,584 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:30,586 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:30] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 01:02:30,586 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:30] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 01:02:30,587 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:30] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:02:30,591 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:30,592 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:30] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:33,599 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:33,600 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:33] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:36,600 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:36,602 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:36] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:39,601 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:39,602 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:39] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:42,607 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:42,608 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:42] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:45,604 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:02:45,606 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:02:45] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:02:47,293 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 01:03:24,566 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 01:03:24,569 [atlas.server] INFO: Atlas API initialized
+2025-09-01 01:03:24,569 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 01:03:24,569 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 01:03:24,569 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 01:03:24,575 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 01:03:24,575 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 01:03:24,880 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:24,887 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:24] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:27,872 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:27,873 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:27] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:27,950 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:27] "GET / HTTP/1.1" 200 -
+2025-09-01 01:03:27,962 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:27] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:03:27,962 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:27] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 01:03:27,964 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:27] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 01:03:27,968 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:27,968 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:27] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:30,975 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:30,977 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:30] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:33,971 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:33,971 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:33] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:36,974 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:36,974 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:36] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:39,974 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:39,974 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:39] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:42,976 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:42,976 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:42] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:45,978 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:45,979 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:45] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:48,978 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:48,979 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:48] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:51,982 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:51,983 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:51] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:54,977 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:54,977 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:54] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:03:57,977 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:03:57,978 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:03:57] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:00,980 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:00,981 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:00] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:01,548 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /?id=63fe2dce-4c76-4e79-92f1-b34a32224c25&vscodeBrowserReqId=1756677841543 HTTP/1.1" 200 -
+2025-09-01 01:04:01,601 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 01:04:01,601 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 01:04:01,601 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 01:04:01,602 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 01:04:01,604 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:04:01,604 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 01:04:01,632 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:01,633 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:01,655 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 01:04:01,660 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET / HTTP/1.1" 200 -
+2025-09-01 01:04:01,661 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 01:04:01,661 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 01:04:01,663 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:04:01,665 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:04:01,665 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:04:01,666 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 01:04:01,667 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:01] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 01:04:03,978 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:03,978 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:03] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:04,633 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:04,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:06,982 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:06,983 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:06] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:07,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:07,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:09,978 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:09,978 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:09] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:10,632 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:10,632 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:12,987 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:12,987 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:12] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:13,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:13,635 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:15,980 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:15,980 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:15] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:16,633 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:16,633 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:18,979 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:18,979 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:18] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:19,636 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:19,636 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:21,992 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:21,993 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:21] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:22,635 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:22,635 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:24,987 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:24,987 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:24] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:25,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:25,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:27,986 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:27,987 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:27] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:28,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:28,635 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:30,983 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:30,983 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:30] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:31,635 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:31,635 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:33,990 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:33,990 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:33] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:34,637 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:34,637 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:36,990 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:36,991 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:36] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:37,636 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:37,637 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:39,990 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:39,991 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:39] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:40,639 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:40,640 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:42,991 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:42,992 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:42] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:43,636 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:43,636 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:45,987 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:45,987 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:45] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:46,637 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:46,638 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:48,992 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:48,993 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:48] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:49,636 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:49,636 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:51,990 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:51,990 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:51] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:52,637 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:52,637 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:54,990 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:54,991 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:54] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:55,639 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:55,639 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:57,989 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:57,989 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:57] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:04:58,638 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:04:58,639 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:04:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:00,995 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:00,996 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:00] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:01,638 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:01,638 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:03,995 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:03,995 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:03] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:04,637 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:04,638 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:06,992 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:06,993 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:06] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:07,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:07,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:09,989 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:09,989 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:09] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:10,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:10,635 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:13,000 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:13,001 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:13,633 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:13,633 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:15,991 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:15,991 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:15] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:16,633 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:16,633 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:18,993 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:18,993 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:18] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:19,636 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:19,637 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:21,999 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:22,001 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:22,638 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:22,639 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:25,000 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:25,000 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:25,639 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:25,640 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:28,002 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:28,003 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:28,639 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:28,640 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:31,003 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:31,005 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:31,639 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:31,640 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:34,000 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:34,001 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:34,638 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:34,639 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:37,002 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:37,003 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:37,640 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:37,641 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:40,000 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:40,001 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:40,639 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:40,640 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:43,006 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:43,007 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:43,635 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:43,636 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:46,005 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:46,006 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:46,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:46,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:48,998 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:48,999 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:48] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:49,635 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:49,636 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:52,000 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:52,001 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:52,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:52,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:55,000 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:55,000 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:55,633 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:55,633 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:58,009 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:58,010 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:05:58,633 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:05:58,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:05:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:01,006 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:01,007 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:01,633 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:01,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:04,007 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:04,008 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:04,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:04,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:07,006 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:07,008 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:07,637 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:07,637 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:10,006 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:10,007 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:10,637 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:10,637 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:13,009 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:13,010 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:13,640 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:13,641 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:16,007 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:16,008 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:16,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:16,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:19,004 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:19,004 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:19,634 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:19,634 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:22,005 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:22,006 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:22,637 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:06:22,637 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:06:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 01:06:24,431 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 01:20:52,448 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 01:20:52,450 [atlas.server] INFO: Atlas API initialized
+2025-09-01 01:20:52,450 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 01:20:52,450 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 01:20:52,450 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 01:20:52,460 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 01:20:52,460 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 01:21:03,213 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "GET /?id=904f1a3e-047d-4745-a1e1-a11c4c28105d&vscodeBrowserReqId=1756678863206 HTTP/1.1" 200 -
+2025-09-01 01:21:03,220 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:21:03,221 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 01:21:03,224 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 01:21:03,224 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 01:21:03,226 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:03,227 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:03,227 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:03,227 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:03,435 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:03] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 01:21:39,576 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET / HTTP/1.1" 200 -
+2025-09-01 01:21:39,585 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 01:21:39,592 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:21:39,593 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 01:21:39,593 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 01:21:39,593 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:21:39,593 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 01:21:39,593 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 01:21:39,594 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 01:21:39,639 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 01:21:39,644 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET / HTTP/1.1" 200 -
+2025-09-01 01:21:39,645 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:39,645 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 01:21:39,646 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:39,648 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:39,648 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:21:39,648 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 01:21:39,650 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 01:21:39,742 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:39] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 01:21:40,002 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:21:40] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 01:25:02,338 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:25:02] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 01:25:02,341 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:25:02,342 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:25:02] "GET /.well-known/appspecific/com.chrome.devtools.json HTTP/1.1" 200 -
+2025-09-01 01:26:01,329 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET / HTTP/1.1" 200 -
+2025-09-01 01:26:01,354 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 01:26:01,356 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 01:26:01,357 [atlas.server] WARNING: 404 error: 404 Not Found: The requested URL was not found on the server. If you entered the URL manually please check your spelling and try again.
+2025-09-01 01:26:01,357 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 01:26:01,358 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 01:26:01,360 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 01:26:01,360 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 01:26:01,360 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 01:26:01,377 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 01:26:01,386 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET / HTTP/1.1" 200 -
+2025-09-01 01:26:01,387 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 01:26:01,388 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 01:26:01,390 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:26:01,391 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:26:01,391 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "[36mGET /static/assets/atlas-icon.svg HTTP/1.1[0m" 304 -
+2025-09-01 01:26:01,392 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 01:26:01,393 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 01:26:01,991 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 01:26:01,999 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:01] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 01:26:06,764 [atlas.server] INFO: Received signal 2, shutting down...
+2025-09-01 01:26:09,448 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 01:26:09,451 [atlas.server] INFO: Atlas API initialized
+2025-09-01 01:26:09,451 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 01:26:09,451 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 01:26:09,451 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 01:26:09,459 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 01:26:09,459 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 01:26:18,233 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:18] "GET / HTTP/1.1" 200 -
+2025-09-01 01:26:18,243 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:18] "GET /static/css/minimal.css HTTP/1.1" 200 -
+2025-09-01 01:26:18,246 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:18] "GET /static/js/minimal.js HTTP/1.1" 200 -
+2025-09-01 01:26:18,254 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:18] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 01:26:23,270 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:23] "GET / HTTP/1.1" 200 -
+2025-09-01 01:26:23,283 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:23] "[36mGET /static/css/minimal.css HTTP/1.1[0m" 304 -
+2025-09-01 01:26:23,284 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:26:23] "[36mGET /static/js/minimal.js HTTP/1.1[0m" 304 -
+2025-09-01 01:27:50,885 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:27:50] "GET / HTTP/1.1" 200 -
+2025-09-01 01:27:50,891 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:27:50] "[36mGET /static/css/minimal.css HTTP/1.1[0m" 304 -
+2025-09-01 01:27:50,891 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 01:27:50] "[36mGET /static/js/minimal.js HTTP/1.1[0m" 304 -
+2025-09-01 01:29:03,465 [atlas.server] INFO: Received signal 2, shutting down...

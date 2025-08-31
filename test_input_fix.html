@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Тест поля вводу Atlas</title>
+    <style>
+        body { font-family: monospace; padding: 20px; background: #000; color: #00ff41; }
+        button { margin: 5px; padding: 10px; background: #003300; color: #00ff41; border: 1px solid #00ff41; }
+        #log { margin-top: 20px; padding: 10px; border: 1px solid #00ff41; height: 400px; overflow-y: auto; }
+    </style>
+</head>
+<body>
+    <h1>Тест поля вводу Atlas</h1>
+    
+    <button onclick="testConnection()">Тест підключення</button>
+    <button onclick="sendTestMessage()">Надіслати тестове повідомлення</button>
+    <button onclick="checkInputState()">Перевірити стан поля вводу</button>
+    <button onclick="forceUnlock()">Примусове розблокування (Ctrl+Shift+U)</button>
+    
+    <div id="log"></div>
+    
+    <script>
+        function log(message) {
+            const logDiv = document.getElementById('log');
+            const time = new Date().toLocaleTimeString();
+            logDiv.innerHTML += `[${time}] ${message}<br>`;
+            logDiv.scrollTop = logDiv.scrollHeight;
+        }
+        
+        async function testConnection() {
+            try {
+                const response = await fetch('http://localhost:8080/api/status');
+                if (response.ok) {
+                    const data = await response.json();
+                    log('✅ Підключення до Atlas успішне');
+                    log(`📊 Статус: ${JSON.stringify(data, null, 2)}`);
+                } else {
+                    log('❌ Помилка підключення до Atlas');
+                }
+            } catch (error) {
+                log(`❌ Помилка: ${error.message}`);
+            }
+        }
+        
+        async function sendTestMessage() {
+            const testMessage = 'Тестове повідомлення для перевірки блокування поля вводу';
+            log(`📤 Відправляю тестове повідомлення: "${testMessage}"`);
+            
+            try {
+                const response = await fetch('http://localhost:8080/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ message: testMessage })
+                });
+                
+                if (!response.ok) {
+                    throw new Error(`HTTP ${response.status}`);
+                }
+                
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder('utf-8');
+                let buffer = '';
+                
+                log('📡 Отримую відповідь стрімом...');
+                
+                while (true) {
+                    const { value, done } = await reader.read();
+                    if (done) break;
+                    
+                    buffer += decoder.decode(value, { stream: true });
+                    const lines = buffer.split('\\n');
+                    buffer = lines.pop();
+                    
+                    for (const line of lines) {
+                        if (line.trim().startsWith('data:')) {
+                            const data = line.slice(5).trim();
+                            try {
+                                const obj = JSON.parse(data);
+                                log(`📨 Отримано: ${JSON.stringify(obj)}`);
+                            } catch {
+                                log(`📨 Отримано текст: ${data}`);
+                            }
+                        }
+                    }
+                }
+                
+                log('✅ Стрім завершено');
+                
+            } catch (error) {
+                log(`❌ Помилка: ${error.message}`);
+            }
+        }
+        
+        function checkInputState() {
+            // Перевіряємо стан поля вводу в основному вікні
+            const mainWindow = window.parent || window;
+            if (mainWindow.atlasInterface) {
+                const iface = mainWindow.atlasInterface;
+                const input = mainWindow.document.getElementById('chatInput');
+                
+                log(`🔍 Стан інтерфейсу:`);
+                log(`  - isStreaming: ${iface.isStreaming}`);
+                log(`  - isStreamPending: ${iface.isStreamPending}`);
+                log(`  - input.disabled: ${input ? input.disabled : 'not found'}`);
+                log(`  - _autoBlockedBySessions: ${iface._autoBlockedBySessions}`);
+            } else {
+                log('❌ Не вдалося знайти atlasInterface');
+            }
+        }
+        
+        function forceUnlock() {
+            const mainWindow = window.parent || window;
+            if (mainWindow.atlasInterface) {
+                const iface = mainWindow.atlasInterface;
+                const input = mainWindow.document.getElementById('chatInput');
+                
+                iface.isStreaming = false;
+                iface.isStreamPending = false;
+                iface._autoBlockedBySessions = false;
+                
+                if (input) {
+                    input.disabled = false;
+                    log('🔓 Поле вводу примусово розблоковано');
+                } else {
+                    log('❌ Не вдалося знайти поле вводу');
+                }
+            } else {
+                log('❌ Не вдалося знайти atlasInterface');
+            }
+        }
+        
+        log('🚀 Тестова сторінка завантажена');
+    </script>
+</body>
+</html>

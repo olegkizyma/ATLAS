@@ -173,12 +173,7 @@ def serve_live_logs(h):
                 "source": "atlas_frontend",
             })
 
-        logs.append({
-            "message": "🔍 Monitoring Goose sessions in real-time...",
-            "level": "info",
-            "timestamp": datetime.now().strftime("%H:%M:%S"),
-            "source": "atlas_monitor",
-        })
+        # Прибрали спам "Monitoring Goose sessions" - він засмічує логи
 
         response = json.dumps({"logs": logs}).encode('utf-8')
         h.send_response(200)
