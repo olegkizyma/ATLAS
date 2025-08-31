@@ -15,6 +15,7 @@ import requests
 from typing import Dict, List, Tuple, Optional, Any
 from datetime import datetime
 import logging
+from . import config as acfg
 
 
 class GrishaSecurity:
@@ -50,7 +51,7 @@ class GrishaSecurity:
         """
         
         # Перевіряємо чи є Mistral API ключ
-        mistral_key = os.getenv('MISTRAL_API_KEY')
+        mistral_key = acfg.mistral_api_key()
         if mistral_key and not self.test_mode:
             try:
                 return self._analyze_with_mistral(command, intent_analysis, user_context, mistral_key)
@@ -529,9 +530,9 @@ class GrishaSecurity:
         import os
         import requests
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             raise Exception("GEMINI_API_KEY не встановлено")
@@ -617,12 +618,11 @@ class GrishaSecurity:
 
     def _analyze_session_duration_with_gemini(self, task_description: str) -> bool:
         """Аналізує чи треба залишити сесію активною через Gemini"""
-        import os
         import requests
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             raise Exception("GEMINI_API_KEY не встановлено")
@@ -772,12 +772,11 @@ class GrishaSecurity:
 
     def _analyze_verification_result_with_gemini(self, stdout: str, stderr: str, return_code: int, original_task: str) -> Dict:
         """Аналізує результат перевірки через Gemini"""
-        import os
         import requests
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             raise Exception("GEMINI_API_KEY не встановлено")
@@ -926,12 +925,11 @@ STDERR: {stderr_trimmed}
 
     def _generate_summary_with_gemini(self, task_description: str, execution_result: Dict, session_info: Dict) -> Optional[str]:
         """Генерує компактний звіт через Gemini API"""
-        import os
         import requests
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             return None

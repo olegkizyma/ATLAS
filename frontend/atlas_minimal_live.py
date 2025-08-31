@@ -38,9 +38,7 @@ def load_env():
 # Завантажуємо змінні середовища
 load_env()
 
-# Перевіряємо API ключі
-print(f"🔑 Gemini API: {'✅' if os.getenv('GEMINI_API_KEY') else '❌'}")
-print(f"🔑 Mistral API: {'✅' if os.getenv('MISTRAL_API_KEY') else '❌'}")
+# Діагностика API ключів видалена або може бути перенесена в config
 
 # Імпортуємо Atlas Core
 try:
@@ -99,6 +97,8 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         # Централізуємо базовий URL та секрет через services.config
         self.goose_client = GooseClient(base_url=cfg.goose_base_url(), secret_key=cfg.goose_secret_key("test"))
         self.goose_api_url = self.goose_client.base_url
+        # Atlas Core URL з централізованого конфігу
+        self.atlas_core_url = cfg.atlas_core_url()
         # Проксі прапор наявності Atlas Core для зовнішніх хендлерів
         try:
             self.ATLAS_CORE_AVAILABLE = ATLAS_CORE_AVAILABLE
@@ -108,130 +108,104 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
         self.live_streamer = None
         super().__init__(*args, **kwargs)
 
+    def end_headers(self):
+        """Додаємо CORS заголовки до всіх відповідей"""
+        self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        super().end_headers()
+
     def do_OPTIONS(self):
         """Обробка preflight CORS запитів"""
         self.send_response(200)
         self.send_header('Access-Control-Allow-Origin', '*')
+        self.send_header('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+        self.send_header('Access-Control-Allow-Headers', 'Content-Type')
+        self.end_headers()
+
+    def do_GET(self):
+        """Обробка GET запитів"""
+        if self.path == "/" or self.path == "/index.html":
+            h_assets.serve_frontend(self)
+        elif self.path == "/DamagedHelmet.glb":
+            h_assets.serve_3d_model(self)
+        elif self.path == "/favicon.ico":
+            h_assets.serve_favicon(self)
+        elif self.path.startswith("/logs"):
+            if self.path == "/logs/stream":
+                h_logs.serve_logs_stream(self)
+            else:
+                h_logs.serve_live_logs(self)
+        elif self.path == "/api/status":
+            h_status.serve_system_status(self)
+        elif self.path == "/api/atlas/status":
+            h_status.serve_atlas_core_status(self)
+        elif self.path == "/api/atlas/sessions":
+            h_status.serve_atlas_sessions(self)
+        elif self.path == "/api/goose/sessions":
+            h_status.serve_goose_sessions(self)
+        elif self.path == "/api/atlas/corrections":
+            h_status.serve_correction_statistics(self)
+        elif self.path.startswith("/api/atlas/corrections/"):
+            session_name = self.path.replace("/api/atlas/corrections/", "")
+            h_status.serve_session_corrections(self, session_name)
+        elif self.path == "/api/atlas/diagnostics":
+            h_status.serve_api_diagnostics(self)
+        elif self.path == "/api/atlas/health":
+            h_status.serve_health_check(self)
+        elif self.path == "/api/atlas/test-mode-analysis":
+            h_status.serve_test_mode_analysis(self)
+        else:
+            super().do_GET()
+
+    def do_POST(self):
+        """Обробка POST запитів"""
+        if self.path == "/api/chat":
+            self.handle_chat()
+        elif self.path == "/api/chat/stream":
+            self.handle_chat_stream()
+        elif self.path == "/api/tts/speak":
+            h_tts.handle_tts(self)
+        elif self.path == "/api/atlas/analyze-prompt":
+            h_atlas.handle_analyze_prompt(self)
+        else:
+            self.send_error(404, "Not Found")
 
     def handle_chat(self):
-        """Обробка чат запитів через Atlas Core (Atlas LLM1 + Goose + Гріша LLM3)"""
+        """Простий non-stream чат через Goose HTTP API"""
         try:
             content_length = int(self.headers.get('Content-Length', 0))
             post_data = self.rfile.read(content_length)
-            data = json.loads(post_data.decode('utf-8'))
-            
-            # Підтримка як "message" так і "prompt"
-            user_message = data.get("message", data.get("prompt", ""))
+            data = json.loads(post_data.decode('utf-8')) if post_data else {}
+
+            user_message = data.get("message") or data.get("prompt")
             if not user_message:
-                self.send_json_response({"error": "Message is required"}, 400)
-                return
-            
-            # Формуємо контекст користувача
-            user_context = {
-                "timestamp": datetime.now().isoformat(),
-                "session_hint": data.get("session_type"),
-                "client_ip": self.client_address[0],
-                "user_agent": self.headers.get('User-Agent', 'unknown')
-            }
-            
-            if ATLAS_CORE_AVAILABLE:
-                # === НОВИЙ ШЛЯХ: Atlas Core ===
-                logger.info(f"🧠 Atlas Core: Обробляю повідомлення: {user_message[:100]}...")
-                
-                try:
-                    # Отримуємо екземпляр Atlas Core
-                    core = get_atlas_core("/Users/dev/Documents/GitHub/ATLAS/goose")
-                    
-                    # Обробляємо повідомлення через всі три компоненти
-                    # Потрібно викликати async метод в sync контексті
-                    loop = asyncio.new_event_loop()
-                    asyncio.set_event_loop(loop)
-                    
-                    try:
-                        result = loop.run_until_complete(
-                            core.process_user_message(user_message, user_context)
-                        )
-                    finally:
-                        loop.close()
-                    
-                    # Формуємо відповідь на основі результату Atlas Core
-                    if result.get("success"):
-                        response_data = {
-                            "response": result.get("response", result.get("atlas_response", "Завдання виконано")),
-                            "response_type": result.get("response_type", "unknown"),
-                            "atlas_core": True,
-                            "processing_time": result.get("processing_time", 0),
-                            "intent": result.get("intent_analysis", {}).get("intent", "unknown"),
-                            "confidence": result.get("intent_analysis", {}).get("confidence", 0.0)
-                        }
-                        
-                        # Додаємо інформацію про сесію якщо є
-                        if "session_strategy" in result:
-                            response_data["session_info"] = {
-                                "strategy": result["session_strategy"].get("strategy"),
-                                "session_name": result["session_strategy"].get("session_name")
-                            }
-                        
-                        # Додаємо інформацію про безпеку якщо є
-                        if "security_analysis" in result:
-                            response_data["security"] = {
-                                "risk_level": result["security_analysis"].get("risk_level"),
-                                "validated": True
-                            }
-                        
-                        logger.info(f"✅ Atlas Core: Успішно оброблено ({result.get('response_type')})")
-                        self.send_json_response(response_data)
-                        
-                    else:
-                        # Помилка в Atlas Core (бізнес-рівень): повертаємо 200 зі структурованим описом, щоб клієнт не падав
-                        error_message = result.get("error", "Невідома помилка Atlas Core")
+                return self.send_json_response({"error": "Message is required"}, 400)
 
-                        base_error_payload = {
-                            "success": False,
-                            "atlas_core": True,
-                            "error": error_message,
-                            "response_type": result.get("response_type", "error"),
-                        }
-                        # Додаємо діагностику, якщо є
-                        if "diagnostic" in result:
-                            base_error_payload["diagnostic"] = result["diagnostic"]
-                        if "security_analysis" in result:
-                            base_error_payload["security_analysis"] = result["security_analysis"]
-                        if "session_strategy" in result:
-                            base_error_payload["session_info"] = {
-                                "strategy": result["session_strategy"].get("strategy"),
-                                "session_name": result["session_strategy"].get("session_name")
-                            }
+            session_type = util_determine_session_type(user_message, data.get("session_type"))
+            session_name = data.get("session_name") or util_get_session_name(user_message, session_type)
 
-                        if result.get("response_type") == "security_block":
-                            base_error_payload["blocked"] = True
-                            base_error_payload["response"] = "🛡️ Команда заблокована системою безпеки Гріша"
-                            logger.warning(f"🛡️ Гріша: Заблокував команду - {error_message}")
-                        else:
-                            base_error_payload["fallback_available"] = True
-                            base_error_payload["response"] = f"Помилка Atlas Core: {error_message}"
-                            logger.error(f"❌ Atlas Core: {error_message}")
-
-                        # 200: клієнт обробляє як валідну відповідь з полем success=false
-                        self.send_json_response(base_error_payload, 200)
-                        
-                except Exception as atlas_error:
-                    logger.error(f"💥 Atlas Core Exception: {atlas_error}")
-                    # Fallback до legacy режиму
-                    self.handle_chat_legacy(user_message, data, user_context, str(atlas_error))
-            
-            else:
-                # === СТАРИЙ ШЛЯХ: Legacy Goose ===
-                logger.info("🔄 Використовую legacy Goose інтеграцію")
-                self.handle_chat_legacy(user_message, data, user_context)
-                
+            try:
+                reply_result = self.goose_client.send_reply(session_name, user_message)
+                if reply_result.get("success"):
+                    answer = reply_result.get("response", "Відповідь отримана")
+                    self.send_json_response({
+                        "response": answer,
+                        "session_name": session_name,
+                        "session_type": session_type,
+                        "atlas_core": False,
+                        "legacy_mode": True,
+                        "api_mode": True
+                    })
+                else:
+                    error_msg = reply_result.get("error", "Goose API не повернув відповідь")
+                    self.send_json_response({"error": error_msg, "atlas_core": False}, 500)
+            except Exception as api_error:
+                # Fallback до CLI
+                self._handle_chat_cli_fallback(user_message, data, session_type, session_name)
         except Exception as e:
             logger.error(f"Fatal error in handle_chat: {e}")
-            self.send_json_response({
-                "response": f"Критична помилка сервера: {str(e)}",
-                "error": str(e),
-                "atlas_core": False
-            }, 500)
+            self.send_json_response({"error": str(e)}, 500)
 
     def handle_chat_stream(self):
         """Delegated streaming chat endpoint."""
@@ -498,46 +472,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
             logger.debug(f"Atlas Core request failed: {e}")
         return None
 
-    def send_tts_request(self, text):
-        """TTS запит безпосередньо до MCP серверу"""
-        try:
-            response = requests.post(
-                "http://localhost:3000/tts",
-                json={"text": text, "language": "uk"},
-                timeout=10
-            )
-            return response.status_code == 200
-        except Exception as e:
-            logger.debug(f"TTS request failed: {e}")
-        return False
-
-    def send_tts_to_atlas(self, text):
-        """Відправка TTS запиту до Atlas Core"""
-        try:
-            if self.live_streamer:
-                self.live_streamer._add_log(f"[TTS] Speaking: {text[:20]}...")
-            
-            # Atlas Core має /tts endpoint
-            response = requests.post(
-                f"{self.atlas_core_url}/tts",
-                json={"text": text, "rate": 200},
-                timeout=10
-            )
-            
-            if response.status_code == 200:
-                if self.live_streamer:
-                    self.live_streamer._add_log("[TTS] Success", "info")
-                return True
-            else:
-                if self.live_streamer:
-                    self.live_streamer._add_log(f"[TTS] Error {response.status_code}", "warning")
-                return False
-                
-        except Exception as e:
-            if self.live_streamer:
-                self.live_streamer._add_log(f"[TTS] Failed: {str(e)[:30]}", "error")
-            logger.debug(f"TTS to Atlas failed: {e}")
-        return False
+    # Старі TTS методи видалено; використовуйте services/handlers/tts.py
 
     def check_service(self, url):
         """Перевірка доступності сервісу"""
@@ -559,10 +494,7 @@ class AtlasMinimalHandler(SimpleHTTPRequestHandler):
 def main():
     """Запуск сервера (спрощена версія)"""
     # Даём возможность задать порт через ENV и избегаем конфликта, если порт занят
-    try:
-        port = int(os.getenv("ATLAS_PORT", "8080"))
-    except Exception:
-        port = 8080
+    port = cfg.server_port(8080)
     server_address = ('', port)
     
     # Зміна робочої директорії

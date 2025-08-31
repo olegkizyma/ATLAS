@@ -5,6 +5,7 @@ import time
 from datetime import datetime
 import requests
 import os
+from services import config as cfg
 
 class LiveLogStreamer:
     """Клас для стрімінгу живих логів системи (виділений у сервіс)."""
@@ -12,7 +13,11 @@ class LiveLogStreamer:
     def __init__(self):
         self.log_queue = queue.Queue()
         self.is_running = False
-        self.atlas_core_url = os.getenv("ATLAS_CORE_URL", "http://localhost:3000")
+        # Використовуємо централізований конфіг
+        try:
+            self.atlas_core_url = cfg.atlas_core_url()
+        except Exception:
+            self.atlas_core_url = os.getenv("ATLAS_CORE_URL", "http://localhost:3000")
         self.system_status = {
             "processes": {},
             "services": {},
