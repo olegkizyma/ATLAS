@@ -11,8 +11,8 @@ class GooseClient:
 
     def __init__(self, base_url: str | None = None, secret_key: str | None = None):
         # Порядок пріоритетів: аргумент -> config -> env -> авто-вибір
-        env_url = os.getenv("GOOSE_API_URL")
-        self.base_url = base_url or cfg.goose_base_url(env_url) or self._auto_pick_goose_url()
+        env_url = cfg.goose_base_url()
+        self.base_url = base_url or env_url or self._auto_pick_goose_url()
         self.secret_key = secret_key or cfg.goose_secret_key("test")
 
     def _auto_pick_goose_url(self) -> str:

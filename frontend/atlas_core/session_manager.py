@@ -16,6 +16,7 @@ import requests
 from typing import Dict, List, Optional, Any
 from datetime import datetime
 from pathlib import Path
+from . import config as acfg
 
 # Налаштування логування
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ class SessionManager:
         self.session_contexts = {}
         
         # Конфігурація HTTP API (goosed: за замовчуванням пробуємо 3000, потім 3001)
-        env_api = os.getenv("GOOSE_API_URL")
+        env_api = acfg.goose_api_url()
         if env_api:
             # Якщо явно задано, перевіряємо доступність; якщо ні — автопідбір (3000 ➜ 3001)
             if self._is_base_url_available(env_api):
@@ -41,7 +42,7 @@ class SessionManager:
                 self.api_url = self._auto_select_api_url()
         else:
             self.api_url = self._auto_select_api_url()
-        self.secret_key = os.getenv("GOOSE_SECRET_KEY", "test")
+        self.secret_key = acfg.goose_secret_key("test")
         
         # 🆕 ІНТЕЛЕКТУАЛЬНЕ УПРАВЛІННЯ РЕЖИМАМИ
         self.preferred_mode = "HTTP_API"  # завжди HTTP API за замовчуванням
@@ -455,7 +456,7 @@ class SessionManager:
                 "Cache-Control": "no-cache",
                 "X-Secret-Key": self.secret_key,
             }
-            working_dir = os.getenv("GOOSE_WORKDIR") or os.getcwd()
+            working_dir = acfg.goose_workdir() or os.getcwd()
             payload = {
                 "messages": [
                     {

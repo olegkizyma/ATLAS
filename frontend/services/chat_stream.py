@@ -26,7 +26,7 @@ class ChatStreamer:
                 return False
         except Exception:
             pass
-        return os.getenv("ATLAS_PARAPHRASE", "1") not in ("0", "false", "False")
+        return cfg.paraphrase_enabled()
 
     def _paraphrase(self, user_message: str) -> str:
         return build_directive(user_message)

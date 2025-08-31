@@ -39,3 +39,33 @@ def sse_heartbeat_seconds(default: int = 30) -> int:
         return int(os.getenv("ATLAS_SSE_HEARTBEAT", str(default)))
     except Exception:
         return default
+
+
+# --- TTS config ---
+def atlas_core_url(default: str = "http://localhost:3000") -> str:
+    return os.getenv("ATLAS_CORE_URL", default)
+
+
+def ukrainian_tts_url(default: str = "http://localhost:3000/tts") -> str:
+    # Локальний сервер укр-TTS; дозволяемо переопределять
+    return os.getenv("UKRAINIAN_TTS_URL", default)
+
+
+def tts_provider_for(agent: str) -> str:
+    # Пер-агентні провайдери. Допустимі значения: gemini, google, local
+    env_key = f"TTS_PROVIDER_{(agent or '').upper()}"
+    return os.getenv(env_key, os.getenv("TTS_PROVIDER_DEFAULT", "local"))
+
+
+def tts_voice_for(agent: str) -> str:
+    env_key = f"TTS_VOICE_{(agent or '').upper()}"
+    return os.getenv(env_key, os.getenv("TTS_VOICE_DEFAULT", "default"))
+
+def paraphrase_enabled() -> bool:
+    return os.getenv("ATLAS_PARAPHRASE", "1") not in ("0", "false", "False")
+
+def server_port(default: int = 8080) -> int:
+    try:
+        return int(os.getenv("ATLAS_PORT", str(default)))
+    except Exception:
+        return default

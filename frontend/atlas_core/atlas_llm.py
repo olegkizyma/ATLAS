@@ -13,6 +13,7 @@ import re
 import requests
 from typing import Dict, List, Tuple, Optional
 from datetime import datetime
+from . import config as acfg
 
 
 class AtlasLLM:
@@ -72,13 +73,12 @@ class AtlasLLM:
 
     def _analyze_intent_with_gemini(self, message: str, previous_context: Dict = None, recent_messages: List = None) -> Optional[Dict]:
         """Використовує Gemini API для аналізу наміру користувача з урахуванням історії розмови"""
-        import os
         import requests
         import json
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             return None
@@ -722,12 +722,11 @@ class AtlasLLM:
 
     def _reformulate_with_gemini(self, message: str, intent_analysis: Dict) -> Optional[str]:
         """Використовує Gemini API для переформулювання завдання"""
-        import os
         import requests
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             return None
@@ -895,12 +894,11 @@ class AtlasLLM:
 
     def _call_gemini_api(self, message: str, context: Dict = None) -> Optional[str]:
         """Викликає Gemini API для природної генерації відповіді"""
-        import os
         import requests
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             return None
@@ -986,7 +984,7 @@ class AtlasLLM:
         """Генерує відповідь на чат повідомлення користувача"""
         
         # Спробуємо використати Gemini API якщо доступний
-        gemini_key = os.getenv('GEMINI_API_KEY')
+        gemini_key = acfg.gemini_api_key()
         if gemini_key:
             try:
                 return self._generate_gemini_response(user_message, user_context, gemini_key)
@@ -1160,12 +1158,11 @@ class AtlasLLM:
 
     def _analyze_clarification_with_gemini(self, message: str, intent_analysis: Dict, previous_context: Dict) -> Optional[Dict]:
         """Використовує Gemini для розумного аналізу уточнень"""
-        import os
         import requests
         
-        api_key = os.getenv('GEMINI_API_KEY')
-        model = os.getenv('GEMINI_MODEL', 'gemini-2.0-flash')
-        base_url = os.getenv('GEMINI_BASE_URL', 'https://generativelanguage.googleapis.com/v1beta')
+        api_key = acfg.gemini_api_key()
+        model = acfg.gemini_model('gemini-2.0-flash')
+        base_url = acfg.gemini_base_url('https://generativelanguage.googleapis.com/v1beta')
         
         if not api_key:
             return None
@@ -1342,6 +1339,6 @@ class AtlasLLM:
             "status": "active",
             "conversations_handled": len(self.conversation_history),
             "current_context": self.current_context.copy(),
-            "gemini_api_available": bool(os.getenv('GEMINI_API_KEY')),
+            "gemini_api_available": bool(acfg.gemini_api_key()),
             "last_activity": datetime.now().isoformat()
         }

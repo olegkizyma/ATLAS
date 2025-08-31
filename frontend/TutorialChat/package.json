@@ -1,0 +1,16 @@
+{
+  "name": "tutorialchat",
+  "version": "1.0.0",
+  "description": "This directory contains the implementation and management of a chat-based interface for end-users. Below is a detailed overview of the files grouped by categories and a graphical representation of the system's structure and workflow.",
+  "main": "index.js",
+  "directories": {
+    "test": "tests"
+  },
+  "scripts": {
+    "test": "echo \"Error: no test specified\" && exit 1"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "type": "commonjs"
+}
