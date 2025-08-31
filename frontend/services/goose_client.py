@@ -4,13 +4,16 @@ import os
 import requests
 import aiohttp
 import asyncio
+from services import config as cfg
 
 class GooseClient:
     """Клієнт для взаємодії з Goose (web/ws або goosed /reply SSE)."""
 
     def __init__(self, base_url: str | None = None, secret_key: str | None = None):
-        self.base_url = base_url or os.getenv("GOOSE_API_URL") or self._auto_pick_goose_url()
-        self.secret_key = secret_key or os.getenv("GOOSE_SECRET_KEY", "test")
+        # Порядок пріоритетів: аргумент -> config -> env -> авто-вибір
+        env_url = os.getenv("GOOSE_API_URL")
+        self.base_url = base_url or cfg.goose_base_url(env_url) or self._auto_pick_goose_url()
+        self.secret_key = secret_key or cfg.goose_secret_key("test")
 
     def _auto_pick_goose_url(self) -> str:
         for base in ("http://127.0.0.1:3000", "http://127.0.0.1:3001"):
