@@ -248,6 +248,43 @@ function capTail(text, max) {
   if (text.length <= max) return text;
   return text.slice(Math.max(0, text.length - max));
 }
+
+// Estimate token count (approximate: 1 token ≈ 4 characters for most languages)
+function estimateTokens(text) {
+  return Math.ceil((text || '').length / 4);
+}
+
+// Smart context truncation based on estimated token count
+function smartTruncate(system, user, maxTokens = 15000) {
+  const systemTokens = estimateTokens(system);
+  const userTokens = estimateTokens(user);
+  const totalTokens = systemTokens + userTokens;
+  
+  if (totalTokens <= maxTokens) {
+    return { system, user };
+  }
+  
+  console.log(`[SMART_TRUNCATE] Total estimated tokens: ${totalTokens}, target: ${maxTokens}`);
+  
+  // Preserve more system prompt, truncate user content more aggressively
+  const systemTargetTokens = Math.min(systemTokens, Math.floor(maxTokens * 0.3)); // 30% для system
+  const userTargetTokens = maxTokens - systemTargetTokens; // Решта для user
+  
+  const truncatedSystem = systemTokens > systemTargetTokens 
+    ? capHead(system, systemTargetTokens * 4) 
+    : system;
+    
+  const truncatedUser = userTokens > userTargetTokens
+    ? capTail(user, userTargetTokens * 4)
+    : user;
+  
+  console.log(`[SMART_TRUNCATE] Reduced: system ${systemTokens} -> ${estimateTokens(truncatedSystem)}, user ${userTokens} -> ${estimateTokens(truncatedUser)}`);
+  
+  return { 
+    system: truncatedSystem, 
+    user: truncatedUser 
+  };
+}
 function summarizeTaskSpec(ts, { maxChars = ORCH_MAX_TASKSPEC_SUMMARY_CHARS, maxArray = 10, maxStr = 500 } = {}) {
   try {
     const pick = (obj) => {
@@ -299,6 +336,12 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
   let lastErr = null;
   let sys = system;
   let usr = user;
+  
+  // Pre-truncate if context is too large
+  const preCheck = smartTruncate(sys, typeof usr === 'string' ? usr : JSON.stringify(usr), 14000);
+  sys = preCheck.system;
+  usr = preCheck.user;
+  
   while (attempts < maxAttempts) {
     attempts += 1;
     try {
@@ -327,10 +370,21 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
       const msg = e?.response?.data?.error?.message || e?.message || '';
       const tooLong = status === 400 && /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
       if (tooLong) {
-        // shrink user payload and retry
+        console.log(`[CONTEXT_LIMIT] Attempt ${attempts}: Token limit exceeded. Shrinking context...`);
+        
+        // shrink both system and user payload more aggressively
         const userStr = typeof usr === 'string' ? usr : JSON.stringify(usr);
-        const target = Math.max(2000, Math.floor(userStr.length * 0.5));
-        usr = capTail(userStr, Math.min(ORCH_MAX_MISTRAL_USER_CHARS, target));
+        const systemStr = typeof sys === 'string' ? sys : JSON.stringify(sys);
+        
+        // More aggressive shrinking for subsequent attempts
+        const shrinkFactor = Math.max(0.3, 0.8 - (attempts * 0.15)); // Більш агресивне стискання з кожною спробою
+        const userTarget = Math.max(1000, Math.floor(userStr.length * shrinkFactor));
+        const systemTarget = Math.max(1000, Math.floor(systemStr.length * shrinkFactor));
+        
+        usr = capTail(userStr, Math.min(ORCH_MAX_MISTRAL_USER_CHARS, userTarget));
+        sys = capHead(systemStr, Math.min(ORCH_MAX_MISTRAL_SYSTEM_CHARS, systemTarget));
+        
+        console.log(`[CONTEXT_LIMIT] Reduced user: ${userStr.length} -> ${usr.length}, system: ${systemStr.length} -> ${sys.length}`);
         continue;
       }
       if (status === 429 || (status >= 500 && status < 600)) {
