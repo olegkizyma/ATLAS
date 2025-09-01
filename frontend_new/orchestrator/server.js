@@ -197,7 +197,7 @@ async function callGrisha(taskSpec, sessionId) {
         { role: 'system', content: sys },
         { role: 'user', content: `TaskSpec JSON:\n${JSON.stringify(taskSpec)}` }
       ],
-      temperature: 0.1
+  temperature: 0
     };
     const { data } = await axios.post(url, payload, {
       headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` },
@@ -224,7 +224,7 @@ async function grishaGenerateVerificationPlan(taskSpec, execText) {
     const { data } = await axios.post('https://api.mistral.ai/v1/chat/completions', {
       model: MISTRAL_MODEL,
       messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ],
-      temperature: 0.1
+  temperature: 0
     }, { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout: 25000 });
     const text = data?.choices?.[0]?.message?.content || '';
     try { return JSON.parse(text); } catch { return { verification_prompt: text || 'Верифікуй повноту виконання і надай докази.' }; }
