@@ -23,6 +23,8 @@ wheels/
 .venv
 env/
 venv/
+*.log
+logs/
 ENV/
 env.bak/
 venv.bak/
