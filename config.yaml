@@ -381,3 +381,19 @@ required:
 - token_list
 version: '202301'
 distributed: false
+
+# Context Management Settings
+context:
+  strategy: "summarize"
+  max_tokens: 45000
+  auto_truncate: true
+  compression_ratio: 0.7
+  log_usage: true
+
+# Goose specific limits  
+goose:
+  context_limit: 45000
+  lead_context_limit: 45000
+  worker_context_limit: 35000
+  context_strategy: "summarize"
+  
