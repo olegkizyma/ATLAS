@@ -36,7 +36,8 @@ const ORCH_MAX_MSPS_CHARS = parseInt(process.env.ORCH_MAX_MSPS_CHARS || '4000', 
 const ORCH_MAX_TASKSPEC_SUMMARY_CHARS = parseInt(process.env.ORCH_MAX_TASKSPEC_SUMMARY_CHARS || '12000', 10);
 const ORCH_MAX_EXEC_REPORT_CHARS = parseInt(process.env.ORCH_MAX_EXEC_REPORT_CHARS || '20000', 10);
 const ORCH_MAX_VERIFY_EVIDENCE_CHARS = parseInt(process.env.ORCH_MAX_VERIFY_EVIDENCE_CHARS || '16000', 10);
-const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '60000', 10);
+const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '30000', 10);
+const ORCH_MAX_MISTRAL_SYSTEM_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_SYSTEM_CHARS || '8000', 10);
 
 // Gemini (Atlas)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
@@ -177,7 +178,10 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
   while (attempts < maxAttempts) {
     attempts += 1;
     try {
-      const text = await mistralChat(sys, usr, { temperature });
+  const sysSafe = capHead(sys, ORCH_MAX_MISTRAL_SYSTEM_CHARS);
+  const usrStr = typeof usr === 'string' ? usr : JSON.stringify(usr);
+  const usrSafe = capTail(usrStr, ORCH_MAX_MISTRAL_USER_CHARS);
+  const text = await mistralChat(sysSafe, usrSafe, { temperature });
       try {
         const parsed = JSON.parse(text);
         if (parsed && typeof parsed === 'object') parsed._attemptsUsed = attempts;
@@ -201,7 +205,7 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
       if (tooLong) {
         // shrink user payload and retry
         const userStr = typeof usr === 'string' ? usr : JSON.stringify(usr);
-        const target = Math.max(2000, Math.floor(userStr.length * 0.6));
+        const target = Math.max(2000, Math.floor(userStr.length * 0.5));
         usr = capTail(userStr, Math.min(ORCH_MAX_MISTRAL_USER_CHARS, target));
         continue;
       }
