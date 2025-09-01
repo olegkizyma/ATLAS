@@ -1,15 +1,1 @@
 Orchestrator running on http://127.0.0.1:5101
-MSP command discovery failed: Command failed: goose msp list --json
-/bin/sh: goose: command not found
-
-orchestrator error Error: Error: Request failed: missing required Copilot-Vision-Request header for vision requests (code: ) (status 400)
-    at WebSocket.<anonymous> (file:///Users/dev/Documents/GitHub/ATLAS/frontend_new/orchestrator/server.js:673:18)
-    at WebSocket.emit (node:events:508:28)
-    at Receiver.receiverOnMessage (/Users/dev/Documents/GitHub/ATLAS/frontend_new/orchestrator/node_modules/ws/lib/websocket.js:1220:20)
-    at Receiver.emit (node:events:508:28)
-    at Receiver.dataMessage (/Users/dev/Documents/GitHub/ATLAS/frontend_new/orchestrator/node_modules/ws/lib/receiver.js:596:14)
-    at Receiver.getData (/Users/dev/Documents/GitHub/ATLAS/frontend_new/orchestrator/node_modules/ws/lib/receiver.js:496:10)
-    at Receiver.startLoop (/Users/dev/Documents/GitHub/ATLAS/frontend_new/orchestrator/node_modules/ws/lib/receiver.js:167:16)
-    at Receiver._write (/Users/dev/Documents/GitHub/ATLAS/frontend_new/orchestrator/node_modules/ws/lib/receiver.js:94:10)
-    at writeOrBuffer (node:internal/streams/writable:570:12)
-    at _write (node:internal/streams/writable:499:10)

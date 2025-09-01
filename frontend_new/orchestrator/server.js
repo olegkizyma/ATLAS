@@ -38,6 +38,7 @@ const ORCH_MAX_EXEC_REPORT_CHARS = parseInt(process.env.ORCH_MAX_EXEC_REPORT_CHA
 const ORCH_MAX_VERIFY_EVIDENCE_CHARS = parseInt(process.env.ORCH_MAX_VERIFY_EVIDENCE_CHARS || '10000', 10);
 const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '28000', 10);
 const ORCH_MAX_MISTRAL_SYSTEM_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_SYSTEM_CHARS || '4000', 10);
+const GOOSE_VISION_HEADER = process.env.GOOSE_VISION_HEADER || 'Copilot-Vision-Request:true';
 
 // Gemini (Atlas)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
@@ -47,6 +48,129 @@ const GEMINI_API_URL = (process.env.GEMINI_API_URL || 'https://generativelanguag
 // Mistral (Grisha)
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-latest';
+
+// Adaptive execution system - cycle-based MSP/tool targeting
+const sessionCycleState = new Map(); // sessionId -> { cycleCount, usedTools, usedMSPs, lastState }
+
+function getExecutionMode(sessionId, currentCycle) {
+  if (currentCycle === 3) {
+    return {
+      mode: "msp_specific",
+      description: "Обмеження до конкретних MSP серверів"
+    };
+  } else if (currentCycle === 6) {
+    return {
+      mode: "tool_specific", 
+      description: "Фокус на конкретних інструментах"
+    };
+  } else {
+    return {
+      mode: "normal",
+      description: "Повний доступ до всіх ресурсів"
+    };
+  }
+}
+
+function updateSessionState(sessionId, cycle, usedTools = [], usedMSPs = []) {
+  if (!sessionCycleState.has(sessionId)) {
+    sessionCycleState.set(sessionId, { 
+      cycleCount: 0, 
+      usedTools: new Set(), 
+      usedMSPs: new Set(),
+      lastState: null
+    });
+  }
+  
+  const state = sessionCycleState.get(sessionId);
+  state.cycleCount = cycle;
+  usedTools.forEach(tool => state.usedTools.add(tool));
+  usedMSPs.forEach(msp => state.usedMSPs.add(msp));
+  state.lastState = { cycle, timestamp: Date.now() };
+  
+  return state;
+}
+
+// Функція для аналізу виводу та відстеження використаних інструментів та MSP
+function analyzeExecutionOutput(output, sessionId) {
+  const usedTools = [];
+  const usedMSPs = [];
+  
+  // Аналізуємо використання інструментів (на основі типових патернів Goose)
+  const toolPatterns = [
+    /use_tool:\s*(\w+)/gi,
+    /tool_call:\s*(\w+)/gi,
+    /executing\s+(\w+)\s+tool/gi,
+    /running\s+(\w+)\s+command/gi,
+    /\*\*(\w+)\*\*:\s+/gi, // **tool_name**: pattern
+    /`(\w+)`\s+tool/gi,
+    /browser_(\w+)/gi,
+    /file_(\w+)/gi,
+    /terminal_(\w+)/gi,
+    /shell_(\w+)/gi
+  ];
+  
+  for (const pattern of toolPatterns) {
+    let match;
+    while ((match = pattern.exec(output)) !== null) {
+      const tool = match[1];
+      if (tool && tool.length > 2 && !usedTools.includes(tool)) {
+        usedTools.push(tool);
+      }
+    }
+  }
+  
+  // Аналізуємо використання MSP (на основі активних з'єднань та запитів)
+  const mspPatterns = [
+    /using\s+msp:\s*(\w+)/gi,
+    /connected\s+to\s+(\w+)/gi,
+    /provider:\s*(\w+)/gi,
+    /model:\s*(\w+)/gi,
+    /endpoint:\s*(\w+)/gi,
+    /msp_(\w+)/gi,
+    /server:\s*(\w+)/gi
+  ];
+  
+  for (const pattern of mspPatterns) {
+    let match;
+    while ((match = pattern.exec(output)) !== null) {
+      const msp = match[1];
+      if (msp && msp.length > 2 && !usedMSPs.includes(msp)) {
+        usedMSPs.push(msp);
+      }
+    }
+  }
+  
+  // Оновлюємо стан сесії, якщо знайдено використані ресурси
+  if (usedTools.length > 0 || usedMSPs.length > 0) {
+    const currentState = sessionCycleState.get(sessionId);
+    if (currentState) {
+      updateSessionState(sessionId, currentState.cycleCount, usedTools, usedMSPs);
+    }
+  }
+  
+  return { usedTools, usedMSPs };
+}
+
+function getRecommendedResources(sessionId, currentCycle) {
+  const state = sessionCycleState.get(sessionId);
+  const mode = getExecutionMode(sessionId, currentCycle);
+  
+  if (mode.mode === "msp_specific" && state) {
+    // 3-й цикл: повертаємо найчастіше використовувані MSP
+    return {
+      msps: Array.from(state.usedMSPs).slice(0, 3), // топ-3 MSP
+      reason: "Базуючись на попередньому використанні"
+    };
+  } else if (mode.mode === "tool_specific" && state) {
+    // 6-й цикл: фокус на інструментах із попереднього стану
+    return {
+      tools: Array.from(state.usedTools).slice(-3), // останні 3 інструменти
+      reason: "Завершення на основі останнього стану"
+    };
+  }
+  
+  return { reason: "Повний доступ до ресурсів" };
+}
 
 // MSP config (optional)
 const MSP_CONFIG_PATH = process.env.MSP_CONFIG_PATH || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../config/msp.json');
@@ -129,7 +253,7 @@ function summarizeTaskSpec(ts, { maxChars = ORCH_MAX_TASKSPEC_SUMMARY_CHARS, max
     const pick = (obj) => {
       const out = {};
       if (!obj || typeof obj !== 'object') return out;
-      const keys = ['title','summary','inputs','steps','constraints','success_criteria','tool_hints'];
+      const keys = ['title','summary','inputs','steps','constraints','success_criteria','tool_hints','_msps'];
       for (const k of keys) {
         const v = obj[k];
         if (v == null) continue;
@@ -325,13 +449,34 @@ app.post('/chat/stream', async (req, res) => {
 
   // 3) Tetiana executes
   sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Виконую задачу…' });
-  let execText = await streamTetianaExecute(atlasOut.task_spec, sessionId, res);
+  
+  // Ініціалізуємо стан сесії для адаптивного виконання
+  updateSessionState(sessionId, 1);
+  const initialMode = getExecutionMode(sessionId, 1);
+  const initialRecommended = getRecommendedResources(sessionId, 1);
+  
+  let execText = await streamTetianaExecute(atlasOut.task_spec, sessionId, res, {
+    cycle: 1, 
+    mode: initialMode.mode
+  }, initialRecommended);
 
   // 4) Post-execution verification loop (requires Grisha API key)
   if (MISTRAL_API_KEY) {
     for (let cycle = 1; cycle <= ORCH_MAX_REFINEMENT_CYCLES; cycle++) {
-      sseSend(res, { type: 'info', agent: 'Grisha', content: `Запускаю перевірку виконання (цикл ${cycle}/${ORCH_MAX_REFINEMENT_CYCLES})…` });
-      const plan = await grishaGenerateVerificationPlan(atlasOut.task_spec, execText);
+      // Адаптивна логіка на основі циклу
+      const mode = getExecutionMode(sessionId, cycle);
+      const recommended = getRecommendedResources(sessionId, cycle);
+      
+      sseSend(res, { type: 'info', agent: 'Grisha', content: `Запускаю перевірку виконання (цикл ${cycle}/${ORCH_MAX_REFINEMENT_CYCLES}) - ${mode.description}` });
+      
+      // Передаємо інформацію про режим виконання до планувальника верифікації
+      const plan = await grishaGenerateVerificationPlan(
+        atlasOut.task_spec, 
+        execText, 
+        msps, 
+        { cycle, mode: mode.mode, recommended }
+      );
+      
       const verifySession = `${sessionId || `sess-${Date.now()}`}-verify-${cycle}`;
       sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Перевіряю результати…' });
       if (plan?.inter_agent_note_ua) {
@@ -340,7 +485,26 @@ app.post('/chat/stream', async (req, res) => {
       if (typeof plan._attemptsUsed === 'number') {
   sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (verification plan): ${plan._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
       }
-      const verifyText = await streamTetianaMessage(plan.verification_prompt || plan.plan_text || plan.prompt || 'Верифікуй повноту виконання і надай докази.', verifySession, res);
+      let verifyPrompt = plan.verification_prompt;
+      
+      // Додаємо інформацію про режим виконання
+      if (mode.mode !== "normal") {
+        verifyPrompt += `\n\nРежим виконання: ${mode.description}`;
+        if (recommended.reason) {
+          verifyPrompt += `\nОснова: ${recommended.reason}`;
+        }
+      }
+      
+      // Якщо Гріша пропонує конкретні інструменти, додаємо їх до промпту
+      if (Array.isArray(plan.suggested_tools) && plan.suggested_tools.length > 0) {
+        verifyPrompt += `\n\nРекомендовані інструменти: ${plan.suggested_tools.join(', ')}`;
+      }
+      
+      const verifyText = await streamTetianaMessage(
+        verifyPrompt,
+        verifySession,
+        res
+      );
 
       const judgement = await grishaAssessCompletion(atlasOut.task_spec, execText, verifyText);
   if (judgement.isComplete) {
@@ -367,8 +531,16 @@ app.post('/chat/stream', async (req, res) => {
       const atlasRefine = await callAtlas(refineMsg, sessionId);
       sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasRefine.user_reply || 'Доопрацьовую задачу.' });
       sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Продовжую доопрацювання…' });
-      const extraText = await streamTetianaExecute(atlasRefine.task_spec, sessionId, res);
+      
+      // Отримуємо адаптивний контекст для циклу доопрацювання
+      const adaptiveContext = getExecutionMode(sessionId, cycle);
+      const recommendedResources = await getRecommendedResources(sessionId, adaptiveContext.mode);
+      
+      const extraText = await streamTetianaExecute(atlasRefine.task_spec, sessionId, res, adaptiveContext, recommendedResources);
       execText = `${execText}\n\n[REFINEMENT ${cycle}]\n${extraText}`;
+      
+      // Оновлюємо стан сесії після кожного циклу доопрацювання
+      updateSessionState(sessionId, cycle + 1); // cycle тут починається з 1
     }
     // Після циклів все ще не завершено
     sseSend(res, { type: 'agent_message', agent: 'Grisha', content: 'Після усіх спроб: завдання не довиконане. Потрібні додаткові дії.' });
@@ -478,9 +650,19 @@ async function callGrisha(taskSpec, sessionId) {
   if (!MISTRAL_API_KEY) {
     throw new Error('Grisha (Mistral) API key not configured');
   }
+  
+  // Додаємо MSP контекст, якщо є
+  const msps = taskSpec._msps || [];
+  let mspsContext = '';
+  if (msps.length) {
+    const s = JSON.stringify(msps);
+    mspsContext = `\n\nДоступні MSP сервери: ${capHead(s, ORCH_MAX_MSPS_CHARS)}`;
+  }
+  
   try {
-  const tsSummary = summarizeTaskSpec(taskSpec);
-  const out = await mistralJsonOnly(sys, `TaskSpecSummary JSON:\n${JSON.stringify(tsSummary)}`, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
+    const tsSummary = summarizeTaskSpec(taskSpec);
+    const userMessage = `TaskSpecSummary JSON:\n${JSON.stringify(tsSummary)}${mspsContext}`;
+    const out = await mistralJsonOnly(sys, userMessage, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
   if (typeof out.isSafe !== 'boolean') out.isSafe = true;
   if (!Array.isArray(out.flagged)) out.flagged = [];
   return out;
@@ -491,18 +673,45 @@ async function callGrisha(taskSpec, sessionId) {
 }
 
 // Grisha: сформувати план перевірки виконання
-async function grishaGenerateVerificationPlan(taskSpec, execText) {
+async function grishaGenerateVerificationPlan(taskSpec, execText, msps = [], adaptiveContext = {}) {
   if (!MISTRAL_API_KEY) throw new Error('Grisha verification requires Mistral API key');
   const sys = prompts.grisha.verification_planner_system || `You are Grisha, a strict verification planner. Return JSON with keys: verification_prompt (string) describing a self-contained check the executor (Tetiana) can run to confirm completeness; hints (array of strings).`;
   const tsSummary = summarizeTaskSpec(taskSpec);
   const execTail = capTail(execText || '', ORCH_MAX_EXEC_REPORT_CHARS);
-  const user = `TaskSpecSummary: ${JSON.stringify(tsSummary)}\n\nExecutor report (tail):\n${execTail}`;
+  
+  // Додаємо MSP контекст для verification planning
+  let mspsContext = '';
+  if (msps.length) {
+    let mspsToUse = msps;
+    
+    // Адаптивна логіка: на 3-му циклі обмежуємо MSP
+    if (adaptiveContext.mode === "msp_specific" && adaptiveContext.recommended?.msps?.length) {
+      mspsToUse = msps.filter(msp => 
+        adaptiveContext.recommended.msps.some(rec => 
+          msp.name && msp.name.toLowerCase().includes(rec.toLowerCase())
+        )
+      );
+      if (mspsToUse.length === 0) mspsToUse = msps.slice(0, 3); // fallback
+    }
+    
+    const s = JSON.stringify(mspsToUse);
+    mspsContext = `\n\nДоступні MSP сервери для верифікації: ${capHead(s, ORCH_MAX_MSPS_CHARS)}`;
+    
+    if (adaptiveContext.mode === "msp_specific") {
+      mspsContext += `\n\n[ЦИКЛ ${adaptiveContext.cycle}] Обмеження до конкретних MSP серверів.`;
+    } else if (adaptiveContext.mode === "tool_specific") {
+      mspsContext += `\n\n[ЦИКЛ ${adaptiveContext.cycle}] Фокус на конкретних інструментах: ${adaptiveContext.recommended?.tools?.join(', ') || 'автовибір'}.`;
+    }
+  }
+  
+  const user = `TaskSpecSummary: ${JSON.stringify(tsSummary)}\n\nExecutor report (tail):\n${execTail}${mspsContext}`;
   try {
     const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
     if (typeof out.verification_prompt !== 'string' || !out.verification_prompt.trim()) {
       out.verification_prompt = 'Верифікуй повноту виконання і надай докази з мапінгом критеріїв -> артефакти.';
     }
     if (!Array.isArray(out.hints)) out.hints = [];
+    if (!Array.isArray(out.suggested_tools)) out.suggested_tools = [];
     return out;
   } catch (e) {
     throw new Error('Grisha verification plan failed: ' + (e.message || 'unknown error'));
@@ -530,7 +739,7 @@ async function grishaAssessCompletion(taskSpec, execText, verifyText) {
 }
 
 // Tetiana: универсальный стрим произвольного повідомлення
-async function streamTetianaMessage(messageText, sessionId, res) {
+async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
   const secret = process.env.GOOSE_SECRET_KEY;
 
   // Автовизначення режиму Goose: web (ws) чи goosed (/reply)
@@ -605,15 +814,44 @@ async function streamTetianaMessage(messageText, sessionId, res) {
           }
         }
       });
-      response.data.on('end', () => resolve(collected.trim()));
+      response.data.on('end', () => {
+        // Аналізуємо зібраний вивід для відстеження використаних ресурсів
+        analyzeExecutionOutput(collected, sessionId);
+        resolve(collected.trim());
+      });
       response.data.on('error', (err) => reject(err));
     });
   }
 }
 
 // Tetiana: виконання по TaskSpec
-async function streamTetianaExecute(taskSpec, sessionId, res) {
-  const messageText = `Виконай наступну задачу (TaskSpec JSON нижче) максимально надійно. Після КОЖНОГО кроку виконай коротку перевірку успіху і, якщо щось не спрацювало, динамічно переформулюй наступні дії (в межах task_spec та його contingencies), доки не отримаєш доказ виконання або вичерпаєш варіанти. Наприкінці обов'язково надай мапу criterion->evidence.\nTaskSpec: ${JSON.stringify(taskSpec)}`;
+async function streamTetianaExecute(taskSpec, sessionId, res, adaptiveContext = {}, recommendedResources = {}) {
+  // Гріша перевіряє активні MSP перед виконанням
+  let liveMsps = await getAvailableMsps();
+  
+  // Адаптивна логіка: обмеження MSP на основі циклу
+  if (adaptiveContext.mode === "msp_specific" && recommendedResources?.msps?.length) {
+    liveMsps = liveMsps.filter(msp => 
+      recommendedResources.msps.some(rec => 
+        msp.name && msp.name.toLowerCase().includes(rec.toLowerCase())
+      )
+    );
+    if (liveMsps.length === 0) liveMsps = await getAvailableMsps(); // fallback до всіх MSP
+  }
+  
+  let mspsContext = '';
+  if (liveMsps.length) {
+    const s = JSON.stringify(liveMsps);
+    mspsContext = `\n\nАктивні MSP сервери (перевірено Гришею): ${capHead(s, ORCH_MAX_MSPS_CHARS)}`;
+    
+    if (adaptiveContext.mode === "msp_specific") {
+      mspsContext += `\n\n[АДАПТИВНИЙ РЕЖИМ] Цикл ${adaptiveContext.cycle || 'поточний'}: Обмеження до конкретних MSP серверів: ${recommendedResources?.msps?.join(', ') || 'всі доступні'}.`;
+    } else if (adaptiveContext.mode === "tool_specific") {
+      mspsContext += `\n\n[АДАПТИВНИЙ РЕЖИМ] Цикл ${adaptiveContext.cycle || 'поточний'}: Сфокусуйся на інструментах: ${recommendedResources?.tools?.join(', ') || 'найкращі доступні'}.`;
+    }
+  }
+  
+  const messageText = `Виконай наступну задачу (TaskSpec JSON нижче) максимально надійно. Після КОЖНОГО кроку виконай коротку перевірку успіху і, якщо щось не спрацювало, динамічно переформулюй наступні дії (в межах task_spec та його contingencies), доки не отримаєш доказ виконання або вичерпаєш варіанти. Наприкінці обов'язково надай мапу criterion->evidence.\nTaskSpec: ${JSON.stringify(taskSpec)}${mspsContext}`;
   return streamTetianaMessage(messageText, sessionId, res);
 }
 
@@ -633,8 +871,8 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
     const wsUrl = baseUrl.replace(/^http/i, 'ws') + '/ws';
     const ws = new WebSocket(wsUrl);
     let settled = false;
-  const answeredQuestions = new Set();
-  let collected = '';
+    const answeredQuestions = new Set();
+    let collected = '';
 
     const finish = (err) => {
       if (settled) return;
@@ -678,7 +916,12 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
     });
 
     ws.on('error', (err) => finish(err));
-  ws.on('close', () => { finish(); resolve(collected.trim()); });
+  ws.on('close', () => { 
+    // Аналізуємо зібраний вивід для відстеження використаних ресурсів
+    analyzeExecutionOutput(collected, sessionId);
+    finish(); 
+    resolve(collected.trim()); 
+  });
   });
 }
 
@@ -730,11 +973,11 @@ async function autoAnswerFromAtlas(requestObjOrContent, sessionId, res, gooseBas
         session_id: sessionId || `sess-${Date.now()}`,
         session_working_dir: process.cwd()
       };
-      // Ждем ответ потока, но не проксируем его напрямую (ответ пойдет в основном стриме)
+      // Ждем ответ потока, но не проксируем его напрямую (ответ пойдет в основному стриме)
       axios.post(url, payload, { headers, responseType: 'stream', timeout: 120000 }).catch(() => {});
     }
 
-    // Показать в UI, что Атлас відповів на уточнення (для прозрачности)
+    // Показати в UI, що Атлас відповів на уточнення (для прозрачности)
     sseSend(res, { type: 'agent_message', agent: 'Atlas', content: reply });
   } catch (_) {
     // тихо игнорируем сбои авто-відповіді
