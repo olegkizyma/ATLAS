@@ -22,7 +22,7 @@ const prompts = JSON.parse(fs.readFileSync(PROMPTS_PATH, 'utf8'));
 const ORCH_PORT = parseInt(process.env.ORCH_PORT || '5101', 10);
 const GOOSE_BASE_URL = process.env.GOOSE_BASE_URL || 'http://127.0.0.1:3000';
 const ORCH_MAX_REFINEMENT_CYCLES = parseInt(process.env.ORCH_MAX_REFINEMENT_CYCLES || '3', 10);
-const ORCH_GRISHA_MAX_ATTEMPTS = parseInt(process.env.ORCH_GRISHA_MAX_ATTEMPTS || '10', 10);
+const ORCH_GRISHA_MAX_ATTEMPTS = parseInt(process.env.ORCH_GRISHA_MAX_ATTEMPTS || '20', 10);
 const ORCH_ATLAS_MAX_ATTEMPTS = parseInt(process.env.ORCH_ATLAS_MAX_ATTEMPTS || '6', 10);
 
 // Backoff & timeouts (env-tunable)

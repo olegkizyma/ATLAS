@@ -4,22 +4,13 @@
 🌐 Starting server on http://127.0.0.1:5001
 Press Ctrl+C to stop
 
-2025-09-01 06:37:57,859 [atlas.server] WARNING: Atlas Core not found, running in test mode
-2025-09-01 06:37:57,884 [atlas.server] INFO: Atlas API initialized
-2025-09-01 06:37:57,885 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
-2025-09-01 06:37:57,885 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
-2025-09-01 06:37:57,885 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 06:53:54,398 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 06:53:54,419 [atlas.server] INFO: Atlas API initialized
+2025-09-01 06:53:54,419 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 06:53:54,419 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 06:53:54,419 [atlas.server] INFO: Atlas Core ready: False
  * Serving Flask app 'atlas_server'
  * Debug mode: off
-2025-09-01 06:37:57,893 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+2025-09-01 06:53:54,425 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
  * Running on http://127.0.0.1:5001
-2025-09-01 06:37:57,893 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
-2025-09-01 06:38:05,049 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:05] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:08,054 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:08] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:11,054 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:11] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:14,058 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:14] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:17,057 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:17] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:20,056 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:20] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:23,058 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:23] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:26,060 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:26] "GET /logs?limit=100 HTTP/1.1" 200 -
-2025-09-01 06:38:29,286 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 06:38:29] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 06:53:54,425 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
