@@ -31,7 +31,7 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
 Також доступні:
 
 - ORCH_ATLAS_MAX_ATTEMPTS (default 6)
-- ORCH_GRISHA_MAX_ATTEMPTS (default 10)
+- ORCH_GRISHA_MAX_ATTEMPTS (default 20)
 
 ## Run
 1) Start Goose:
