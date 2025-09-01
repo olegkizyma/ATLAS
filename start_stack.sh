@@ -1,7 +1,16 @@
 #!/bin/bash
 
 # ATLAS Intelligent Stack Startup Script
-# Запуск повного стеку ATL# 1. Запуск Python Environment Setup
+# Запуск повного стеку ATLAS
+
+# macOS users: Use ./start_stack_macos.sh for better compatibility
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "🍎 macOS detected. For optimal experience, use:"
+    echo "   ./start_stack_macos.sh"
+    echo ""
+    echo "Continuing with full stack (may require Rust/Cargo)..."
+    sleep 2
+fi# 1. Запуск Python Environment Setup
 echo "🐍 Setting up Python environment..."
 cd frontend_new
 if [ -f "setup_env.sh" ]; then
@@ -32,12 +41,23 @@ echo "🚀 Starting ATLAS Intelligent Multi-Agent System..."
 # Створення директорії для логів
 mkdir -p logs
 
-# Функція для перевірки доступності порту
+# Функція для перевірки доступності порту (macOS compatible)
 check_port() {
     local port=$1
-    if lsof -ti:$port > /dev/null 2>&1; then
-        echo "⚠️  Port $port is already in use"
-        return 1
+    if command -v lsof >/dev/null 2>&1; then
+        # Use lsof if available (macOS and Linux)
+        if lsof -ti:$port > /dev/null 2>&1; then
+            echo "⚠️  Port $port is already in use"
+            return 1
+        fi
+    elif command -v netstat >/dev/null 2>&1; then
+        # Fallback to netstat (Linux)
+        if netstat -tuln 2>/dev/null | grep -q ":$port "; then
+            echo "⚠️  Port $port is already in use"
+            return 1
+        fi
+    else
+        echo "⚠️  Cannot check port $port availability (no lsof or netstat)"
     fi
     return 0
 }
@@ -58,26 +78,37 @@ start_service() {
 
 # Перевірка портів
 echo "🔍 Checking ports availability..."
-check_port 3000 || { echo "❌ Goose web interface port 3000 busy"; exit 1; }
+if lsof -ti:3000 > /dev/null 2>&1; then
+    echo "⚠️  Goose web interface port 3000 busy (Goose will be skipped)"
+else
+    echo "✅ Port 3000 available for Goose"
+fi
 check_port 5001 || { echo "❌ Frontend port 5001 busy"; exit 1; }
 check_port 5101 || { echo "❌ Orchestrator port 5101 busy"; exit 1; }
 check_port 5102 || { echo "⚠️  Recovery bridge port 5102 busy (will attempt restart)"; }
 
 echo "✅ Port check completed"
 
-# 2. Запуск Goose Web Interface (Port 3000)
+# 2. Запуск Goose Web Interface (Port 3000) - Optional
 echo "🦆 Starting Goose Web Interface..."
 cd goose
 if [ -f "target/release/goose" ]; then
     XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
     echo $! > ../logs/goose.pid
     echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+elif command -v cargo >/dev/null 2>&1; then
+    echo "📦 Goose binary not found. Building with Cargo (this may take several minutes)..."
+    if cargo build --release --quiet; then
+        XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
+        echo $! > ../logs/goose.pid
+        echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+    else
+        echo "⚠️  Goose build failed. Continuing without Goose web interface."
+        echo "   Frontend will still work on http://localhost:5001"
+    fi
 else
-    echo "❌ Goose binary not found. Running cargo build..."
-    cargo build --release
-    XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
-    echo $! > ../logs/goose.pid
-    echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+    echo "⚠️  Cargo not found. Skipping Goose web interface."
+    echo "   Frontend will still work on http://localhost:5001"
 fi
 cd ..
 
@@ -143,9 +174,15 @@ check_service() {
     fi
 }
 
-check_service "Goose Web" "http://localhost:3000" "logs/goose.pid"
 check_service "Python Frontend" "http://localhost:5001" "logs/frontend.pid"
 check_service "Node.js Orchestrator" "http://localhost:5101/health" "logs/orchestrator.pid"
+
+# Check Goose only if it was started
+if [ -f "logs/goose.pid" ] && ps -p $(cat logs/goose.pid) > /dev/null 2>&1; then
+    check_service "Goose Web" "http://localhost:3000" "logs/goose.pid"
+else
+    echo "⚠️  Goose Web Interface not running (optional)"
+fi
 
 # Перевірка Recovery Bridge (WebSocket не можна перевірити через curl)
 echo "🔧 Checking Recovery Bridge..."
@@ -159,13 +196,19 @@ echo ""
 echo "🎉 ATLAS System Startup Complete!"
 echo ""
 echo "📊 Service Dashboard:"
-echo "   🌐 Web Interface:    http://localhost:3000"
+if [ -f "logs/goose.pid" ] && ps -p $(cat logs/goose.pid) > /dev/null 2>&1; then
+    echo "   🌐 Web Interface:    http://localhost:3000"
+else
+    echo "   🌐 Web Interface:    (not available - Goose not running)"
+fi
 echo "   🐍 Python Frontend:  http://localhost:5001"
 echo "   🎭 Orchestrator API: http://localhost:5101"
 echo "   🔧 Recovery Bridge:  ws://localhost:5102"
 echo ""
 echo "📝 Logs:"
-echo "   Goose:        logs/goose.log"
+if [ -f "logs/goose.log" ]; then
+    echo "   Goose:        logs/goose.log"
+fi
 echo "   Frontend:     logs/frontend.log"
 echo "   Orchestrator: logs/orchestrator.log"
 echo ""
