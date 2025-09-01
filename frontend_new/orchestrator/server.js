@@ -31,6 +31,12 @@ const ORCH_BACKOFF_MAX_MS = parseInt(process.env.ORCH_BACKOFF_MAX_MS || '8000', 
 const ORCH_BACKOFF_JITTER_MS = parseInt(process.env.ORCH_BACKOFF_JITTER_MS || '400', 10); // довільний джиттер до 400ms
 const ORCH_ATLAS_TIMEOUT_MS = parseInt(process.env.ORCH_ATLAS_TIMEOUT_MS || '45000', 10);
 const ORCH_GRISHA_TIMEOUT_MS = parseInt(process.env.ORCH_GRISHA_TIMEOUT_MS || '45000', 10);
+// Prompt size guards
+const ORCH_MAX_MSPS_CHARS = parseInt(process.env.ORCH_MAX_MSPS_CHARS || '4000', 10);
+const ORCH_MAX_TASKSPEC_SUMMARY_CHARS = parseInt(process.env.ORCH_MAX_TASKSPEC_SUMMARY_CHARS || '12000', 10);
+const ORCH_MAX_EXEC_REPORT_CHARS = parseInt(process.env.ORCH_MAX_EXEC_REPORT_CHARS || '20000', 10);
+const ORCH_MAX_VERIFY_EVIDENCE_CHARS = parseInt(process.env.ORCH_MAX_VERIFY_EVIDENCE_CHARS || '16000', 10);
+const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '60000', 10);
 
 // Gemini (Atlas)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
@@ -106,6 +112,56 @@ function extractJsonBlock(text) {
   return null;
 }
 
+// --- Prompt size helpers ---
+function capHead(text, max) {
+  if (!text || typeof text !== 'string') return '';
+  if (text.length <= max) return text;
+  return text.slice(0, Math.max(0, max));
+}
+function capTail(text, max) {
+  if (!text || typeof text !== 'string') return '';
+  if (text.length <= max) return text;
+  return text.slice(Math.max(0, text.length - max));
+}
+function summarizeTaskSpec(ts, { maxChars = ORCH_MAX_TASKSPEC_SUMMARY_CHARS, maxArray = 10, maxStr = 500 } = {}) {
+  try {
+    const pick = (obj) => {
+      const out = {};
+      if (!obj || typeof obj !== 'object') return out;
+      const keys = ['title','summary','inputs','steps','constraints','success_criteria','tool_hints'];
+      for (const k of keys) {
+        const v = obj[k];
+        if (v == null) continue;
+        if (Array.isArray(v)) {
+          out[k] = v.slice(0, maxArray).map(x => {
+            if (typeof x === 'string') return capHead(x, maxStr);
+            if (x && typeof x === 'object') return JSON.parse(capHead(JSON.stringify(x), maxStr));
+            return x;
+          });
+        } else if (typeof v === 'string') {
+          out[k] = capHead(v, maxStr);
+        } else if (typeof v === 'object') {
+          out[k] = JSON.parse(capHead(JSON.stringify(v), maxStr));
+        } else {
+          out[k] = v;
+        }
+      }
+      return out;
+    };
+    let out = pick(ts || {});
+    let s = JSON.stringify(out);
+    if (s.length > maxChars) {
+      // fallback: keep only essentials
+      out = { title: capHead(String(ts?.title || 'Task'), 200), summary: capHead(String(ts?.summary || ''), 2000), steps: Array.isArray(ts?.steps) ? ts.steps.slice(0, 5) : [], success_criteria: Array.isArray(ts?.success_criteria) ? ts.success_criteria.slice(0, 5) : [] };
+      s = JSON.stringify(out).slice(0, maxChars);
+      out = JSON.parse(s);
+    }
+    return out;
+  } catch {
+    return { title: String(ts?.title || 'Task'), summary: capHead(String(ts?.summary || ''), 1000) };
+  }
+}
+
 async function mistralChat(system, user, { temperature = 0, timeout = ORCH_GRISHA_TIMEOUT_MS } = {}) {
   const url = 'https://api.mistral.ai/v1/chat/completions';
   const payload = { model: MISTRAL_MODEL, messages: [ { role: 'system', content: system }, { role: 'user', content: user } ], temperature };
@@ -140,6 +196,15 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
     } catch (e) {
       lastErr = e;
       const status = e?.response?.status;
+      const msg = e?.response?.data?.error?.message || e?.message || '';
+      const tooLong = status === 400 && /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
+      if (tooLong) {
+        // shrink user payload and retry
+        const userStr = typeof usr === 'string' ? usr : JSON.stringify(usr);
+        const target = Math.max(2000, Math.floor(userStr.length * 0.6));
+        usr = capTail(userStr, Math.min(ORCH_MAX_MISTRAL_USER_CHARS, target));
+        continue;
+      }
       if (status === 429 || (status >= 500 && status < 600)) {
         // експоненційний backoff із джиттером
         await sleep(backoffDelay(attempts));
@@ -325,7 +390,11 @@ async function callAtlas(userMessage, sessionId, options = {}) {
   const format = prompts.atlas.output_format;
   const instruction = `Відповідай українською. Спочатку коротко відповідай користувачу (user_reply). Потім побудуй task_spec у JSON відповідно до схеми: ${JSON.stringify(format)}. Виведи рівно один JSON-блок після користувацької відповіді. Не використовуй кодові блоки (три зворотні апострофи), не додавай префікси типу \"user_reply:\" у текст відповіді.`;
   const msps = Array.isArray(options.msps) ? options.msps : [];
-  const mspsContext = msps.length ? `\n\nДодатковий контекст: Доступні MSP сервери (ім'я/порт/опис/статус) — ${JSON.stringify(msps)}` : '';
+  let mspsContext = '';
+  if (msps.length) {
+    const s = JSON.stringify(msps);
+    mspsContext = `\n\nДодатковий контекст: Доступні MSP сервери (ім'я/порт/опис/статус) — ${capHead(s, ORCH_MAX_MSPS_CHARS)}`;
+  }
 
   if (!GEMINI_API_KEY) {
     throw new Error('Atlas (Gemini) API key not configured');
@@ -407,7 +476,8 @@ async function callGrisha(taskSpec, sessionId) {
     throw new Error('Grisha (Mistral) API key not configured');
   }
   try {
-  const out = await mistralJsonOnly(sys, `TaskSpec JSON:\n${JSON.stringify(taskSpec)}`, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
+  const tsSummary = summarizeTaskSpec(taskSpec);
+  const out = await mistralJsonOnly(sys, `TaskSpecSummary JSON:\n${JSON.stringify(tsSummary)}`, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
   if (typeof out.isSafe !== 'boolean') out.isSafe = true;
   if (!Array.isArray(out.flagged)) out.flagged = [];
   return out;
@@ -421,7 +491,9 @@ async function callGrisha(taskSpec, sessionId) {
 async function grishaGenerateVerificationPlan(taskSpec, execText) {
   if (!MISTRAL_API_KEY) throw new Error('Grisha verification requires Mistral API key');
   const sys = prompts.grisha.verification_planner_system || `You are Grisha, a strict verification planner. Return JSON with keys: verification_prompt (string) describing a self-contained check the executor (Tetiana) can run to confirm completeness; hints (array of strings).`;
-  const user = `TaskSpec: ${JSON.stringify(taskSpec)}\n\nExecutor report (may be partial):\n${execText}`;
+  const tsSummary = summarizeTaskSpec(taskSpec);
+  const execTail = capTail(execText || '', ORCH_MAX_EXEC_REPORT_CHARS);
+  const user = `TaskSpecSummary: ${JSON.stringify(tsSummary)}\n\nExecutor report (tail):\n${execTail}`;
   try {
     const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
     if (typeof out.verification_prompt !== 'string' || !out.verification_prompt.trim()) {
@@ -438,7 +510,10 @@ async function grishaGenerateVerificationPlan(taskSpec, execText) {
 async function grishaAssessCompletion(taskSpec, execText, verifyText) {
   if (!MISTRAL_API_KEY) throw new Error('Grisha completion judge requires Mistral API key');
   const sys = prompts.grisha.completion_judge_system || `You are Grisha, a strict completion judge. Return JSON: { isComplete: boolean, issues: string[] } based on evidence.`;
-  const user = `TaskSpec: ${JSON.stringify(taskSpec)}\n\nExecutor report:\n${execText}\n\nVerification evidence:\n${verifyText}`;
+  const tsSummary = summarizeTaskSpec(taskSpec);
+  const execTail = capTail(execText || '', ORCH_MAX_EXEC_REPORT_CHARS);
+  const verifyTail = capTail(verifyText || '', ORCH_MAX_VERIFY_EVIDENCE_CHARS);
+  const user = `TaskSpecSummary: ${JSON.stringify(tsSummary)}\n\nExecutor report (tail):\n${execTail}\n\nVerification evidence (tail):\n${verifyTail}`;
   try {
     const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0.1 });
     if (typeof out.isComplete !== 'boolean') {
