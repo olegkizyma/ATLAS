@@ -6,6 +6,7 @@ import path from 'path';
 import axios from 'axios';
 import WebSocket from 'ws';
 import { execSync } from 'child_process';
+import { ContextSummarizer } from './context_summarizer.js';
 
 dotenv.config({ path: path.resolve(process.cwd(), '../config/.env') });
 dotenv.config();
@@ -39,6 +40,13 @@ const ORCH_MAX_VERIFY_EVIDENCE_CHARS = parseInt(process.env.ORCH_MAX_VERIFY_EVID
 const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '28000', 10);
 const ORCH_MAX_MISTRAL_SYSTEM_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_SYSTEM_CHARS || '4000', 10);
 const GOOSE_VISION_HEADER = process.env.GOOSE_VISION_HEADER || 'Copilot-Vision-Request:true';
+
+// Smart Context Management
+const contextSummarizer = new ContextSummarizer(
+    parseInt(process.env.ORCH_MAX_CONTEXT_TOKENS || '45000', 10),
+    parseFloat(process.env.ORCH_SUMMARY_RATIO || '0.3')
+);
+console.log('[ATLAS] Smart Context Summarization initialized');
 
 // Gemini (Atlas)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
@@ -331,13 +339,23 @@ async function mistralChat(system, user, { temperature = 0, timeout = ORCH_GRISH
   return data?.choices?.[0]?.message?.content || '';
 }
 
-async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATTEMPTS, temperature = 0 } = {}) {
+async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATTEMPTS, temperature = 0, sessionId = null } = {}) {
   let attempts = 0;
   let lastErr = null;
   let sys = system;
   let usr = user;
   
-  // Pre-truncate if context is too large
+  // Smart Context Management: Apply summarization if context is too large
+  if (sessionId && contextSummarizer.shouldSummarize(sys + (typeof usr === 'string' ? usr : JSON.stringify(usr)))) {
+    console.log(`[ContextSummarizer] Context too large for session ${sessionId}, optimizing...`);
+    const optimizedContext = contextSummarizer.formatForAiPrompt();
+    if (optimizedContext) {
+      sys = `${system}\n\n${optimizedContext}`;
+      console.log(`[ContextSummarizer] Applied optimized context: ${contextSummarizer.getStats().estimatedTokens} estimated tokens`);
+    }
+  }
+  
+  // Pre-truncate if context is still too large
   const preCheck = smartTruncate(sys, typeof usr === 'string' ? usr : JSON.stringify(usr), 14000);
   sys = preCheck.system;
   usr = preCheck.user;
@@ -469,6 +487,15 @@ app.post('/chat/stream', async (req, res) => {
     sseHeaders(res);
     sseSend(res, { type: 'start', agent: 'system', timestamp: Date.now() });
 
+    // Smart Context Management: Check if we need to process context
+    console.log(`[ContextSummarizer] Processing request for session: ${sessionId || 'no-session'}`);
+    const contextStats = contextSummarizer.getStats();
+    console.log(`[ContextSummarizer] Current context stats:`, contextStats);
+    
+    if (contextStats.estimatedTokens > 40000) {
+      sseSend(res, { type: 'info', agent: 'system', content: 'Оптимізую контекст для кращої продуктивності...' });
+    }
+
   // 1) Atlas enriches
     sseSend(res, { type: 'info', agent: 'Atlas', content: 'Аналізую запит та збагачую…' });
   const msps = await getAvailableMsps();
@@ -528,7 +555,7 @@ app.post('/chat/stream', async (req, res) => {
         atlasOut.task_spec, 
         execText, 
         msps, 
-        { cycle, mode: mode.mode, recommended }
+        { cycle, mode: mode.mode, recommended, sessionId }
       );
       
       const verifySession = `${sessionId || `sess-${Date.now()}`}-verify-${cycle}`;
@@ -560,9 +587,38 @@ app.post('/chat/stream', async (req, res) => {
         res
       );
 
-      const judgement = await grishaAssessCompletion(atlasOut.task_spec, execText, verifyText);
+      const judgement = await grishaAssessCompletion(atlasOut.task_spec, execText, verifyText, sessionId);
   if (judgement.isComplete) {
         sseSend(res, { type: 'agent_message', agent: 'Grisha', content: 'Перевірка пройдена. Завдання виконано повністю.' });
+        
+        // Context Summarization: Process completed interaction
+        try {
+          if (sessionId) {
+            await contextSummarizer.processNewInteraction(
+              message, 
+              `${atlasOut.user_reply}\n${execText}`, 
+              {
+                generateResponse: async (messages, options) => {
+                  // Simple AI client for summarization using Mistral
+                  const systemMessage = messages.find(m => m.role === 'system')?.content || '';
+                  const userMessage = messages.find(m => m.role === 'user')?.content || '';
+                  const result = await mistralJsonOnly(
+                    systemMessage, 
+                    userMessage, 
+                    { maxAttempts: 3, temperature: 0.3, sessionId }
+                  );
+                  return { content: typeof result === 'string' ? result : JSON.stringify(result) };
+                }
+              }
+            );
+            console.log(`[ContextSummarizer] Updated context for session ${sessionId}`);
+            const updatedStats = contextSummarizer.getStats();
+            console.log(`[ContextSummarizer] New stats:`, updatedStats);
+          }
+        } catch (error) {
+          console.error('[ContextSummarizer] Failed to process interaction:', error);
+        }
+        
   sseSend(res, { type: 'complete', agent: 'system' });
   res.end();
   return;
@@ -716,7 +772,7 @@ async function callGrisha(taskSpec, sessionId) {
   try {
     const tsSummary = summarizeTaskSpec(taskSpec);
     const userMessage = `TaskSpecSummary JSON:\n${JSON.stringify(tsSummary)}${mspsContext}`;
-    const out = await mistralJsonOnly(sys, userMessage, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
+    const out = await mistralJsonOnly(sys, userMessage, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0, sessionId });
   if (typeof out.isSafe !== 'boolean') out.isSafe = true;
   if (!Array.isArray(out.flagged)) out.flagged = [];
   return out;
@@ -760,7 +816,7 @@ async function grishaGenerateVerificationPlan(taskSpec, execText, msps = [], ada
   
   const user = `TaskSpecSummary: ${JSON.stringify(tsSummary)}\n\nExecutor report (tail):\n${execTail}${mspsContext}`;
   try {
-    const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0 });
+    const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0, sessionId: adaptiveContext.sessionId });
     if (typeof out.verification_prompt !== 'string' || !out.verification_prompt.trim()) {
       out.verification_prompt = 'Верифікуй повноту виконання і надай докази з мапінгом критеріїв -> артефакти.';
     }
@@ -773,7 +829,7 @@ async function grishaGenerateVerificationPlan(taskSpec, execText, msps = [], ada
 }
 
 // Grisha: оцінити завершеність після перевірки
-async function grishaAssessCompletion(taskSpec, execText, verifyText) {
+async function grishaAssessCompletion(taskSpec, execText, verifyText, sessionId = null) {
   if (!MISTRAL_API_KEY) throw new Error('Grisha completion judge requires Mistral API key');
   const sys = prompts.grisha.completion_judge_system || `You are Grisha, a strict completion judge. Return JSON: { isComplete: boolean, issues: string[] } based on evidence.`;
   const tsSummary = summarizeTaskSpec(taskSpec);
@@ -781,7 +837,7 @@ async function grishaAssessCompletion(taskSpec, execText, verifyText) {
   const verifyTail = capTail(verifyText || '', ORCH_MAX_VERIFY_EVIDENCE_CHARS);
   const user = `TaskSpecSummary: ${JSON.stringify(tsSummary)}\n\nExecutor report (tail):\n${execTail}\n\nVerification evidence (tail):\n${verifyTail}`;
   try {
-    const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0.1 });
+    const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0.1, sessionId });
     if (typeof out.isComplete !== 'boolean') {
       return { isComplete: false, issues: ['Не вдалося інтерпретувати результат оцінки завершеності. Очікується поле isComplete:boolean.'] };
     }
@@ -1059,6 +1115,56 @@ async function maybeAutoAnswerFromAtlasText(text, answeredSet, sessionId, res, g
   } catch {}
 }
 
+// Context management endpoints
+app.get('/context/stats', (req, res) => {
+  try {
+    const stats = contextSummarizer.getStats();
+    res.json({
+      success: true,
+      stats: stats,
+      maxContextTokens: contextSummarizer.maxContextTokens,
+      summaryRatio: contextSummarizer.summaryRatio
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.post('/context/clear', (req, res) => {
+  try {
+    contextSummarizer.clearState();
+    res.json({
+      success: true,
+      message: 'Context cleared successfully'
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
+app.get('/context/formatted', (req, res) => {
+  try {
+    const formatted = contextSummarizer.formatForAiPrompt();
+    res.json({
+      success: true,
+      formattedContext: formatted,
+      length: formatted.length
+    });
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      error: error.message
+    });
+  }
+});
+
 app.listen(ORCH_PORT, () => {
   console.log(`Orchestrator running on http://127.0.0.1:${ORCH_PORT}`);
+  console.log(`Smart Context Summarization: ${contextSummarizer.maxContextTokens} max tokens, ${Math.round(contextSummarizer.summaryRatio * 100)}% summary ratio`);
 });
