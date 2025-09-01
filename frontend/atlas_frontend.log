@@ -1,4 +1,0 @@
-Traceback (most recent call last):
-  File "/Users/dev/Documents/GitHub/ATLAS/frontend/atlas_minimal_live.py", line 14, in <module>
-    import aiohttp
-ModuleNotFoundError: No module named 'aiohttp'
