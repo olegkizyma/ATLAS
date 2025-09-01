@@ -10,7 +10,9 @@ if [[ "$OSTYPE" == "darwin"* ]]; then
     echo ""
     echo "Continuing with full stack (may require Rust/Cargo)..."
     sleep 2
-fi# 1. Запуск Python Environment Setup
+fi
+
+# 1. Запуск Python Environment Setup
 echo "🐍 Setting up Python environment..."
 cd frontend_new
 if [ -f "setup_env.sh" ]; then
