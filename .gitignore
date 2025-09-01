@@ -24,6 +24,7 @@ wheels/
 env/
 venv/
 *.log
+*.pid
 logs/
 ENV/
 env.bak/

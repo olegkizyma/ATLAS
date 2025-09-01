@@ -1,9 +1,0 @@
-Warning: Failed to load extension filesystem: IO error: No such file or directory (os error 2)
-Warning: Failed to load extension ukrainiannativetts: IO error: No such file or directory (os error 2)
-
-🪿 Starting Goose web server
-   Provider: github_copilot | Model: gpt-4o
-   Working directory: /Users/dev/Documents/GitHub/ATLAS/goose
-   Server: http://127.0.0.1:3000
-   Press Ctrl+C to stop
-
