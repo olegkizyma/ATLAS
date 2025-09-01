@@ -20,6 +20,7 @@ const prompts = JSON.parse(fs.readFileSync(PROMPTS_PATH, 'utf8'));
 // Ports and external services
 const ORCH_PORT = parseInt(process.env.ORCH_PORT || '5101', 10);
 const GOOSE_BASE_URL = process.env.GOOSE_BASE_URL || 'http://127.0.0.1:3000';
+const ORCH_MAX_REFINEMENT_CYCLES = parseInt(process.env.ORCH_MAX_REFINEMENT_CYCLES || '3', 10);
 
 // Gemini (Atlas)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
@@ -67,7 +68,7 @@ app.post('/chat/stream', async (req, res) => {
 
     // 2) Grisha checks
   sseSend(res, { type: 'info', agent: 'Grisha', content: 'Перевіряю політики…' });
-    const grishaOut = await callGrisha(atlasOut.task_spec, sessionId);
+  const grishaOut = await callGrisha(atlasOut.task_spec, sessionId);
   sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `isSafe=${grishaOut.isSafe}. ${grishaOut.rationale ? grishaOut.rationale : ''}` });
 
     if (!grishaOut.isSafe) {
@@ -75,11 +76,44 @@ app.post('/chat/stream', async (req, res) => {
       return res.end();
     }
 
-  // 3) Tetiana executes via Goose (SSE passthrough)
+  // 3) Tetiana executes
   sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Виконую задачу…' });
-  await streamTetiana(atlasOut.task_spec, sessionId, res);
+  let execText = await streamTetianaExecute(atlasOut.task_spec, sessionId, res);
+
+  // 4) Post-execution verification loop (requires Grisha API key)
+  if (MISTRAL_API_KEY) {
+    for (let cycle = 1; cycle <= ORCH_MAX_REFINEMENT_CYCLES; cycle++) {
+      sseSend(res, { type: 'info', agent: 'Grisha', content: `Запускаю перевірку виконання (цикл ${cycle}/${ORCH_MAX_REFINEMENT_CYCLES})…` });
+      const plan = await grishaGenerateVerificationPlan(atlasOut.task_spec, execText);
+      const verifySession = `${sessionId || `sess-${Date.now()}`}-verify-${cycle}`;
+      sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Перевіряю результати…' });
+      const verifyText = await streamTetianaMessage(plan.verification_prompt || plan.plan_text || plan.prompt || 'Верифікуй повноту виконання і надай докази.', verifySession, res);
+
+      const judgement = await grishaAssessCompletion(atlasOut.task_spec, execText, verifyText);
+      if (judgement.isComplete) {
+        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: 'Перевірка пройдена. Завдання виконано повністю.' });
   sseSend(res, { type: 'complete', agent: 'system' });
   res.end();
+  return;
+      }
+
+      const issuesText = (judgement.issues || []).join('; ');
+      sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `Виявлено невідповідності: ${issuesText || 'потрібне доопрацювання'}` });
+      const refineMsg = `Задача виконана неповністю. Проблеми: ${issuesText}. Сформуй оновлений TaskSpec для доопрацювання саме у ПОТОЧНІЙ сесії, стисло та чітко.`;
+      const atlasRefine = await callAtlas(refineMsg, sessionId);
+      sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasRefine.user_reply || 'Доопрацьовую задачу.' });
+      sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Продовжую доопрацювання…' });
+      const extraText = await streamTetianaExecute(atlasRefine.task_spec, sessionId, res);
+      execText = `${execText}\n\n[REFINEMENT ${cycle}]\n${extraText}`;
+    }
+    // Після циклів все ще не завершено
+    sseSend(res, { type: 'agent_message', agent: 'Grisha', content: 'Після усіх спроб: завдання не довиконане. Потрібні додаткові дії.' });
+    sseSend(res, { type: 'complete', agent: 'system' });
+    res.end();
+  } else {
+    sseSend(res, { type: 'error', agent: 'Grisha', content: 'Відсутній ключ Mistral: неможливо провести перевірку/аудит.' });
+    res.end();
+  }
   } catch (err) {
     console.error('orchestrator error', err);
     try {
@@ -153,8 +187,7 @@ async function generateTetianaClarifyingQuestion(taskSpec) {
 async function callGrisha(taskSpec, sessionId) {
   const sys = prompts.grisha.system;
   if (!MISTRAL_API_KEY) {
-  // Test mode allow all (без хардкодного повідомлення)
-  return { isSafe: true, rationale: '', flagged: [] };
+    throw new Error('Grisha (Mistral) API key not configured');
   }
   try {
     const url = 'https://api.mistral.ai/v1/chat/completions';
@@ -177,20 +210,57 @@ async function callGrisha(taskSpec, sessionId) {
     if (typeof out.isSafe !== 'boolean') out.isSafe = true;
     return out;
   } catch (e) {
-  console.warn('Mistral call failed, allowing in test mode:', e.message);
-  return { isSafe: true, rationale: '', flagged: [] };
+  console.warn('Mistral policy check failed:', e.message);
+  throw new Error('Grisha policy check failed: ' + (e.message || 'unknown error'));
   }
 }
 
-// Tetiana (Goose) streaming execution
-async function streamTetiana(taskSpec, sessionId, res) {
+// Grisha: сформувати план перевірки виконання
+async function grishaGenerateVerificationPlan(taskSpec, execText) {
+  if (!MISTRAL_API_KEY) throw new Error('Grisha verification requires Mistral API key');
+  const sys = prompts.grisha.verification_planner_system || `You are Grisha, a strict verification planner. Return JSON with keys: verification_prompt (string) describing a self-contained check the executor (Tetiana) can run to confirm completeness; hints (array of strings).`;
+  const user = `TaskSpec: ${JSON.stringify(taskSpec)}\n\nExecutor report (may be partial):\n${execText}`;
+  try {
+    const { data } = await axios.post('https://api.mistral.ai/v1/chat/completions', {
+      model: MISTRAL_MODEL,
+      messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ],
+      temperature: 0.1
+    }, { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout: 25000 });
+    const text = data?.choices?.[0]?.message?.content || '';
+    try { return JSON.parse(text); } catch { return { verification_prompt: text || 'Верифікуй повноту виконання і надай докази.' }; }
+  } catch (e) {
+    throw new Error('Grisha verification plan failed: ' + (e.message || 'unknown error'));
+  }
+}
+
+// Grisha: оцінити завершеність після перевірки
+async function grishaAssessCompletion(taskSpec, execText, verifyText) {
+  if (!MISTRAL_API_KEY) throw new Error('Grisha completion judge requires Mistral API key');
+  const sys = prompts.grisha.completion_judge_system || `You are Grisha, a strict completion judge. Return JSON: { isComplete: boolean, issues: string[] } based on evidence.`;
+  const user = `TaskSpec: ${JSON.stringify(taskSpec)}\n\nExecutor report:\n${execText}\n\nVerification evidence:\n${verifyText}`;
+  try {
+    const { data } = await axios.post('https://api.mistral.ai/v1/chat/completions', {
+      model: MISTRAL_MODEL,
+      messages: [ { role: 'system', content: sys }, { role: 'user', content: user } ],
+      temperature: 0.1
+    }, { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout: 25000 });
+    const text = data?.choices?.[0]?.message?.content || '';
+    try { return JSON.parse(text); } catch {
+      return { isComplete: false, issues: ['Не вдалося розпарсити відповідь судді.', 'Відсутній валідний JSON від Grisha.'] };
+    }
+  } catch (e) {
+    return { isComplete: false, issues: ['Помилка оцінки завершеності: ' + (e.message || 'невідома помилка')] };
+  }
+}
+
+// Tetiana: универсальный стрим произвольного повідомлення
+async function streamTetianaMessage(messageText, sessionId, res) {
   const secret = process.env.GOOSE_SECRET_KEY;
 
   // Автовизначення режиму Goose: web (ws) чи goosed (/reply)
   const gooseBase = GOOSE_BASE_URL.replace(/\/$/, '');
   const isWeb = await isGooseWeb(gooseBase);
 
-  const messageText = `Виконай наступну задачу (TaskSpec JSON нижче). Пиши хід роботи та фінальний результат.\nTaskSpec: ${JSON.stringify(taskSpec)}`;
   const payload = {
     messages: [
       {
@@ -210,7 +280,7 @@ async function streamTetiana(taskSpec, sessionId, res) {
   if (secret) headers['X-Secret-Key'] = secret;
 
   if (isWeb) {
-    // Потік через WebSocket /ws з авто-відповідями Атласа на уточнення (безкінечний цикл до завершення сесії)
+    // Потік через WebSocket /ws з авто-відповідями Атласа на уточнення
     return streamTetianaWs(gooseBase, payload, res, sessionId);
   } else {
     // Потік через goosed /reply (SSE)
@@ -222,6 +292,7 @@ async function streamTetiana(taskSpec, sessionId, res) {
     });
 
     return new Promise((resolve, reject) => {
+      let collected = '';
       const answeredQuestions = new Set();
       let buffer = '';
       response.data.on('data', (chunk) => {
@@ -235,7 +306,7 @@ async function streamTetiana(taskSpec, sessionId, res) {
           try {
             const obj = JSON.parse(dataLine);
             if (obj.type === 'Finish') {
-              resolve();
+              resolve(collected.trim());
               return;
             }
             const msg = obj.message;
@@ -243,6 +314,7 @@ async function streamTetiana(taskSpec, sessionId, res) {
               for (const c of msg.content) {
                 if (c.type === 'text' && c.text) {
                   sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: c.text });
+                  collected += c.text + '\n';
                   // Постійний цикл: визначити чи це уточнення; якщо так — авто-відповідь Атласа
                   maybeAutoAnswerFromAtlasText(c.text, answeredQuestions, sessionId, res, gooseBase, secret, null).catch(() => {});
                 }
@@ -257,10 +329,16 @@ async function streamTetiana(taskSpec, sessionId, res) {
           }
         }
       });
-      response.data.on('end', () => resolve());
+      response.data.on('end', () => resolve(collected.trim()));
       response.data.on('error', (err) => reject(err));
     });
   }
+}
+
+// Tetiana: виконання по TaskSpec
+async function streamTetianaExecute(taskSpec, sessionId, res) {
+  const messageText = `Виконай наступну задачу (TaskSpec JSON нижче). Пиши хід роботи та фінальний результат.\nTaskSpec: ${JSON.stringify(taskSpec)}`;
+  return streamTetianaMessage(messageText, sessionId, res);
 }
 
 // Перевірка: чи це Goose Web
@@ -280,6 +358,7 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
     const ws = new WebSocket(wsUrl);
     let settled = false;
   const answeredQuestions = new Set();
+  let collected = '';
 
     const finish = (err) => {
       if (settled) return;
@@ -307,6 +386,7 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
           if (content) {
             sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: String(content) });
             maybeAutoAnswerFromAtlasText(String(content), answeredQuestions, sessionId, res, baseUrl, null, ws).catch(() => {});
+            collected += String(content) + '\n';
           }
         } else if (t === 'question' || t === 'frontendToolRequest') {
           // Автовідповідь Атласа на уточнення, без залучення користувача
@@ -322,7 +402,7 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
     });
 
     ws.on('error', (err) => finish(err));
-    ws.on('close', () => finish());
+  ws.on('close', () => { finish(); resolve(collected.trim()); });
   });
 }
 
@@ -395,7 +475,8 @@ async function maybeAutoAnswerFromAtlasText(text, answeredSet, sessionId, res, g
     if (answeredSet.has(key)) return;
 
     // Класификация через Atlas: вопрос-уточнение или просто ответ
-    const classificationPrompt = `Визнач: чи є цей текст уточнюючим питанням (yes/no): "${snippet}". Виведи лише yes або no.`;
+  const classifierSystem = prompts.atlas.classifier_system || 'You are a concise classifier. Answer strictly yes or no.';
+  const classificationPrompt = `${classifierSystem}\nВизнач: чи є цей текст уточнюючим питанням (yes/no): "${snippet}". Виведи лише yes або no.`;
     const ans = await callAtlas(classificationPrompt, sessionId);
     const verdict = (ans.user_reply || '').trim().toLowerCase();
     if (verdict.startsWith('yes')) {
