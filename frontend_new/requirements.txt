@@ -1,3 +1,21 @@
 # Minimal dependencies for ATLAS Frontend v2.0 (Python server)
 Flask~=3.0
 requests~=2.32
+
+# Intelligent Recovery System dependencies
+websockets~=11.0
+aiohttp~=3.8
+asyncio-mqtt~=0.13
+typing-extensions~=4.8
+
+# Data processing and analysis
+numpy~=1.24
+pandas~=2.0
+
+# Configuration and logging
+pyyaml~=6.0
+python-dotenv~=1.0
+
+# Optional: Advanced features
+psutil~=5.9  # System monitoring
+schedule~=1.2  # Task scheduling
