@@ -45,6 +45,7 @@ echo "📊 Core Services:"
 check_service_status "Goose Web Interface" "logs/goose.pid" "3000" "http://localhost:3000"
 check_service_status "Python Frontend" "logs/frontend.pid" "5001" "http://localhost:5001"
 check_service_status "Node.js Orchestrator" "logs/orchestrator.pid" "5101" "http://localhost:5101/health"
+check_service_status "Recovery Bridge" "logs/recovery_bridge.pid" "5102" ""
 
 echo ""
 echo "🌐 Port Status:"
@@ -72,8 +73,8 @@ echo ""
 echo "📁 System Files:"
 printf "%-25s" "Logs directory:"
 if [ -d "logs" ]; then
-    local log_count=$(find logs/ -name "*.log" | wc -l | tr -d ' ')
-    local pid_count=$(find logs/ -name "*.pid" | wc -l | tr -d ' ')
+    log_count=$(find logs/ -name "*.log" | wc -l | tr -d ' ')
+    pid_count=$(find logs/ -name "*.pid" | wc -l | tr -d ' ')
     echo "🟢 EXISTS ($log_count logs, $pid_count PIDs)"
 else
     echo "🔴 MISSING"
@@ -89,21 +90,21 @@ fi
 echo ""
 echo "🧠 Intelligent Components:"
 printf "%-25s" "Recovery System:"
-if [ -f "frontend/intelligent_recovery.py" ]; then
+if [ -f "frontend_new/config/intelligent_recovery.py" ]; then
     echo "🟢 AVAILABLE"
 else
     echo "🔴 MISSING"
 fi
 
 printf "%-25s" "Environment Manager:"
-if [ -f "frontend/env_manager.py" ]; then
+if [ -f "frontend_new/env_manager.py" ]; then
     echo "🟢 AVAILABLE"
 else
     echo "🔴 MISSING"
 fi
 
 printf "%-25s" "Recovery Bridge:"
-if [ -f "frontend/recovery_bridge.py" ]; then
+if [ -f "frontend_new/config/recovery_bridge.py" ]; then
     echo "🟢 AVAILABLE"
 else
     echo "🔴 MISSING"
@@ -130,11 +131,11 @@ echo ""
 echo "🎯 System Summary:"
 # Підрахунок активних сервісів
 active_count=0
-total_services=3
+total_services=4
 
-for pidfile in logs/goose.pid logs/frontend.pid logs/orchestrator.pid; do
+for pidfile in logs/goose.pid logs/frontend.pid logs/orchestrator.pid logs/recovery_bridge.pid; do
     if [ -f "$pidfile" ]; then
-        local pid=$(cat "$pidfile")
+        pid=$(cat "$pidfile")
         if ps -p $pid > /dev/null 2>&1; then
             active_count=$((active_count + 1))
         fi

@@ -63,19 +63,23 @@ stop_by_name() {
     fi
 }
 
-# 1. Зупинка Node.js Orchestrator (Port 5101)
+# 1. Зупинка Recovery Bridge (Port 5102)
+echo "🔧 Stopping Recovery Bridge..."
+stop_service "Recovery Bridge" "logs/recovery_bridge.pid"
+
+# 2. Зупинка Node.js Orchestrator (Port 5101)
 echo "🎭 Stopping Node.js Orchestrator..."
 stop_service "Node.js Orchestrator" "logs/orchestrator.pid"
 
-# 2. Зупинка Python Frontend (Port 5001)
+# 3. Зупинка Python Frontend (Port 5001)
 echo "🧠 Stopping Python Frontend..."
 stop_service "Python Frontend" "logs/frontend.pid"
 
-# 3. Зупинка Goose Web Interface (Port 3000)
+# 4. Зупинка Goose Web Interface (Port 3000)
 echo "🦆 Stopping Goose Web Interface..."
 stop_service "Goose Web Interface" "logs/goose.pid"
 
-# 4. Додаткова очистка процесів за іменем
+# 5. Додаткова очистка процесів за іменем
 echo "🧹 Cleaning up remaining processes..."
 stop_by_name "Goose daemon" "goosed"
 stop_by_name "Python frontend" "atlas_minimal_live.py"
