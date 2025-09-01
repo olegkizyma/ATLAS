@@ -21,7 +21,7 @@ const prompts = JSON.parse(fs.readFileSync(PROMPTS_PATH, 'utf8'));
 // Ports and external services
 const ORCH_PORT = parseInt(process.env.ORCH_PORT || '5101', 10);
 const GOOSE_BASE_URL = process.env.GOOSE_BASE_URL || 'http://127.0.0.1:3000';
-const ORCH_MAX_REFINEMENT_CYCLES = parseInt(process.env.ORCH_MAX_REFINEMENT_CYCLES || '3', 10);
+const ORCH_MAX_REFINEMENT_CYCLES = parseInt(process.env.ORCH_MAX_REFINEMENT_CYCLES || '20', 10);
 const ORCH_GRISHA_MAX_ATTEMPTS = parseInt(process.env.ORCH_GRISHA_MAX_ATTEMPTS || '20', 10);
 const ORCH_ATLAS_MAX_ATTEMPTS = parseInt(process.env.ORCH_ATLAS_MAX_ATTEMPTS || '6', 10);
 
@@ -123,10 +123,15 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
     try {
       const text = await mistralChat(sys, usr, { temperature });
       try {
-        return JSON.parse(text);
+        const parsed = JSON.parse(text);
+        if (parsed && typeof parsed === 'object') parsed._attemptsUsed = attempts;
+        return parsed;
       } catch (e) {
         const extracted = extractJsonBlock(text);
-        if (extracted) return extracted;
+        if (extracted) {
+          if (extracted && typeof extracted === 'object') extracted._attemptsUsed = attempts;
+          return extracted;
+        }
         lastErr = e;
         // tighten instructions for next attempt
         sys = `${system}\n\nIMPORTANT: Return ONLY valid minified JSON (no markdown, no prose, no comments). If you previously included any non-JSON text, remove it.`;
@@ -222,6 +227,9 @@ app.post('/chat/stream', async (req, res) => {
   const msps = await getAvailableMsps();
   const atlasOut = await callAtlas(message, sessionId, { msps });
   sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasOut.user_reply || '' });
+  if (typeof atlasOut._attemptsUsed === 'number') {
+    sseSend(res, { type: 'info', agent: 'Atlas', content: `Спроб: ${atlasOut._attemptsUsed}/${ORCH_ATLAS_MAX_ATTEMPTS}` });
+  }
 
   // 1.5) Уточнення будуть виникати природно під час виконання Тетяни (без штучної інʼєкції тут)
 
@@ -232,6 +240,9 @@ app.post('/chat/stream', async (req, res) => {
       sseSend(res, { type: 'agent_message', agent: 'Grisha', content: grishaOut.inter_agent_note_ua });
     }
   sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `isSafe=${grishaOut.isSafe}. ${grishaOut.rationale ? grishaOut.rationale : ''}` });
+    if (typeof grishaOut._attemptsUsed === 'number') {
+      sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (policy): ${grishaOut._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
+    }
 
     if (!grishaOut.isSafe) {
       const testMode = !!(prompts?.grisha?.test_mode);
@@ -257,6 +268,9 @@ app.post('/chat/stream', async (req, res) => {
       if (plan?.inter_agent_note_ua) {
         sseSend(res, { type: 'agent_message', agent: 'Grisha', content: plan.inter_agent_note_ua });
       }
+      if (typeof plan._attemptsUsed === 'number') {
+  sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (verification plan): ${plan._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
+      }
       const verifyText = await streamTetianaMessage(plan.verification_prompt || plan.plan_text || plan.prompt || 'Верифікуй повноту виконання і надай докази.', verifySession, res);
 
       const judgement = await grishaAssessCompletion(atlasOut.task_spec, execText, verifyText);
@@ -266,13 +280,21 @@ app.post('/chat/stream', async (req, res) => {
   res.end();
   return;
       }
+      if (typeof judgement._attemptsUsed === 'number') {
+        sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (judge): ${judgement._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
+      }
 
-      const issuesText = (judgement.issues || []).join('; ');
+  const issuesText = (judgement.issues || []).join('; ');
       sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `Виявлено невідповідності: ${issuesText || 'потрібне доопрацювання'}` });
       if (judgement?.inter_agent_note_ua) {
         sseSend(res, { type: 'agent_message', agent: 'Grisha', content: judgement.inter_agent_note_ua });
       }
-      const refineBase = `Задача виконана неповністю. Проблеми: ${issuesText}. Сформуй оновлений TaskSpec для доопрацювання саме у ПОТОЧНІЙ сесії, стисло та чітко.`;
+  const refineBase = `Задача виконана неповністю. Проблеми: ${issuesText}.
+Сформуй оновлений TaskSpec для доопрацювання саме у ПОТОЧНІЙ сесії, стисло та чітко. Зроби його ДОКАЗОВО-ОРІЄНТОВАНИМ: 
+- для кожного success_criterion додай крок(и) вимірювання/зчитування стану з подальшим підтвердженням (читанням значення/стану/URI/логу);
+- у steps опиши наміри й спостережувані стани без згадок конкретних брендів/сайтів, інструменти підбирай динамічно з урахуванням ОС/доступних додатків/MSP;
+- у tool_hints зафіксуй дії як операції над станами (відкрити/фокус, навігація/пошук/вибір за критерієм, встановити/прочитати значення), і додай перевірки після кожного важливого кроку;
+- у success_criteria сформулюй об’єктивні, вимірювані умови з чіткими артефактами для мапування criterion->evidence.`;
       const refineMsg = judgement?.atlas_refine_prompt_ua ? `${refineBase}\n\nДодаткова підказка від Гріші:\n${judgement.atlas_refine_prompt_ua}` : refineBase;
       const atlasRefine = await callAtlas(refineMsg, sessionId);
       sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasRefine.user_reply || 'Доопрацьовую задачу.' });

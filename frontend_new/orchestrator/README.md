@@ -15,6 +15,8 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
 - GEMINI_MODEL=gemini-1.5-flash
 - MISTRAL_API_KEY=...
 - MISTRAL_MODEL=mistral-small-latest
+ - ORCH_GRISHA_MAX_ATTEMPTS (default 20) — максимальна кількість спроб для Гріші
+ - ORCH_MAX_REFINEMENT_CYCLES (default 20) — кількість циклів довиконання/верифікації після початкового запуску
 
 ## Налаштування backoff/таймаутів (опційно через .env)
 
@@ -32,6 +34,7 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
 
 - ORCH_ATLAS_MAX_ATTEMPTS (default 6)
 - ORCH_GRISHA_MAX_ATTEMPTS (default 20)
+ - ORCH_MAX_REFINEMENT_CYCLES (default 20)
 
 ## Run
 1) Start Goose:
