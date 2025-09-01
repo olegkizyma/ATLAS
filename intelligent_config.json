@@ -1,0 +1,110 @@
+{
+  "system": {
+    "name": "ATLAS",
+    "version": "2.0",
+    "architecture": "microservices",
+    "intelligence_level": "full_autonomous"
+  },
+  "adaptive_configuration": {
+    "auto_detect_resources": true,
+    "dynamic_port_allocation": true,
+    "intelligent_failover": true,
+    "self_healing": true,
+    "context_aware_scaling": true,
+    "provider_auto_selection": true
+  },
+  "services": {
+    "auto_discovery": {
+      "enabled": true,
+      "scan_ports": [3000, 3001, 5000, 5001, 5101, 8000, 8080],
+      "service_patterns": [
+        { "name": "goose", "patterns": ["goose", "tetiana"], "priority": 1 },
+        { "name": "orchestrator", "patterns": ["orch", "grisha", "atlas"], "priority": 2 },
+        { "name": "frontend", "patterns": ["frontend", "ui", "web"], "priority": 3 }
+      ]
+    },
+    "health_monitoring": {
+      "enabled": true,
+      "check_interval_ms": 5000,
+      "failure_threshold": 3,
+      "recovery_delay_ms": 2000
+    }
+  },
+  "providers": {
+    "auto_detection": {
+      "enabled": true,
+      "preference_order": ["github_copilot", "openai", "openrouter", "mistral", "gemini"],
+      "fallback_strategy": "intelligent_selection",
+      "token_validation": true
+    },
+    "load_balancing": {
+      "enabled": true,
+      "strategy": "performance_based",
+      "response_time_threshold_ms": 5000,
+      "error_rate_threshold": 0.1
+    }
+  },
+  "context_management": {
+    "strategy": "adaptive",
+    "intelligence": {
+      "auto_summarization": true,
+      "semantic_compression": true,
+      "priority_based_retention": true,
+      "relevance_scoring": true
+    },
+    "limits": {
+      "adaptive": true,
+      "base_tokens": 45000,
+      "scaling_factor": 1.2,
+      "max_expansion": 100000,
+      "compression_ratio": 0.7
+    }
+  },
+  "execution_modes": {
+    "adaptive_cycling": {
+      "enabled": true,
+      "modes": [
+        {
+          "cycle": 1,
+          "mode": "exploration",
+          "description": "Повне дослідження ресурсів та можливостей"
+        },
+        {
+          "cycle": 3,
+          "mode": "focused",
+          "description": "Фокус на найефективніших ресурсах"
+        },
+        {
+          "cycle": 6,
+          "mode": "optimization",
+          "description": "Оптимізація на базі накопиченого досвіду"
+        }
+      ]
+    }
+  },
+  "intelligence": {
+    "learning": {
+      "enabled": true,
+      "experience_tracking": true,
+      "performance_optimization": true,
+      "pattern_recognition": true
+    },
+    "decision_making": {
+      "algorithm": "multi_criteria",
+      "factors": ["performance", "reliability", "cost", "latency"],
+      "weights": [0.3, 0.3, 0.2, 0.2]
+    }
+  },
+  "monitoring": {
+    "metrics": {
+      "enabled": true,
+      "collect_interval_ms": 1000,
+      "retention_hours": 24
+    },
+    "alerting": {
+      "enabled": true,
+      "channels": ["console", "log"],
+      "severity_levels": ["critical", "warning", "info"]
+    }
+  }
+}

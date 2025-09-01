@@ -1016,14 +1016,26 @@ async function streamTetianaExecute(taskSpec, sessionId, res, adaptiveContext = 
   return streamTetianaMessage(messageText, sessionId, res);
 }
 
-// Перевірка: чи це Goose Web
+// Перевірка: чи це Goose Web (а не goosed agent)
 async function isGooseWeb(baseUrl) {
+  const urlBase = baseUrl.replace(/\/$/, '');
+  // 1) Спроба офіційного health для веб-інтерфейсу (якщо є)
   try {
-    const { status } = await axios.get(`${baseUrl}/api/health`, { timeout: 2000 });
-    return status === 200;
-  } catch {
-    return false;
-  }
+    const resp = await axios.get(`${urlBase}/api/health`, { timeout: 2000, validateStatus: () => true });
+    if (resp.status >= 200 && resp.status < 300) return true;
+  } catch {}
+  // 2) Fallback: головна сторінка Goose Web віддає HTML з UI
+  try {
+    const resp = await axios.get(`${urlBase}/`, { timeout: 2000, validateStatus: () => true });
+    const ct = String(resp.headers?.['content-type'] || '').toLowerCase();
+    if (resp.status === 200 && (ct.includes('text/html') || ct.includes('text/plain'))) {
+      const body = typeof resp.data === 'string' ? resp.data : '';
+      // евристика: шукаємо згадування Goose або елементів UI
+      if (body.includes('Goose') || body.includes('goose') || body.includes('<html')) return true;
+    }
+  } catch {}
+  // 3) Інакше вважаємо, що це goosed agent (який не має HTML-UI) і використовуємо /reply
+  return false;
 }
 
 // Стрім Тетяни через WebSocket інтерфейс Goose Web
@@ -1060,12 +1072,14 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
           const content = obj.content;
           if (content) {
             sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: String(content) });
-            maybeAutoAnswerFromAtlasText(String(content), answeredQuestions, sessionId, res, baseUrl, null, ws).catch(() => {});
+            // maybeAutoAnswerFromAtlasText временно отключён из-за конфликтов API
+            // maybeAutoAnswerFromAtlasText(String(content), answeredQuestions, sessionId, res, baseUrl, null, ws).catch(() => {});
             collected += String(content) + '\n';
           }
         } else if (t === 'question' || t === 'frontendToolRequest') {
-          // Автовідповідь Атласа на уточнення, без залучення користувача
-          autoAnswerFromAtlas(obj, sessionId, res, baseUrl, null, ws).catch(() => {});
+          // Автовідповідь Атласа на уточнення тимчасово відключена через конфлікти з GitHub Copilot API
+          // autoAnswerFromAtlas(obj, sessionId, res, baseUrl, null, ws).catch(() => {});
+          console.log('[DEBUG] Question/frontendToolRequest received but auto-answer disabled:', obj.type);
         } else if (t === 'complete' || t === 'cancelled') {
           finish();
         } else if (t === 'error') {
