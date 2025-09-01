@@ -8,6 +8,8 @@ import time
 import logging
 from threading import Thread
 import queue
+import os
+import requests
 
 class AtlasAPI:
     def __init__(self, app, atlas_core):
@@ -56,9 +58,14 @@ class AtlasAPI:
                 if not message:
                     return jsonify({'error': 'Empty message'}), 400
                 
-                # Перевіряємо готовність
-                if not self.atlas_core:
-                    return jsonify({'error': 'Atlas Core not ready'}), 503
+                # Якщо визначено Node orchestrator, делегуємо туди (сумісність)
+                orchestrator_base = os.getenv('ORCH_BASE') or request.args.get('orchestrator')
+                if orchestrator_base:
+                    try:
+                        r = requests.post(f"{orchestrator_base.rstrip('/')}/chat/stream", json={'message': message}, timeout=5)
+                        return jsonify({'status': 'accepted', 'note': 'Delegated to orchestrator', 'http_status': r.status_code})
+                    except Exception as e:
+                        self.logger.warning(f"Delegation failed: {e}")
                 
                 # Генеруємо ID для відповіді
                 response_id = f"resp_{int(time.time() * 1000)}"
