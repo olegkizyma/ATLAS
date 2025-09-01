@@ -135,6 +135,10 @@ export type DecodeRecipeResponse = {
     recipe: Recipe;
 };
 
+export type DeleteRecipeRequest = {
+    id: string;
+};
+
 export type EmbeddedResource = {
     annotations?: Annotations | {
         [key: string]: unknown;
@@ -279,6 +283,14 @@ export type ExtensionConfig = {
     type: 'inline_python';
 };
 
+/**
+ * Extension data containing all extension states
+ * Keys are in format "extension_name.version" (e.g., "todo.v0")
+ */
+export type ExtensionData = {
+    [key: string]: unknown;
+};
+
 export type ExtensionEntry = ExtensionConfig & {
     type?: 'ExtensionEntry';
 } & {
@@ -322,6 +334,10 @@ export type InspectJobResponse = {
 
 export type KillJobResponse = {
     message: string;
+};
+
+export type ListRecipeResponse = {
+    recipe_manifest_responses: Array<RecipeManifestResponse>;
 };
 
 export type ListSchedulesResponse = {
@@ -534,6 +550,14 @@ export type Recipe = {
     version?: string;
 };
 
+export type RecipeManifestResponse = {
+    id: string;
+    isGlobal: boolean;
+    lastModified: string;
+    name: string;
+    recipe: Recipe;
+};
+
 export type RecipeParameter = {
     default?: string | null;
     description: string;
@@ -682,6 +706,7 @@ export type SessionMetadata = {
      * A short description of the session, typically 3 words or less
      */
     description: string;
+    extension_data?: ExtensionData;
     /**
      * The number of input tokens used in the session. Retrieved from the provider's last usage.
      */
@@ -698,10 +723,6 @@ export type SessionMetadata = {
      * ID of the schedule that triggered this session, if any
      */
     schedule_id?: string | null;
-    /**
-     * Session-scoped TODO list content
-     */
-    todo_content?: string | null;
     /**
      * The total number of tokens used in the session. Retrieved from the provider's last usage.
      */
@@ -1524,6 +1545,37 @@ export type DecodeRecipeResponses = {
 
 export type DecodeRecipeResponse2 = DecodeRecipeResponses[keyof DecodeRecipeResponses];
 
+export type DeleteRecipeData = {
+    body: DeleteRecipeRequest;
+    path?: never;
+    query?: never;
+    url: '/recipes/delete';
+};
+
+export type DeleteRecipeErrors = {
+    /**
+     * Unauthorized - Invalid or missing API key
+     */
+    401: unknown;
+    /**
+     * Recipe not found
+     */
+    404: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type DeleteRecipeResponses = {
+    /**
+     * Recipe deleted successfully
+     */
+    204: void;
+};
+
+export type DeleteRecipeResponse = DeleteRecipeResponses[keyof DeleteRecipeResponses];
+
 export type EncodeRecipeData = {
     body: EncodeRecipeRequest;
     path?: never;
@@ -1546,6 +1598,33 @@ export type EncodeRecipeResponses = {
 };
 
 export type EncodeRecipeResponse2 = EncodeRecipeResponses[keyof EncodeRecipeResponses];
+
+export type ListRecipesData = {
+    body?: never;
+    path?: never;
+    query?: never;
+    url: '/recipes/list';
+};
+
+export type ListRecipesErrors = {
+    /**
+     * Unauthorized - Invalid or missing API key
+     */
+    401: unknown;
+    /**
+     * Internal server error
+     */
+    500: unknown;
+};
+
+export type ListRecipesResponses = {
+    /**
+     * Get recipe list successfully
+     */
+    200: ListRecipeResponse;
+};
+
+export type ListRecipesResponse = ListRecipesResponses[keyof ListRecipesResponses];
 
 export type ScanRecipeData = {
     body: ScanRecipeRequest;

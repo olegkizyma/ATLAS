@@ -862,6 +862,38 @@
         }
       }
     },
+    "/recipes/delete": {
+      "post": {
+        "tags": [
+          "Recipe Management"
+        ],
+        "operationId": "delete_recipe",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeleteRecipeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Recipe deleted successfully"
+          },
+          "401": {
+            "description": "Unauthorized - Invalid or missing API key"
+          },
+          "404": {
+            "description": "Recipe not found"
+          },
+          "500": {
+            "description": "Internal server error"
+          }
+        }
+      }
+    },
     "/recipes/encode": {
       "post": {
         "tags": [
@@ -891,6 +923,32 @@
           },
           "400": {
             "description": "Bad request"
+          }
+        }
+      }
+    },
+    "/recipes/list": {
+      "get": {
+        "tags": [
+          "Recipe Management"
+        ],
+        "operationId": "list_recipes",
+        "responses": {
+          "200": {
+            "description": "Get recipe list successfully",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ListRecipeResponse"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "Unauthorized - Invalid or missing API key"
+          },
+          "500": {
+            "description": "Internal server error"
           }
         }
       }
@@ -1717,6 +1775,17 @@
           }
         }
       },
+      "DeleteRecipeRequest": {
+        "type": "object",
+        "required": [
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          }
+        }
+      },
       "EmbeddedResource": {
         "type": "object",
         "required": [
@@ -2123,6 +2192,11 @@
           "propertyName": "type"
         }
       },
+      "ExtensionData": {
+        "type": "object",
+        "description": "Extension data containing all extension states\nKeys are in format \"extension_name.version\" (e.g., \"todo.v0\")",
+        "additionalProperties": {}
+      },
       "ExtensionEntry": {
         "allOf": [
           {
@@ -2249,6 +2323,20 @@
         "properties": {
           "message": {
             "type": "string"
+          }
+        }
+      },
+      "ListRecipeResponse": {
+        "type": "object",
+        "required": [
+          "recipe_manifest_responses"
+        ],
+        "properties": {
+          "recipe_manifest_responses": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/RecipeManifestResponse"
+            }
           }
         }
       },
@@ -2799,6 +2887,33 @@
           }
         }
       },
+      "RecipeManifestResponse": {
+        "type": "object",
+        "required": [
+          "name",
+          "isGlobal",
+          "recipe",
+          "lastModified",
+          "id"
+        ],
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "isGlobal": {
+            "type": "boolean"
+          },
+          "lastModified": {
+            "type": "string"
+          },
+          "name": {
+            "type": "string"
+          },
+          "recipe": {
+            "$ref": "#/components/schemas/Recipe"
+          }
+        }
+      },
       "RecipeParameter": {
         "type": "object",
         "required": [
@@ -3207,6 +3322,9 @@
             "type": "string",
             "description": "A short description of the session, typically 3 words or less"
           },
+          "extension_data": {
+            "$ref": "#/components/schemas/ExtensionData"
+          },
           "input_tokens": {
             "type": "integer",
             "format": "int32",
@@ -3227,11 +3345,6 @@
           "schedule_id": {
             "type": "string",
             "description": "ID of the schedule that triggered this session, if any",
-            "nullable": true
-          },
-          "todo_content": {
-            "type": "string",
-            "description": "Session-scoped TODO list content",
             "nullable": true
           },
           "total_tokens": {

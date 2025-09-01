@@ -1,6 +1,0 @@
-providers:
-  - name: ollama
-    model: llama3.2:3b
-    base_url: http://localhost:11434
-    api_key: ""
-    stream: true

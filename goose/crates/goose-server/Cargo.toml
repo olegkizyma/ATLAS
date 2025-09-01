@@ -15,7 +15,6 @@ goose = { path = "../goose" }
 mcp-core = { path = "../mcp-core" }
 goose-mcp = { path = "../goose-mcp" }
 mcp-server = { path = "../mcp-server" }
-mcp-tts-ukrainian = { path = "../mcp-tts-ukrainian" }
 rmcp = { workspace = true }
 schemars = "1.0"
 axum = { version = "0.8.1", features = ["ws", "macros"] }
@@ -54,3 +53,4 @@ path = "src/bin/generate_schema.rs"
 [dev-dependencies]
 tower = "0.5"
 async-trait = "0.1"
+tempfile = "3.15.0"

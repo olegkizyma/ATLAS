@@ -393,7 +393,9 @@ impl<'__s> ToSchema<'__s> for AnnotatedSchema {
         super::routes::recipe::create_recipe,
         super::routes::recipe::encode_recipe,
         super::routes::recipe::decode_recipe,
-        super::routes::recipe::scan_recipe
+        super::routes::recipe::scan_recipe,
+        super::routes::recipe::list_recipes,
+        super::routes::recipe::delete_recipe,
     ),
     components(schemas(
         super::routes::config_management::UpsertConfigQuery,
@@ -445,6 +447,7 @@ impl<'__s> ToSchema<'__s> for AnnotatedSchema {
         ModelInfo,
         SessionInfo,
         SessionMetadata,
+        goose::session::ExtensionData,
         super::routes::schedule::CreateScheduleRequest,
         super::routes::schedule::UpdateScheduleRequest,
         super::routes::schedule::KillJobResponse,
@@ -463,6 +466,9 @@ impl<'__s> ToSchema<'__s> for AnnotatedSchema {
         super::routes::recipe::DecodeRecipeResponse,
         super::routes::recipe::ScanRecipeRequest,
         super::routes::recipe::ScanRecipeResponse,
+        super::routes::recipe::RecipeManifestResponse,
+        super::routes::recipe::ListRecipeResponse,
+        super::routes::recipe::DeleteRecipeRequest,
         goose::recipe::Recipe,
         goose::recipe::Author,
         goose::recipe::Settings,

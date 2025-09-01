@@ -4,7 +4,6 @@ use goose_mcp::{
 };
 use mcp_server::router::RouterService;
 use mcp_server::{BoundedService, ByteTransport, Server};
-use mcp_tts_ukrainian::UkrainianTTSRouter;
 use tokio::io::{stdin, stdout};
 
 use std::sync::Arc;
@@ -28,17 +27,12 @@ pub async fn run_server(name: &str) -> Result<()> {
 
     tracing::info!("Starting MCP server");
 
-    // Support multiple aliases for Ukrainian TTS so UI configs / legacy scripts work
     let router: Option<Box<dyn BoundedService>> = match name {
         "developer" => Some(Box::new(RouterService(DeveloperRouter::new()))),
         "computercontroller" => Some(Box::new(RouterService(ComputerControllerRouter::new()))),
         "autovisualiser" => Some(Box::new(RouterService(AutoVisualiserRouter::new()))),
         "memory" => Some(Box::new(RouterService(MemoryRouter::new()))),
         "tutorial" => Some(Box::new(RouterService(TutorialRouter::new()))),
-        // Aliases: ukrainian-tts | ukrainiantts | ukrainian_tts | ukraine-tts
-        "ukrainian-tts" | "ukrainiantts" | "ukrainian_tts" | "ukraine-tts" => {
-            Some(Box::new(RouterService(UkrainianTTSRouter::new())))
-        }
         _ => None,
     };
 

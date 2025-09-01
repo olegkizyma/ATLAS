@@ -51,6 +51,17 @@
     ]
   },
   {
+    "id": "autovisualiser",
+    "name": "Auto Visualiser",
+    "description": "Automatic data visualisation via MCP-UI",
+    "command": "",
+    "link": "https://github.com/block/goose/tree/main/crates/goose-mcp/src/autovisualiser",
+    "installation_notes": "This is a built-in extension that comes with Goose and can be enabled on the Extensions page.",
+    "is_builtin": true,
+    "endorsed": true,
+    "environmentVariables": []
+  },
+  {
     "id": "blender-mcp",
     "name": "Blender",
     "description": "3D modeling and animation integration",
@@ -611,17 +622,6 @@
     "link": "https://github.com/block/vscode-mcp",
     "installation_notes": "Install using npx package manager.",
     "is_builtin": false,
-    "endorsed": true,
-    "environmentVariables": []
-  },
-  {
-    "id": "ukrainiantts",
-    "name": "Ukrainiantts",
-    "description": "Ukrainian Text-to-Speech with Google TTS fallback for voice synthesis",
-    "command": "",
-    "link": "https://github.com/block/goose/tree/main/crates/mcp-tts-ukrainian",
-    "installation_notes": "This is a built-in extension that comes with Goose and can be enabled on the Extensions page.",
-    "is_builtin": true,
     "endorsed": true,
     "environmentVariables": []
   },
