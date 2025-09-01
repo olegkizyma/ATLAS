@@ -140,31 +140,120 @@ class AtlasIntelligentChatManager {
         this.setInputState(false);
         
         try {
-            // Відправляємо повідомлення до оркестратора
-            const response = await fetch(`${this.apiBase}:5101/orchestrate`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: message,
-                    session_id: this.getSessionId(),
-                    voice_enabled: this.voiceSystem.enabled
-                })
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                await this.handleIntelligentResponse(data);
-            } else {
-                throw new Error(`Server responded with ${response.status}`);
-            }
+            // Використовуємо SSE стрім як оригінальний чат-менеджер
+            await this.streamFromOrchestrator(message);
             
         } catch (error) {
             this.log(`[ERROR] Failed to send message: ${error.message}`);
             this.addMessage(`❌ Помилка відправки: ${error.message}`, 'error');
         } finally {
             this.setInputState(true);
+        }
+    }
+    
+    async streamFromOrchestrator(message) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 min timeout
+        
+        try {
+            this.isStreaming = true;
+            this.log('[STREAM] Starting Orchestrator stream...');
+            
+            const orchestratorUrl = this.apiBase.replace(':5001', ':5101');
+            const response = await fetch(`${orchestratorUrl}/chat/stream`, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/json',
+                },
+                body: JSON.stringify({ 
+                    message: message, 
+                    sessionId: this.getSessionId(),
+                    voice_enabled: this.voiceSystem.enabled
+                }),
+                signal: controller.signal
+            });
+            
+            if (!response.ok) {
+                throw new Error(`Server responded with ${response.status}`);
+            }
+            
+            // Handle SSE stream
+            const reader = response.body.getReader();
+            const decoder = new TextDecoder();
+            let buffer = '';
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop(); // Keep incomplete line in buffer
+                
+                for (const line of lines) {
+                    if (line.startsWith('data: ')) {
+                        const data = line.substring(6);
+                        if (data === '[DONE]') {
+                            break;
+                        }
+                        
+                        try {
+                            const event = JSON.parse(data);
+                            await this.handleStreamEvent(event);
+                        } catch (e) {
+                            this.log(`[STREAM] Parse error: ${e.message}`);
+                        }
+                    }
+                }
+            }
+            
+        } catch (error) {
+            if (error.name === 'AbortError') {
+                this.log('[STREAM] Stream aborted by timeout');
+                this.addMessage('❌ Timeout: відповідь перевищила ліміт часу', 'error');
+            } else {
+                throw error;
+            }
+        } finally {
+            clearTimeout(timeoutId);
+            this.isStreaming = false;
+        }
+    }
+    
+    async handleStreamEvent(event) {
+        if (!event || !event.type) return;
+        
+        const agent = event.agent || 'system';
+        const content = event.content || '';
+        
+        switch (event.type) {
+            case 'info':
+                this.log(`[${agent.toUpperCase()}] ${content}`);
+                break;
+                
+            case 'agent_message':
+                if (content.trim()) {
+                    if (this.voiceSystem.enabled) {
+                        // Use intelligent voice processing
+                        await this.processVoiceResponse(content);
+                    } else {
+                        // Standard message display
+                        this.addMessage(content, 'assistant');
+                    }
+                }
+                break;
+                
+            case 'complete':
+                this.log('[STREAM] Stream completed');
+                break;
+                
+            case 'error':
+                this.addMessage(`❌ ${content}`, 'error');
+                this.log(`[ERROR] ${content}`);
+                break;
+                
+            default:
+                this.log(`[STREAM] Unknown event type: ${event.type}`);
         }
     }
     

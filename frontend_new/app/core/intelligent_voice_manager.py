@@ -21,7 +21,7 @@ class IntelligentVoiceManager:
     
     def __init__(self):
         self.voice_config = self._load_voice_config()
-        self.ukrainian_tts_url = "http://localhost:3000/tts"
+        self.ukrainian_tts_url = "http://localhost:3001/tts"  # Updated port
         self.fallback_enabled = False  # Вимкнено згідно вимог - тільки розумна система
         
     def _load_voice_config(self) -> Dict:
