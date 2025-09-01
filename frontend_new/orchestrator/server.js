@@ -184,6 +184,29 @@ function getRecommendedResources(sessionId, currentCycle) {
   return { reason: "Повний доступ до ресурсів" };
 }
 
+// Intent classifier (chat vs task) with Gemini keys rotation
+async function classifyIntentSafe(text) {
+  const sys = prompts.atlas?.intent_classifier_system || 'Answer one word: task or chat.';
+  const keys = [process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY, process.env.GENERATIVE_LANGUAGE_API_KEY].filter(Boolean);
+  const payload = { contents: [ { role: 'user', parts: [{ text: `${sys}\n\nТекст: ${text}\nВідповідь: ` }] } ] };
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const url = `${GEMINI_API_URL}/models/${GEMINI_MODEL}:generateContent?key=${keys[i]}`;
+      const { data } = await axios.post(url, payload, { timeout: 12000 });
+      const out = (data?.candidates?.[0]?.content?.parts?.[0]?.text || '').toLowerCase();
+      if (out.includes('task')) return 'task';
+      if (out.includes('chat')) return 'chat';
+    } catch (e) {
+      const st = e?.response?.status; if (!(st === 401 || st === 403 || st === 429)) break;
+    }
+  }
+  // Heuristic fallback
+  const t = (text || '').toLowerCase();
+  const taskHints = ['зроби', 'створи', 'налаштуй', 'запусти', 'перевір', 'згенеруй', 'інстал', 'деплой', 'configure', 'run', 'create', 'build', 'deploy'];
+  if (taskHints.some(h => t.includes(h))) return 'task';
+  return 'chat';
+}
+
 // MSP config (optional)
 const MSP_CONFIG_PATH = process.env.MSP_CONFIG_PATH || path.resolve(path.dirname(new URL(import.meta.url).pathname), '../config/msp.json');
 
@@ -532,6 +555,21 @@ app.post('/chat/stream', async (req, res) => {
   if (typeof atlasOut._attemptsUsed === 'number') {
     sseSend(res, { type: 'info', agent: 'Atlas', content: `[ATLAS] Спроб: ${atlasOut._attemptsUsed}/${ORCH_ATLAS_MAX_ATTEMPTS}` });
   }
+
+  // 1.1) Намір користувача: якщо це chat — завершуємо без виконання
+  try {
+    const intentRaw = String(atlasOut?.task_spec?.intent || '').toLowerCase();
+    const doNotExec = atlasOut?.task_spec?.do_not_execute === true;
+    let intent = (intentRaw === 'chat' || intentRaw === 'task') ? intentRaw : null;
+    if (!intent) {
+      intent = await classifyIntentSafe(message);
+    }
+    if (doNotExec || intent === 'chat') {
+      sseSend(res, { type: 'info', agent: 'system', content: 'Режим розмови: виконання не запускається.' });
+      sseSend(res, { type: 'complete', agent: 'system' });
+      return res.end();
+    }
+  } catch (_) { /* ігноруємо, продовжуємо пайплайн */ }
 
   // 1.5) Уточнення будуть виникати природно під час виконання Тетяни (без штучної інʼєкції тут)
 
@@ -957,7 +995,14 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
         }
       ]
     };
-    const response = await axios.post(url, ssePayload, { headers, responseType: 'stream', timeout: 0 });
+    let response;
+    try {
+      response = await axios.post(url, ssePayload, { headers, responseType: 'stream', timeout: 0 });
+    } catch (e) {
+      const status = e?.response?.status;
+      const msg = `[Tetiana][SSE] POST ${url} failed: ${status || e.message}`;
+      throw new Error(msg);
+    }
     return new Promise((resolve, reject) => {
       let collected = '';
       const answeredQuestions = new Set();
@@ -1007,6 +1052,7 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
     } catch (e) {
       const msg = e?.message || '';
       const tooLong = /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
+      const notFound = /404|not\s*found/i.test(msg);
       if (tooLong) {
         console.log('[CONTEXT_LIMIT] Goose Web reported token overflow. Falling back to SSE with extra compression...');
         const fallbackMax = Math.max(2000, Math.floor(ORCH_MAX_MISTRAL_USER_CHARS * 0.5));
@@ -1016,6 +1062,9 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
           console.log(`[CONTEXT_LIMIT] Fallback prompt size: chars=${compressed.length}, estTokens=${est2}`);
         } catch {}
         return await sendViaSse(compressed);
+      } else if (notFound) {
+        console.log('[ROUTE_FALLBACK] Goose Web /ws returned 404; trying /reply SSE...');
+        return await sendViaSse();
       }
       throw e;
     }
@@ -1217,7 +1266,10 @@ async function autoAnswerFromAtlas(requestObjOrContent, sessionId, res, gooseBas
         session_working_dir: process.cwd()
       };
       // Ждем ответ потока, но не проксируем его напрямую (ответ пойдет в основному стриме)
-      axios.post(url, payload, { headers, responseType: 'stream', timeout: 120000 }).catch(() => {});
+      axios.post(url, payload, { headers, responseType: 'stream', timeout: 120000 }).catch((e) => {
+        // Тихо ігноруємо 404 на /reply (часто від Goose Web UI, де немає цього маршруту)
+        const st = e?.response?.status; if (st && st !== 404) console.warn('[autoAnswerFromAtlas] /reply error:', st);
+      });
     }
 
     // Показати в UI, що Атлас відповів на уточнення (для прозрачности)
