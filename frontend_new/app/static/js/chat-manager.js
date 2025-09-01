@@ -7,7 +7,7 @@ class AtlasChatManager {
         this.isStreaming = false;
         this.isStreamPending = false;
         this.messages = [];
-        this.apiBase = window.location.origin;
+    this.apiBase = (window.ATLAS_CFG && window.ATLAS_CFG.orchestratorBase) || window.location.origin;
         this.retryCount = 0;
         this.maxRetries = 3;
         
@@ -64,8 +64,8 @@ class AtlasChatManager {
             this.addMessage('user', message);
             this.chatInput.value = '';
             
-            // Відправляємо через Atlas Core API
-            await this.streamToAtlasCore(message);
+            // Стрім безпосередньо до Node-оркестратора
+            await this.streamFromOrchestrator(message);
             
         } catch (error) {
             this.log(`Send error: ${error.message}`, 'error');
@@ -83,20 +83,19 @@ class AtlasChatManager {
         }
     }
     
-    async streamToAtlasCore(message) {
+    async streamFromOrchestrator(message) {
         const controller = new AbortController();
         const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 хв
         
         try {
             this.isStreaming = true;
-            this.log('Starting Atlas Core stream...');
-            
-            const response = await fetch(`${this.apiBase}/api/chat/stream`, {
+            this.log('Starting Orchestrator stream...');
+            const response = await fetch(`${this.apiBase}/chat/stream`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json',
                 },
-                body: JSON.stringify({ message }),
+                body: JSON.stringify({ message, sessionId: this.sessionId || undefined }),
                 signal: controller.signal
             });
             
@@ -110,11 +109,9 @@ class AtlasChatManager {
                 throw new Error('No response body reader available');
             }
             
-            let assistantMessage = '';
             const decoder = new TextDecoder();
-            
-            // Додаємо порожнє повідомлення помічника для стрімінгу
-            const messageElement = this.addMessage('assistant', '');
+            let currentAgent = null;
+            let currentElement = null;
             
             while (true) {
                 const { done, value } = await reader.read();
@@ -135,9 +132,23 @@ class AtlasChatManager {
                         
                         try {
                             const parsed = JSON.parse(data);
-                            if (parsed.content) {
-                                assistantMessage += parsed.content;
-                                this.updateMessage(messageElement, assistantMessage);
+                            const { type, agent, content } = parsed;
+                            if (type === 'start' || type === 'info') {
+                                // system/info events -> log panel only
+                                this.log(`${agent || 'system'}: ${content || type}`);
+                            } else if (type === 'agent_message') {
+                                // switch or continue agent stream
+                                if (currentAgent !== agent) {
+                                    currentAgent = agent;
+                                    currentElement = this.addMessage(agentLabel(agent), '');
+                                }
+                                if (content) {
+                                    this.appendToMessage(currentElement, content);
+                                }
+                            } else if (type === 'error') {
+                                this.addMessage('system', `Помилка оркестратора: ${parsed.error}`);
+                            } else if (type === 'complete') {
+                                this.log('Stream completed successfully');
                             }
                         } catch (e) {
                             // Ігноруємо помилки парсингу окремих chunk'ів
@@ -165,6 +176,11 @@ class AtlasChatManager {
     
     updateMessage(element, content) {
         element.textContent = content;
+        this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+    }
+    
+    appendToMessage(element, delta) {
+        element.textContent += delta;
         this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
     }
     
@@ -207,3 +223,11 @@ class AtlasChatManager {
 
 // Експортуємо для глобального використання
 window.AtlasChatManager = AtlasChatManager;
+
+function agentLabel(agent) {
+    const a = (agent || '').toLowerCase();
+    if (a.includes('grisha')) return 'grisha';
+    if (a.includes('tetiana') || a.includes('goose')) return 'tetiana';
+    if (a.includes('atlas')) return 'assistant';
+    return 'assistant';
+}

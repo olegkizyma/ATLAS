@@ -1,3 +1,5 @@
+- Add Node.js orchestrator in `orchestrator/` with SSE endpoint `/chat/stream` and prompts file `intelligeich.json`.
+- Frontend now reads `window.ATLAS_CFG.orchestratorBase` from `static/js/config.js`.
 # Оновлення ATLAS Frontend v2.0 - Чиста панель логів
 
 ## ✅ Виконані зміни
