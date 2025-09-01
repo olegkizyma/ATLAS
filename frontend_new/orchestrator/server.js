@@ -448,18 +448,23 @@ app.get('/health', (_, res) => {
 
 // LLM health: light probes (no secrets returned)
 app.get('/health/llm', async (_, res) => {
-  const out = { atlas: { configured: !!GEMINI_API_KEY, ok: false, status: null }, grisha: { configured: !!MISTRAL_API_KEY, ok: false, status: null } };
-  // Atlas probe
-  if (GEMINI_API_KEY) {
+  const out = { atlas: { configured: !!(GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY), ok: false, status: null }, grisha: { configured: !!MISTRAL_API_KEY, ok: false, status: null } };
+  // Atlas probe with key rotation
+  const keys = [process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY, process.env.GENERATIVE_LANGUAGE_API_KEY].filter(Boolean);
+  for (let i = 0; i < keys.length; i++) {
     try {
-      const url = `${GEMINI_API_URL}/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
+      const url = `${GEMINI_API_URL}/models/${GEMINI_MODEL}:generateContent?key=${keys[i]}`;
       const payload = { contents: [ { role: 'user', parts: [{ text: 'ping' }] } ] };
       const { status } = await axios.post(url, payload, { timeout: 8000 });
       out.atlas.ok = status >= 200 && status < 300;
       out.atlas.status = status;
+      if (out.atlas.ok) break;
     } catch (e) {
       out.atlas.ok = false;
       out.atlas.status = e?.response?.status || 'error';
+      // try next key if 401/403/429
+      const st = e?.response?.status;
+      if (!(st === 401 || st === 403 || st === 429)) break;
     }
   }
   // Grisha probe
@@ -514,7 +519,15 @@ app.post('/chat/stream', async (req, res) => {
   // 1) Atlas enriches
     sseSend(res, { type: 'info', agent: 'Atlas', content: '[ATLAS] Аналізую запит та збагачую…' });
   const msps = await getAvailableMsps();
-  const atlasOut = await callAtlas(message, sessionId, { msps });
+  let atlasOut;
+  try {
+    atlasOut = await callAtlas(message, sessionId, { msps });
+  } catch (e) {
+    // Мʼякий фолбэк: відповідь у чат‑режимі без запуску виконання
+    sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Зараз сервіс планування перевантажений (429). Відповім коротко і без запуску виконання: ' + (message.length > 160 ? message.slice(0,160) + '…' : message) });
+    sseSend(res, { type: 'complete', agent: 'system' });
+    return res.end();
+  }
   sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${atlasOut.user_reply || ''}` });
   if (typeof atlasOut._attemptsUsed === 'number') {
     sseSend(res, { type: 'info', agent: 'Atlas', content: `[ATLAS] Спроб: ${atlasOut._attemptsUsed}/${ORCH_ATLAS_MAX_ATTEMPTS}` });
@@ -696,58 +709,84 @@ async function callAtlas(userMessage, sessionId, options = {}) {
     mspsContext = `\n\nДодатковий контекст: Доступні MSP сервери (ім'я/порт/опис/статус) — ${capHead(s, ORCH_MAX_MSPS_CHARS)}`;
   }
 
-  if (!GEMINI_API_KEY) {
+  // Prepare candidate keys (rotate on 429/401/403)
+  const candidateKeys = [
+    process.env.GEMINI_API_KEY,
+    process.env.GOOGLE_API_KEY,
+    process.env.GENERATIVE_LANGUAGE_API_KEY
+  ].filter((v, i, a) => v && a.indexOf(v) === i);
+  if (candidateKeys.length === 0) {
     throw new Error('Atlas (Gemini) API key not configured');
   }
 
-  try {
-    const url = `${GEMINI_API_URL}/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-    const payload = {
-      contents: [
-        { role: 'user', parts: [{ text: `${sys}\n\n${instruction}${mspsContext}\n\nUser: ${userMessage}` }] }
-      ]
-    };
+  const payload = {
+    contents: [
+      { role: 'user', parts: [{ text: `${sys}\n\n${instruction}${mspsContext}\n\nUser: ${userMessage}` }] }
+    ]
+  };
 
-    let attempts = 0;
-    let lastErr = null;
-    let text = '';
-    while (attempts < ORCH_ATLAS_MAX_ATTEMPTS) {
-      attempts += 1;
+  const perKeyAttempts = Math.max(1, Math.min(ORCH_ATLAS_MAX_ATTEMPTS, 3));
+  let usedAttempts = 0;
+  let lastErr = null;
+  let text = '';
+  let keyUsed = null;
+
+  for (let ki = 0; ki < candidateKeys.length; ki++) {
+    const key = candidateKeys[ki];
+    if (!key) continue;
+    for (let a = 1; a <= perKeyAttempts; a++) {
+      usedAttempts += 1;
       try {
+        const url = `${GEMINI_API_URL}/models/${GEMINI_MODEL}:generateContent?key=${key}`;
         const { data } = await axios.post(url, payload, { timeout: ORCH_ATLAS_TIMEOUT_MS });
         text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+        keyUsed = key;
         break;
       } catch (e) {
         lastErr = e;
         const status = e?.response?.status;
-        if (status === 429 || (status >= 500 && status < 600)) {
-          await sleep(backoffDelay(attempts));
+        // On rate limit or auth, try next key sooner; otherwise backoff and retry
+        if (status === 429 || status === 401 || status === 403) {
+          if (ki < candidateKeys.length - 1) {
+            // switch to next key
+            break;
+          }
+          await sleep(backoffDelay(a));
           continue;
         }
+        if (status >= 500 && status < 600) {
+          await sleep(backoffDelay(a));
+          continue;
+        }
+        // Fatal - stop immediately
         throw e;
       }
     }
-    if (!text) throw lastErr || new Error('empty response from Atlas');
+    if (text) break;
+  }
 
-    // Parse: first part for user, last JSON block for task
-    const jsonMatch = text.match(/\{[\s\S]*\}$/);
-    let taskSpec = null;
-    if (jsonMatch) {
-      try { taskSpec = JSON.parse(jsonMatch[0]); } catch {}
-    }
+  if (!text) {
+    console.warn('Gemini call failed:', lastErr?.message);
+    throw new Error('Atlas недоступний: ' + (lastErr?.message || 'невідома помилка'));
+  }
+
+  // Parse: first part for user, last JSON block for task
+  const jsonMatch = text.match(/\{[\s\S]*\}$/);
+  let taskSpec = null;
+  if (jsonMatch) {
+    try { taskSpec = JSON.parse(jsonMatch[0]); } catch {}
+  }
   const userReplyRaw = taskSpec ? text.replace(jsonMatch[0], '').trim() : text;
   const userReply = cleanUserReply(userReplyRaw);
 
-    return {
-      user_reply: userReply || 'Готово.',
-      task_spec: taskSpec || {
-        title: 'Задача', summary: userMessage, inputs: [userMessage], steps: [], constraints: [], success_criteria: [], tool_hints: {}
-      }
-    };
-  } catch (e) {
-    console.warn('Gemini call failed:', e.message);
-    throw new Error('Atlas недоступний: ' + (e.message || 'невідома помилка'));
-  }
+  return {
+    user_reply: userReply || 'Готово.',
+    task_spec: taskSpec || {
+      title: 'Задача', summary: userMessage, inputs: [userMessage], steps: [], constraints: [], success_criteria: [], tool_hints: {}
+    },
+    _attemptsUsed: usedAttempts,
+    _keyUsed: keyUsed ? (keyUsed === process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY' : keyUsed === process.env.GOOGLE_API_KEY ? 'GOOGLE_API_KEY' : 'GENERATIVE_LANGUAGE_API_KEY') : null
+  };
 }
 
 // Create one clarifying question Tetiana might ask
@@ -759,9 +798,17 @@ async function generateTetianaClarifyingQuestion(taskSpec) {
       // heuristic fallback: no question
       return '';
     }
-  const url = `${GEMINI_API_URL}/models/${GEMINI_MODEL}:generateContent?key=${GEMINI_API_KEY}`;
-    const payload = { contents: [ { role: 'user', parts: [{ text: `${base}\n\n${ask}` }] } ] };
-  const { data } = await axios.post(url, payload, { timeout: ORCH_ATLAS_TIMEOUT_MS });
+  const keys = [process.env.GEMINI_API_KEY, process.env.GOOGLE_API_KEY, process.env.GENERATIVE_LANGUAGE_API_KEY].filter(Boolean);
+  let data = null; let lastErr = null;
+  for (let i = 0; i < keys.length; i++) {
+    try {
+      const url = `${GEMINI_API_URL}/models/${GEMINI_MODEL}:generateContent?key=${keys[i]}`;
+      const payload = { contents: [ { role: 'user', parts: [{ text: `${base}\n\n${ask}` }] } ] };
+      const resp = await axios.post(url, payload, { timeout: ORCH_ATLAS_TIMEOUT_MS });
+      data = resp.data; break;
+    } catch (e) { lastErr = e; const st = e?.response?.status; if (!(st === 401 || st === 403 || st === 429)) break; }
+  }
+  if (!data) throw lastErr || new Error('clarify failed');
     const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
     return (text || '').trim();
   } catch {
