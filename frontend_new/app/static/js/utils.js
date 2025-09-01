@@ -4,7 +4,7 @@
  */
 
 // Утиліти для форматування часу
-export const timeUtils = {
+window.timeUtils = {
     getCurrentTime() {
         return new Date().toLocaleTimeString();
     },
@@ -15,7 +15,7 @@ export const timeUtils = {
 };
 
 // Утиліти для DOM
-export const domUtils = {
+window.domUtils = {
     createElement(tag, className, textContent) {
         const element = document.createElement(tag);
         if (className) element.className = className;
@@ -29,7 +29,7 @@ export const domUtils = {
 };
 
 // Утиліти для API запитів
-export const apiUtils = {
+window.apiUtils = {
     async get(url) {
         try {
             const response = await fetch(url);
@@ -58,7 +58,7 @@ export const apiUtils = {
 };
 
 // Утиліти для дебагінгу
-export const debugUtils = {
+window.debugUtils = {
     log(message, data = null) {
         console.log(`[ATLAS] ${message}`, data || '');
     },
