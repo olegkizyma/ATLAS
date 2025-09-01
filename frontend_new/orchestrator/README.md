@@ -15,7 +15,6 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
 - GEMINI_MODEL=gemini-1.5-flash
 - MISTRAL_API_KEY=...
 - MISTRAL_MODEL=mistral-small-latest
-- GOOSE_VISION_HEADER="Copilot-Vision-Request:true" — HTTP-заголовок для активації візуального аналізу в Goose/Tetiana.
  - ORCH_GRISHA_MAX_ATTEMPTS (default 20) — максимальна кількість спроб для Гріші
  - ORCH_MAX_REFINEMENT_CYCLES (default 20) — кількість циклів довиконання/верифікації після початкового запуску
 

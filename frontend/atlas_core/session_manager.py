@@ -504,17 +504,10 @@ class SessionManager:
             logger.info(f"🕸️ POST {url} session={session_name}")
             with requests.post(url, json=payload, headers=headers, stream=True, timeout=timeout) as resp:
                 if resp.status_code != 200:
-                    # Мягкий ретрай: если 400 и намекает на vision/header — пробуем WS
                     try:
                         body_preview = resp.text[:500]
                     except Exception:
                         body_preview = "<no body>"
-                    if resp.status_code == 400:
-                        bp = (body_preview or "").lower()
-                        if any(k in bp for k in ("vision", "copilot-vision", "header", "missing", "requires")):
-                            ws_res = _run_ws_once()
-                            if ws_res.get("success"):
-                                return ws_res
                     return {"success": False, "error": f"HTTP {resp.status_code}", "response": body_preview}
 
                 chunks: list[str] = []
