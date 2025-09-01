@@ -14,6 +14,22 @@ FRONTEND_PORT=5001
 
 mkdir -p "$LOG_DIR"
 
+# Optionally load extra context limits if file exists
+if [[ -f "$ROOT/context_limits.env" ]]; then
+  echo "==> Loading optional context limits from context_limits.env"
+  # Export only ORCH_ and GOOSE_ variables to avoid side effects
+  # shellcheck disable=SC2046
+  set -a
+  # Read and export lines starting with ORCH_ or GOOSE_
+  while IFS= read -r line; do
+    case "$line" in
+      ORCH_*|GOOSE_*) export "$line" || true ;;
+      *) : ;;
+    esac
+  done < <(grep -E '^(ORCH_|GOOSE_)' "$ROOT/context_limits.env" | sed 's/[[:space:]]*#.*$//')
+  set +a
+fi
+
 echo "==> Cleaning ports ($GOOSE_PORT, $ORCH_PORT, $FRONTEND_PORT)"
 cleanup_port() {
   local port="$1"

@@ -60,23 +60,17 @@ class AtlasServer:
         logger.info(f"Atlas Server initialized at {host}:{port}")
     
     def _init_atlas_core(self):
-        """Ініціалізуємо Atlas Core"""
+        """Ініціалізуємо Atlas Core (локальна версія)"""
         try:
-            # Імпортуємо Atlas Core з основної директорії
-            atlas_core_path = atlas_root / 'frontend' / 'atlas_core'
-            if atlas_core_path.exists():
-                sys.path.insert(0, str(atlas_core_path))
-                
-                try:
-                    from atlas_integration import AtlasCore
-                    self.atlas_core = AtlasCore()
-                    logger.info("Atlas Core loaded successfully")
-                except ImportError as e:
-                    logger.warning(f"Could not import AtlasCore: {e}")
-                    logger.info("Running in test mode without Atlas Core")
-            else:
-                logger.warning("Atlas Core not found, running in test mode")
-                
+            # Використовуємо локальну інтеграцію в app/core
+            sys.path.insert(0, str(current_dir / 'core'))
+            try:
+                from atlas_integration import AtlasCore
+                self.atlas_core = AtlasCore()
+                logger.info("Local Atlas Core loaded successfully")
+            except ImportError as e:
+                logger.warning(f"Could not import local AtlasCore: {e}")
+                logger.info("Running in basic mode without Atlas Core")
         except Exception as e:
             logger.error(f"Atlas Core initialization error: {e}")
             logger.info("Continuing without Atlas Core")
