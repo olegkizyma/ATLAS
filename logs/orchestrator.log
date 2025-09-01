@@ -1,1 +1,4 @@
 Orchestrator running on http://127.0.0.1:5101
+MSP command discovery failed: Command failed: goose msp list --json
+/bin/sh: goose: command not found
+
