@@ -16,6 +16,23 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
 - MISTRAL_API_KEY=...
 - MISTRAL_MODEL=mistral-small-latest
 
+## Налаштування backoff/таймаутів (опційно через .env)
+
+Для більш стабільної роботи під 429/5xx введені параметри експоненційного backoff із джиттером і таймаути запитів:
+
+- ORCH_BACKOFF_BASE_MS (default 400) — базова затримка для спроби №1
+- ORCH_BACKOFF_MAX_MS (default 8000) — верхня межа затримки
+- ORCH_BACKOFF_JITTER_MS (default 400) — випадковий джиттер, додається до затримки
+- ORCH_ATLAS_TIMEOUT_MS (default 45000) — таймаут запитів до Gemini
+- ORCH_GRISHA_TIMEOUT_MS (default 45000) — таймаут запитів до Mistral
+
+Алгоритм: delay = min(ORCH_BACKOFF_BASE_MS * 2^(attempt-1), ORCH_BACKOFF_MAX_MS) + random(0..ORCH_BACKOFF_JITTER_MS)
+
+Також доступні:
+
+- ORCH_ATLAS_MAX_ATTEMPTS (default 6)
+- ORCH_GRISHA_MAX_ATTEMPTS (default 10)
+
 ## Run
 1) Start Goose:
    cd /Users/dev/Documents/GitHub/ATLAS/goose && /Users/dev/Documents/GitHub/ATLAS/goose/target/release/goose web --port 3000
