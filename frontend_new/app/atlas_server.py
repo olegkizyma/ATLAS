@@ -160,6 +160,9 @@ class AtlasServer:
             logger.error(f"Could not import AtlasAPI: {e}")
             # Створюємо базову заглушку API
             self._create_basic_api()
+        
+        # Завжди ініціалізуємо Voice API - це ключова частина розумної системи
+        self._init_voice_api()
     
     def _create_basic_api(self):
         """Створюємо базові API ендпойнти як заглушку"""
@@ -187,6 +190,39 @@ class AtlasServer:
         def logs_fallback():
             """Fallback для старих запитів логів"""
             return api_logs()
+    
+    def _init_voice_api(self):
+        """Ініціалізуємо розумний Voice API"""
+        try:
+            # Додаємо поточну директорію до шляху для voice API
+            sys.path.insert(0, str(current_dir / 'api'))
+            from voice_api import voice_bp
+            
+            # Реєструємо Blueprint для voice API
+            self.app.register_blueprint(voice_bp)
+            logger.info("Intelligent Voice API initialized successfully")
+            
+            # Додаємо інформаційний ендпойнт
+            @self.app.route('/api/system/voices')
+            def system_voices():
+                return {
+                    'voice_system': 'operational',
+                    'agents': ['atlas', 'tetyana', 'grisha'],
+                    'features': [
+                        'automatic_speaker_detection',
+                        'intelligent_voice_mapping',
+                        'ukrainian_tts_synthesis',
+                        'response_signature_tagging'
+                    ],
+                    'timestamp': time.time()
+                }
+                
+        except ImportError as e:
+            logger.error(f"Could not import Voice API: {e}")
+            logger.warning("Voice system unavailable - continuing without voice features")
+        except Exception as e:
+            logger.error(f"Voice API initialization error: {e}")
+            logger.warning("Voice system unavailable due to initialization error")
     
     def run(self, debug=False):
         """Запускаємо сервер"""

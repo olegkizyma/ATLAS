@@ -512,25 +512,25 @@ app.post('/chat/stream', async (req, res) => {
     }
 
   // 1) Atlas enriches
-    sseSend(res, { type: 'info', agent: 'Atlas', content: 'Аналізую запит та збагачую…' });
+    sseSend(res, { type: 'info', agent: 'Atlas', content: '[ATLAS] Аналізую запит та збагачую…' });
   const msps = await getAvailableMsps();
   const atlasOut = await callAtlas(message, sessionId, { msps });
-  sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasOut.user_reply || '' });
+  sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${atlasOut.user_reply || ''}` });
   if (typeof atlasOut._attemptsUsed === 'number') {
-    sseSend(res, { type: 'info', agent: 'Atlas', content: `Спроб: ${atlasOut._attemptsUsed}/${ORCH_ATLAS_MAX_ATTEMPTS}` });
+    sseSend(res, { type: 'info', agent: 'Atlas', content: `[ATLAS] Спроб: ${atlasOut._attemptsUsed}/${ORCH_ATLAS_MAX_ATTEMPTS}` });
   }
 
   // 1.5) Уточнення будуть виникати природно під час виконання Тетяни (без штучної інʼєкції тут)
 
     // 2) Grisha checks
-  sseSend(res, { type: 'info', agent: 'Grisha', content: 'Перевіряю політики…' });
+  sseSend(res, { type: 'info', agent: 'Grisha', content: '[ГРИША] Перевіряю політики…' });
     const grishaOut = await callGrisha({ ...atlasOut.task_spec, _msps: msps }, sessionId);
     if (grishaOut?.inter_agent_note_ua) {
-      sseSend(res, { type: 'agent_message', agent: 'Grisha', content: grishaOut.inter_agent_note_ua });
+      sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `[ГРИША] ${grishaOut.inter_agent_note_ua}` });
     }
-  sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `isSafe=${grishaOut.isSafe}. ${grishaOut.rationale ? grishaOut.rationale : ''}` });
+  sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `[ГРИША] isSafe=${grishaOut.isSafe}. ${grishaOut.rationale ? grishaOut.rationale : ''}` });
     if (typeof grishaOut._attemptsUsed === 'number') {
-      sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (policy): ${grishaOut._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
+      sseSend(res, { type: 'info', agent: 'Grisha', content: `[ГРИША] Спроб (policy): ${grishaOut._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
     }
 
     if (!grishaOut.isSafe) {
@@ -544,7 +544,7 @@ app.post('/chat/stream', async (req, res) => {
     }
 
   // 3) Tetiana executes
-  sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Виконую задачу…' });
+  sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Виконую задачу…' });
   
   // Ініціалізуємо стан сесії для адаптивного виконання
   updateSessionState(sessionId, 1);
@@ -574,9 +574,9 @@ app.post('/chat/stream', async (req, res) => {
       );
       
       const verifySession = `${sessionId || `sess-${Date.now()}`}-verify-${cycle}`;
-      sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Перевіряю результати…' });
+      sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Перевіряю результати…' });
       if (plan?.inter_agent_note_ua) {
-        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: plan.inter_agent_note_ua });
+        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `[ГРИША] ${plan.inter_agent_note_ua}` });
       }
       if (typeof plan._attemptsUsed === 'number') {
   sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (verification plan): ${plan._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
@@ -1012,7 +1012,28 @@ async function streamTetianaExecute(taskSpec, sessionId, res, adaptiveContext = 
   if (summarizedTsJson.length < originalTs.length) {
     console.log(`[ContextSummarizer] TaskSpec reduced: ${originalTs.length} -> ${summarizedTsJson.length} chars`);
   }
-  const messageText = `Виконай наступну задачу (TaskSpec JSON нижче) максимально надійно. Після КОЖНОГО кроку виконай коротку перевірку успіху і, якщо щось не спрацювало, динамічно переформулюй наступні дії (в межах task_spec та його contingencies), доки не отримаєш доказ виконання або вичерпаєш варіанти. Наприкінці обов'язково надай мапу criterion->evidence.\nTaskSpec: ${summarizedTsJson}${mspsContext}`;
+  
+  // Використовуємо новий розумний промпт для Тетяни з intelligeich.json
+  const tetyanaSystem = prompts.tetyana?.system || 'Ти - Тетяна, досвідчена виконавиця завдань та практикуюча спеціалістка.';
+  const tetyanaApproach = prompts.tetyana?.execution_approach || {};
+  
+  // Створюємо розумний промпт з урахуванням ролі Тетяни
+  const roleContext = `[ТЕТЯНА] ${tetyanaSystem}
+  
+Твоя методологія роботи:
+- ${tetyanaApproach.methodology || 'покроковий детальний підхід'}
+- ${tetyanaApproach.verification || 'збір конкретних доказів виконання'}
+- ${tetyanaApproach.reporting || 'чіткі звіти з результатами'}
+- ${tetyanaApproach.problem_solving || 'практичне вирішення проблем по ходу'}`;
+  
+  const messageText = `${roleContext}
+
+Виконай наступну задачу (TaskSpec JSON нижче) максимально надійно відповідно до своєї ролі. Після КОЖНОГО кроку виконуй коротку перевірку успіху і, якщо щось не спрацювало, динамічно переформульовуй наступні дії (в межах task_spec та його contingencies), доки не отримаєш доказ виконання або вичерпаєш варіанти. 
+
+Завжди підписуйся як [ТЕТЯНА] та наприкінці обов'язково надавай мапу criterion->evidence.
+
+TaskSpec: ${summarizedTsJson}${mspsContext}`;
+  
   return streamTetianaMessage(messageText, sessionId, res);
 }
 
