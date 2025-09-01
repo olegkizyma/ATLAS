@@ -85,11 +85,8 @@ wait_for_port() {
 }
 
 echo "==> Starting Tetiana (Goose) on :$GOOSE_PORT"
-# When SSE (/reply) is forced, prefer goosed agent server (exposes /reply).
+# Use regular goose web instead of goosed for better compatibility
 USE_GOOSED=false
-case "${ORCH_FORCE_GOOSE_REPLY:-}" in
-  true|1|yes|on|TRUE|YES|ON) USE_GOOSED=true ;;
-esac
 
 if $USE_GOOSED; then
   # Prefer port from goosed config if available (may be ignored by binary)
@@ -106,9 +103,9 @@ if $USE_GOOSED; then
     cd "$GOOSE_DIR"
     # Ensure goosed reads local config from this repo
     : > "$LOG_DIR/goose.log"
-    # Defaults can be overridden via environment (context_limits.env)
-  GOOSE_PROVIDER="${GOOSE_PROVIDER:-github_copilot}" \
-  GOOSE_MODEL="${GOOSE_MODEL:-gpt-4o}" \
+    # Use config from goosed configure (no hardcoded defaults)
+  GOOSE_PROVIDER=github_copilot \
+  GOOSE_MODEL=claude-sonnet-4 \
     XDG_CONFIG_HOME="$GOOSE_DIR" \
       nohup "$GOOSED_BIN" agent >> "$LOG_DIR/goose.log" 2>&1 &
     echo $! > "$LOG_DIR/goose.pid"
@@ -150,10 +147,10 @@ else
     echo "!! Goose binary not found: $GOOSE_BIN" >&2
     exit 1
   fi
-  echo "   - Starting goose web (WS UI)"
+  echo "   - Starting goose web (WS UI) with local config"
   (
     cd "$GOOSE_DIR"
-    nohup "$GOOSE_BIN" web --port "$GOOSE_PORT" > "$LOG_DIR/goose.log" 2>&1 &
+    XDG_CONFIG_HOME="$GOOSE_DIR" nohup "$GOOSE_BIN" web --port "$GOOSE_PORT" > "$LOG_DIR/goose.log" 2>&1 &
     echo $! > "$LOG_DIR/goose.pid"
   )
   wait_for_port "$GOOSE_PORT" "Goose Web"

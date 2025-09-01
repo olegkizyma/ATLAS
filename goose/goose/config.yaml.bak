@@ -1,0 +1,2 @@
+GOOSE_PROVIDER: github_copilot
+GOOSE_MODEL: gpt-4o
