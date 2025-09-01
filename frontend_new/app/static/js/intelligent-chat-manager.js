@@ -140,25 +140,8 @@ class AtlasIntelligentChatManager {
         this.setInputState(false);
         
         try {
-            // Відправляємо повідомлення до оркестратора
-            const response = await fetch(`${this.apiBase}:5101/orchestrate`, {
-                method: 'POST',
-                headers: {
-                    'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                    message: message,
-                    session_id: this.getSessionId(),
-                    voice_enabled: this.voiceSystem.enabled
-                })
-            });
-            
-            if (response.ok) {
-                const data = await response.json();
-                await this.handleIntelligentResponse(data);
-            } else {
-                throw new Error(`Server responded with ${response.status}`);
-            }
+            // Потоковий стрім із Node Orchestrator (SSE)
+            await this.streamFromOrchestrator(message);
             
         } catch (error) {
             this.log(`[ERROR] Failed to send message: ${error.message}`);
@@ -185,6 +168,93 @@ class AtlasIntelligentChatManager {
         }
     }
     
+    async streamFromOrchestrator(message) {
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 хв
+        this.isStreaming = true;
+        
+        try {
+            this.log('Starting Orchestrator stream...');
+            const response = await fetch(`${this.apiBase}/chat/stream`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ message, sessionId: this.getSessionId() }),
+                signal: controller.signal
+            });
+            
+            if (!response.ok) {
+                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+            }
+            
+            const reader = response.body?.getReader();
+            if (!reader) throw new Error('No response body reader available');
+            
+            const decoder = new TextDecoder();
+            let currentAgent = null;
+            let currentTextNode = null;
+            
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
+                
+                const chunk = decoder.decode(value, { stream: true });
+                const lines = chunk.split('\n');
+                
+                for (const line of lines) {
+                    if (!line || line.trim() === '') continue;
+                    if (!line.startsWith('data: ')) continue;
+                    const data = line.slice(6);
+                    if (data === '[DONE]') { this.log('Stream completed'); break; }
+                    
+                    try {
+                        const evt = JSON.parse(data);
+                        const { type, agent, content } = evt;
+                        if (type === 'start' || type === 'info') {
+                            this.log(`${agent || 'system'}: ${content || type}`);
+                            continue;
+                        }
+                        if (type === 'error') {
+                            this.addMessage(`Помилка оркестратора: ${evt.error || 'невідома'}`, 'error');
+                            continue;
+                        }
+                        if (type === 'complete') {
+                            this.log('Orchestrator signaled completion');
+                            continue;
+                        }
+                        if (type === 'agent_message') {
+                            const role = agentLabel(agent);
+                            const cls = role === 'assistant' ? 'assistant' : role; // fall back to 'assistant'
+                            if (currentAgent !== cls) {
+                                currentAgent = cls;
+                                this.addMessage('', cls);
+                                const lastMsg = this.chatContainer.lastElementChild;
+                                currentTextNode = lastMsg ? lastMsg.querySelector('.message-text') : null;
+                            }
+                            if (content) {
+                                if (currentTextNode) {
+                                    this.appendToMessage(currentTextNode, content);
+                                } else {
+                                    this.addMessage(content, cls);
+                                }
+                            }
+                        }
+                    } catch (_) {
+                        // ігноруємо нечитаємі chunk-и
+                    }
+                }
+            }
+        } finally {
+            clearTimeout(timeoutId);
+            this.isStreaming = false;
+        }
+    }
+
+    appendToMessage(messageTextElement, delta) {
+        if (!messageTextElement) return;
+        messageTextElement.innerHTML += this.formatMessage(delta);
+        this.scrollToBottom();
+    }
+
     async processVoiceResponse(responseText) {
         try {
             // Визначаємо агента та підготовляємо відповідь
@@ -414,3 +484,12 @@ class AtlasIntelligentChatManager {
 
 // Ініціалізуємо глобальний менеджер чату
 window.AtlasChatManager = AtlasIntelligentChatManager;
+
+// helper maps agent name to UI role label
+function agentLabel(agent) {
+    const a = (agent || '').toLowerCase();
+    if (a.includes('grisha')) return 'grisha';
+    if (a.includes('tetiana') || a.includes('goose')) return 'tetiana';
+    if (a.includes('atlas')) return 'assistant';
+    return 'assistant';
+}
