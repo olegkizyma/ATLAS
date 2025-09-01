@@ -39,6 +39,11 @@ const ORCH_MAX_EXEC_REPORT_CHARS = parseInt(process.env.ORCH_MAX_EXEC_REPORT_CHA
 const ORCH_MAX_VERIFY_EVIDENCE_CHARS = parseInt(process.env.ORCH_MAX_VERIFY_EVIDENCE_CHARS || '10000', 10);
 const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '28000', 10);
 const ORCH_MAX_MISTRAL_SYSTEM_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_SYSTEM_CHARS || '4000', 10);
+// Feature flags
+const ORCH_AUTO_TRUNCATE_ON_TOKEN_LIMIT = String(process.env.ORCH_AUTO_TRUNCATE_ON_TOKEN_LIMIT || 'true') === 'true';
+const ORCH_CONTEXT_COMPRESSION_RATIO = parseFloat(process.env.ORCH_CONTEXT_COMPRESSION_RATIO || '0.7');
+// Force using goosed /reply (SSE) instead of Goose WebSocket interface
+const ORCH_FORCE_GOOSE_REPLY = String(process.env.ORCH_FORCE_GOOSE_REPLY || 'false') === 'true';
 
 // Smart Context Management
 const contextSummarizer = new ContextSummarizer(
@@ -291,6 +296,17 @@ function smartTruncate(system, user, maxTokens = 15000) {
     system: truncatedSystem, 
     user: truncatedUser 
   };
+}
+
+// Ensure a text chunk is within safe char bounds; logs when truncation happens
+function ensurePromptBounds(text, maxChars, label = 'prompt') {
+  if (!text) return '';
+  const s = String(text);
+  if (!ORCH_AUTO_TRUNCATE_ON_TOKEN_LIMIT) return s;
+  if (s.length <= maxChars) return s;
+  const truncated = capTail(s, maxChars);
+  console.log(`[CONTEXT_LIMIT] ${label} length ${s.length} > ${maxChars}, truncated to ${truncated.length}`);
+  return truncated;
 }
 function summarizeTaskSpec(ts, { maxChars = ORCH_MAX_TASKSPEC_SUMMARY_CHARS, maxArray = 10, maxStr = 500 } = {}) {
   try {
@@ -853,14 +869,22 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
 
   // Автовизначення режиму Goose: web (ws) чи goosed (/reply)
   const gooseBase = GOOSE_BASE_URL.replace(/\/$/, '');
-  const isWeb = await isGooseWeb(gooseBase);
+  const isWebDetected = await isGooseWeb(gooseBase);
+  const isWeb = ORCH_FORCE_GOOSE_REPLY ? false : isWebDetected;
+
+  // Guard prompt size to avoid 400 from upstream providers
+  const safeMessageText = ensurePromptBounds(messageText, ORCH_MAX_MISTRAL_USER_CHARS, 'Tetiana prompt');
+  try {
+    const est = estimateTokens(safeMessageText);
+    console.log(`[CONTEXT_LIMIT] Tetiana prompt size: chars=${safeMessageText.length}, estTokens=${est}, mode=${isWeb ? 'websocket' : 'sse'}`);
+  } catch {}
 
   const payload = {
     messages: [
       {
         role: 'user',
         created: Math.floor(Date.now() / 1000),
-        content: [{ type: 'text', text: messageText }]
+        content: [{ type: 'text', text: safeMessageText }]
       }
     ],
     session_id: sessionId || `sess-${Date.now()}`,
@@ -873,18 +897,20 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
   };
   if (secret) headers['X-Secret-Key'] = secret;
 
-  if (isWeb) {
-    // Потік через WebSocket /ws з авто-відповідями Атласа на уточнення
-    return streamTetianaWs(gooseBase, payload, res, sessionId);
-  } else {
-    // Потік через goosed /reply (SSE)
+  const sendViaSse = async (overrideText) => {
+    const text = overrideText || safeMessageText;
     const url = `${gooseBase}/reply`;
-    const response = await axios.post(url, payload, {
-      headers,
-      responseType: 'stream',
-      timeout: 0
-    });
-
+    const ssePayload = {
+      ...payload,
+      messages: [
+        {
+          role: 'user',
+          created: Math.floor(Date.now() / 1000),
+          content: [{ type: 'text', text }]
+        }
+      ]
+    };
+    const response = await axios.post(url, ssePayload, { headers, responseType: 'stream', timeout: 0 });
     return new Promise((resolve, reject) => {
       let collected = '';
       const answeredQuestions = new Set();
@@ -909,27 +935,46 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
                 if (c.type === 'text' && c.text) {
                   sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: c.text });
                   collected += c.text + '\n';
-                  // Постійний цикл: визначити чи це уточнення; якщо так — авто-відповідь Атласа
                   maybeAutoAnswerFromAtlasText(c.text, answeredQuestions, sessionId, res, gooseBase, secret, null).catch(() => {});
                 }
                 if (c.type === 'frontendToolRequest' || c.type === 'question') {
-                  // Автовідповідь Атласа: формуємо коротку відповідь без залучення користувача
                   autoAnswerFromAtlas(c, sessionId, res, gooseBase, secret).catch(() => {});
                 }
               }
             }
-          } catch (_) {
-            // ignore non-JSON lines
-          }
+          } catch (_) {}
         }
       });
       response.data.on('end', () => {
-        // Аналізуємо зібраний вивід для відстеження використаних ресурсів
         analyzeExecutionOutput(collected, sessionId);
         resolve(collected.trim());
       });
       response.data.on('error', (err) => reject(err));
     });
+  };
+
+  if (isWeb) {
+    try {
+      // Потік через WebSocket /ws з авто-відповідями Атласа на уточнення
+      return await streamTetianaWs(gooseBase, payload, res, sessionId);
+    } catch (e) {
+      const msg = e?.message || '';
+      const tooLong = /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
+      if (tooLong) {
+        console.log('[CONTEXT_LIMIT] Goose Web reported token overflow. Falling back to SSE with extra compression...');
+        const fallbackMax = Math.max(2000, Math.floor(ORCH_MAX_MISTRAL_USER_CHARS * 0.5));
+        const compressed = ensurePromptBounds(messageText, fallbackMax, 'Tetiana prompt (fallback)');
+        try {
+          const est2 = estimateTokens(compressed);
+          console.log(`[CONTEXT_LIMIT] Fallback prompt size: chars=${compressed.length}, estTokens=${est2}`);
+        } catch {}
+        return await sendViaSse(compressed);
+      }
+      throw e;
+    }
+  } else {
+    // Потік через goosed /reply (SSE)
+    return await sendViaSse();
   }
 }
 
@@ -960,7 +1005,14 @@ async function streamTetianaExecute(taskSpec, sessionId, res, adaptiveContext = 
     }
   }
   
-  const messageText = `Виконай наступну задачу (TaskSpec JSON нижче) максимально надійно. Після КОЖНОГО кроку виконай коротку перевірку успіху і, якщо щось не спрацювало, динамічно переформулюй наступні дії (в межах task_spec та його contingencies), доки не отримаєш доказ виконання або вичерпаєш варіанти. Наприкінці обов'язково надай мапу criterion->evidence.\nTaskSpec: ${JSON.stringify(taskSpec)}${mspsContext}`;
+  // Стискаємо TaskSpec перед вставкою в промпт, щоб уникати переповнення контексту
+  const originalTs = JSON.stringify(taskSpec);
+  const summarizedTs = summarizeTaskSpec(taskSpec); // вже обмежує довжину полів
+  const summarizedTsJson = JSON.stringify(summarizedTs);
+  if (summarizedTsJson.length < originalTs.length) {
+    console.log(`[ContextSummarizer] TaskSpec reduced: ${originalTs.length} -> ${summarizedTsJson.length} chars`);
+  }
+  const messageText = `Виконай наступну задачу (TaskSpec JSON нижче) максимально надійно. Після КОЖНОГО кроку виконай коротку перевірку успіху і, якщо щось не спрацювало, динамічно переформулюй наступні дії (в межах task_spec та його contingencies), доки не отримаєш доказ виконання або вичерпаєш варіанти. Наприкінці обов'язково надай мапу criterion->evidence.\nTaskSpec: ${summarizedTsJson}${mspsContext}`;
   return streamTetianaMessage(messageText, sessionId, res);
 }
 

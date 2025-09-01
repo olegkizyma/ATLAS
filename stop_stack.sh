@@ -19,5 +19,6 @@ echo "==> Extra cleanup"
 pkill -f "atlas_server.py" 2>/dev/null || true
 pkill -f "node server.js" 2>/dev/null || true
 pkill -f "/goose web" 2>/dev/null || true
+pkill -f "/goosed" 2>/dev/null || true
 
 echo "Done."
