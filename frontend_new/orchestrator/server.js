@@ -34,10 +34,10 @@ const ORCH_GRISHA_TIMEOUT_MS = parseInt(process.env.ORCH_GRISHA_TIMEOUT_MS || '4
 // Prompt size guards
 const ORCH_MAX_MSPS_CHARS = parseInt(process.env.ORCH_MAX_MSPS_CHARS || '4000', 10);
 const ORCH_MAX_TASKSPEC_SUMMARY_CHARS = parseInt(process.env.ORCH_MAX_TASKSPEC_SUMMARY_CHARS || '12000', 10);
-const ORCH_MAX_EXEC_REPORT_CHARS = parseInt(process.env.ORCH_MAX_EXEC_REPORT_CHARS || '20000', 10);
-const ORCH_MAX_VERIFY_EVIDENCE_CHARS = parseInt(process.env.ORCH_MAX_VERIFY_EVIDENCE_CHARS || '16000', 10);
-const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '30000', 10);
-const ORCH_MAX_MISTRAL_SYSTEM_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_SYSTEM_CHARS || '8000', 10);
+const ORCH_MAX_EXEC_REPORT_CHARS = parseInt(process.env.ORCH_MAX_EXEC_REPORT_CHARS || '12000', 10);
+const ORCH_MAX_VERIFY_EVIDENCE_CHARS = parseInt(process.env.ORCH_MAX_VERIFY_EVIDENCE_CHARS || '10000', 10);
+const ORCH_MAX_MISTRAL_USER_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_USER_CHARS || '28000', 10);
+const ORCH_MAX_MISTRAL_SYSTEM_CHARS = parseInt(process.env.ORCH_MAX_MISTRAL_SYSTEM_CHARS || '4000', 10);
 
 // Gemini (Atlas)
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY || process.env.GOOGLE_API_KEY || process.env.GENERATIVE_LANGUAGE_API_KEY;
@@ -359,11 +359,10 @@ app.post('/chat/stream', async (req, res) => {
         sseSend(res, { type: 'agent_message', agent: 'Grisha', content: judgement.inter_agent_note_ua });
       }
   const refineBase = `Задача виконана неповністю. Проблеми: ${issuesText}.
-Сформуй оновлений TaskSpec для доопрацювання саме у ПОТОЧНІЙ сесії, стисло та чітко. Зроби його ДОКАЗОВО-ОРІЄНТОВАНИМ: 
-- для кожного success_criterion додай крок(и) вимірювання/зчитування стану з подальшим підтвердженням (читанням значення/стану/URI/логу);
-- у steps опиши наміри й спостережувані стани без згадок конкретних брендів/сайтів, інструменти підбирай динамічно з урахуванням ОС/доступних додатків/MSP;
-- у tool_hints зафіксуй дії як операції над станами (відкрити/фокус, навігація/пошук/вибір за критерієм, встановити/прочитати значення), і додай перевірки після кожного важливого кроку;
-- у success_criteria сформулюй об’єктивні, вимірювані умови з чіткими артефактами для мапування criterion->evidence.`;
+Сформуй *план виправлення* для доопрацювання. Замість повного нового TaskSpec, створи компактний, що містить *лише* кроки для виправлення невиконаних success_criteria.
+- Сфокусуйся на невиконаних критеріях.
+- Кожен крок має бути спрямований на збір конкретного доказу (значення, стан, URL).
+- Зроби план максимально коротким і точним.`;
       const refineMsg = judgement?.atlas_refine_prompt_ua ? `${refineBase}\n\nДодаткова підказка від Гріші:\n${judgement.atlas_refine_prompt_ua}` : refineBase;
       const atlasRefine = await callAtlas(refineMsg, sessionId);
       sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasRefine.user_reply || 'Доопрацьовую задачу.' });

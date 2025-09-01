@@ -29,12 +29,10 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
 - ORCH_GRISHA_TIMEOUT_MS (default 45000) — таймаут запитів до Mistral
  - ORCH_MAX_MSPS_CHARS (default 4000) — ліміт символів для MSP контексту у промпті
  - ORCH_MAX_TASKSPEC_SUMMARY_CHARS (default 12000) — ліміт символів для узагальненого TaskSpec
- - ORCH_MAX_EXEC_REPORT_CHARS (default 20000) — ліміт символів хвоста звіту виконання
- - ORCH_MAX_VERIFY_EVIDENCE_CHARS (default 16000) — ліміт символів хвоста доказів перевірки
- - ORCH_MAX_MISTRAL_USER_CHARS (default 30000) — максимальний розмір user-повідомлення до Mistral (авто-урізання при 400)
- - ORCH_MAX_MISTRAL_SYSTEM_CHARS (default 8000) — максимальний розмір system-повідомлення до Mistral
-
-Алгоритм: delay = min(ORCH_BACKOFF_BASE_MS * 2^(attempt-1), ORCH_BACKOFF_MAX_MS) + random(0..ORCH_BACKOFF_JITTER_MS)
+- ORCH_MAX_EXEC_REPORT_CHARS (default 12000) — ліміт символів хвоста звіту виконання
+- ORCH_MAX_VERIFY_EVIDENCE_CHARS (default 10000) — ліміт символів хвоста доказів перевірки
+- ORCH_MAX_MISTRAL_USER_CHARS (default 28000) — максимальний розмір user-повідомлення до Mistral (авто-урізання при 400)
+- ORCH_MAX_MISTRAL_SYSTEM_CHARS (default 4000) — максимальний розмір system-повідомлення до MistralАлгоритм: delay = min(ORCH_BACKOFF_BASE_MS * 2^(attempt-1), ORCH_BACKOFF_MAX_MS) + random(0..ORCH_BACKOFF_JITTER_MS)
 
 Також доступні:
 
