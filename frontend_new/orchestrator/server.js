@@ -234,8 +234,13 @@ app.post('/chat/stream', async (req, res) => {
   sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `isSafe=${grishaOut.isSafe}. ${grishaOut.rationale ? grishaOut.rationale : ''}` });
 
     if (!grishaOut.isSafe) {
-      sseSend(res, { type: 'complete', agent: 'system', content: 'Запит заблоковано політиками' });
-      return res.end();
+      const testMode = !!(prompts?.grisha?.test_mode);
+      if (testMode) {
+        sseSend(res, { type: 'info', agent: 'system', content: 'TEST MODE: безпековий блок вимкнено; продовжую виконання.' });
+      } else {
+        sseSend(res, { type: 'complete', agent: 'system', content: 'Запит заблоковано політиками' });
+        return res.end();
+      }
     }
 
   // 3) Tetiana executes
