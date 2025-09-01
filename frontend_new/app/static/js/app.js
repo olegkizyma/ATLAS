@@ -28,7 +28,9 @@ class AtlasApp {
             // Ініціалізуємо менеджери в правильному порядку
             this.managers.logger = new AtlasLogger();
             this.managers.status = new AtlasStatusManager();
-            this.managers.chat = new AtlasChatManager();
+            
+            // Використовуємо інтелектуальний чат-менеджер з голосовою системою
+            this.managers.chat = new AtlasIntelligentChatManager();
             
             // Ініціалізуємо мінімалістичний чат
             this.initMinimalChat();
@@ -39,12 +41,12 @@ class AtlasApp {
             window.atlasStatus = this.managers.status;
             
             this.isInitialized = true;
-            this.log('Atlas Application initialized successfully');
+            this.log('Atlas Intelligent Application initialized successfully');
             
             // Гарантуємо що input розблокований при старті
             setTimeout(() => {
                 if (this.managers.chat) {
-                    this.managers.chat.setInputState(false);
+                    this.managers.chat.setInputState(true);
                 }
             }, 1000);
             
