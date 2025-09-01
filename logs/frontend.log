@@ -468,3 +468,6 @@ Press Ctrl+C to stop
 2025-09-01 04:32:49,585 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 04:32:49] "GET /logs?limit=100 HTTP/1.1" 200 -
 2025-09-01 04:32:52,586 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 04:32:52] "GET /logs?limit=100 HTTP/1.1" 200 -
 2025-09-01 04:32:52,993 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 04:32:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 04:32:55,585 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 04:32:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 04:32:56,994 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 04:32:56] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 04:32:58,585 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 04:32:58] "GET /logs?limit=100 HTTP/1.1" 200 -
