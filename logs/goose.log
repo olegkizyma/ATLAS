@@ -7,6 +7,6 @@ Warning: Failed to load extension filesystem: IO error: No such file or director
    Server: http://127.0.0.1:3000
    Press Ctrl+C to stop
 
-  [2m2025-09-01T04:09:04.094410Z[0m [31mERROR[0m [1;31mgoose_cli::commands::web[0m[31m: [31mError in message stream: Request failed: prompt token count of 68717 exceeds the limit of 64000 (code: model_max_prompt_tokens_exceeded) (status 400)[0m
+  [2m2025-09-01T04:12:41.424892Z[0m [31mERROR[0m [1;31mgoose_cli::commands::web[0m[31m: [31mError in message stream: Request failed: prompt token count of 72295 exceeds the limit of 64000 (code: model_max_prompt_tokens_exceeded) (status 400)[0m
     [2;3mat[0m crates/goose-cli/src/commands/web.rs:671
 

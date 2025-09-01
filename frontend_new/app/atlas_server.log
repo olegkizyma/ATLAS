@@ -7336,3 +7336,69 @@
 2025-09-01 07:10:34,753 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:10:34] "GET /logs?limit=100 HTTP/1.1" 200 -
 2025-09-01 07:10:45,075 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:10:45] "GET /logs?limit=100 HTTP/1.1" 200 -
 2025-09-01 07:11:05,073 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:05] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:25,066 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:27,157 [atlas.server] INFO: Received signal 15, shutting down...
+2025-09-01 07:11:37,314 [atlas.server] WARNING: Atlas Core not found, running in test mode
+2025-09-01 07:11:37,337 [atlas.server] INFO: Atlas API initialized
+2025-09-01 07:11:37,337 [atlas.server] INFO: Atlas Server initialized at 127.0.0.1:5001
+2025-09-01 07:11:37,337 [atlas.server] INFO: Starting Atlas Server on 127.0.0.1:5001
+2025-09-01 07:11:37,337 [atlas.server] INFO: Atlas Core ready: False
+2025-09-01 07:11:37,343 [werkzeug] INFO: [31m[1mWARNING: This is a development server. Do not use it in a production deployment. Use a production WSGI server instead.[0m
+ * Running on http://127.0.0.1:5001
+2025-09-01 07:11:37,343 [werkzeug] INFO: [33mPress CTRL+C to quit[0m
+2025-09-01 07:11:39,357 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:39] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:42,361 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:42] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:45,359 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:45] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:48,360 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:48] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:51,362 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:51] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:54,362 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:54] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:55,193 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET / HTTP/1.1" 200 -
+2025-09-01 07:11:55,211 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/css/main.css HTTP/1.1" 200 -
+2025-09-01 07:11:55,214 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/js/config.js HTTP/1.1" 200 -
+2025-09-01 07:11:55,214 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/js/utils.js HTTP/1.1" 200 -
+2025-09-01 07:11:55,215 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/js/status-manager.js HTTP/1.1" 200 -
+2025-09-01 07:11:55,215 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/js/logger-manager.js HTTP/1.1" 200 -
+2025-09-01 07:11:55,215 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/js/chat-manager.js HTTP/1.1" 200 -
+2025-09-01 07:11:55,217 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/js/app.js HTTP/1.1" 200 -
+2025-09-01 07:11:55,223 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/js/service-worker.js HTTP/1.1" 200 -
+2025-09-01 07:11:55,235 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET / HTTP/1.1" 200 -
+2025-09-01 07:11:55,237 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/assets/atlas-icon.svg HTTP/1.1" 200 -
+2025-09-01 07:11:55,238 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "[36mGET /static/css/main.css HTTP/1.1[0m" 304 -
+2025-09-01 07:11:55,238 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/assets/favicon.ico HTTP/1.1" 200 -
+2025-09-01 07:11:55,239 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "[36mGET /static/js/app.js HTTP/1.1[0m" 304 -
+2025-09-01 07:11:55,239 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "[36mGET /static/js/status-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 07:11:55,240 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "[36mGET /static/js/chat-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 07:11:55,240 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "[36mGET /static/js/logger-manager.js HTTP/1.1[0m" 304 -
+2025-09-01 07:11:55,505 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:11:55,506 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "[36mGET /static/assets/favicon.ico HTTP/1.1[0m" 304 -
+2025-09-01 07:11:55,517 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:55] "GET /static/assets/DamagedHelmet.glb HTTP/1.1" 200 -
+2025-09-01 07:11:58,509 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:11:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:01,510 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:04,515 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:07,515 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:10,519 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:10] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:13,513 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:13] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:16,515 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:16] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:19,517 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:19] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:22,511 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:22] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:25,517 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:25] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:28,518 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:28] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:31,522 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:31] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:34,522 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:34] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:37,521 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:37] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:40,521 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:40] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:43,520 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:43] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:46,521 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:46] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:49,524 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:49] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:52,526 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:52] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:55,526 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:55] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:12:58,530 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:12:58] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:01,530 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:01] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:04,535 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:04] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:07,597 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:07] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:11,475 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:11] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:14,776 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:14] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:23,671 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:23] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:36,665 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:36] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:13:53,846 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:13:53] "GET /logs?limit=100 HTTP/1.1" 200 -
+2025-09-01 07:14:05,059 [werkzeug] INFO: 127.0.0.1 - - [01/Sep/2025 07:14:05] "GET /logs?limit=100 HTTP/1.1" 200 -
