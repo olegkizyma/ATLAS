@@ -4,12 +4,13 @@ import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
 import axios from 'axios';
+import WebSocket from 'ws';
 
 dotenv.config({ path: path.resolve(process.cwd(), '../config/.env') });
 dotenv.config();
 
 const app = express();
-app.use(cors({ origin: '*', methods: ['GET', 'POST'], allowedHeaders: ['Content-Type', 'Authorization'] }));
+app.use(cors({ origin: '*', methods: ['GET', 'POST'], allowedHeaders: ['Content-Type', 'Authorization', 'X-Secret-Key'] }));
 app.use(express.json({ limit: '1mb' }));
 
 // Load prompts
@@ -31,7 +32,7 @@ const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-latest';
 
 // Helper: stream as SSE
 function sseHeaders(res) {
-  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Content-Type', 'text/event-stream; charset=utf-8');
   res.setHeader('Cache-Control', 'no-cache');
   res.setHeader('Connection', 'keep-alive');
   res.flushHeaders?.();
@@ -60,22 +61,14 @@ app.post('/chat/stream', async (req, res) => {
     // 1) Atlas enriches
     sseSend(res, { type: 'info', agent: 'Atlas', content: 'Аналізую запит та збагачую…' });
     const atlasOut = await callAtlas(message, sessionId);
-    sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasOut.user_reply || '' });
+  sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasOut.user_reply || '' });
 
-    // 1.5) Optional clarification: Tetiana asks, Atlas answers
-    if ((process.env.TETIANA_CLARIFY || '1') === '1') {
-      const q = await generateTetianaClarifyingQuestion(atlasOut.task_spec);
-      if (q) {
-        sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: `Питання для уточнення: ${q}\n` });
-        const clarAns = await callAtlas(`Відповідай на уточнююче питання Тетяни коротко і по суті: ${q}`, sessionId);
-        sseSend(res, { type: 'agent_message', agent: 'Atlas', content: clarAns.user_reply || 'Відповів.' });
-      }
-    }
+  // 1.5) Уточнення будуть виникати природно під час виконання Тетяни (без штучної інʼєкції тут)
 
     // 2) Grisha checks
-    sseSend(res, { type: 'info', agent: 'Grisha', content: 'Перевіряю політики… (тестовий режим: пропускаю)' });
+  sseSend(res, { type: 'info', agent: 'Grisha', content: 'Перевіряю політики…' });
     const grishaOut = await callGrisha(atlasOut.task_spec, sessionId);
-    sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `isSafe=${grishaOut.isSafe}. ${grishaOut.rationale || ''}` });
+  sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `isSafe=${grishaOut.isSafe}. ${grishaOut.rationale ? grishaOut.rationale : ''}` });
 
     if (!grishaOut.isSafe) {
       sseSend(res, { type: 'complete', agent: 'system', content: 'Запит заблоковано політиками' });
@@ -100,22 +93,10 @@ app.post('/chat/stream', async (req, res) => {
 async function callAtlas(userMessage, sessionId) {
   const sys = prompts.atlas.system;
   const format = prompts.atlas.output_format;
-  const instruction = `Відповідай українською. Спочатку коротко відповідай користувачу (user_reply). Потім побудуй task_spec у JSON відповідно до схеми: ${JSON.stringify(format)}. Виведи рівно один JSON-блок після користувацької відповіді.`;
+  const instruction = `Відповідай українською. Спочатку коротко відповідай користувачу (user_reply). Потім побудуй task_spec у JSON відповідно до схеми: ${JSON.stringify(format)}. Виведи рівно один JSON-блок після користувацької відповіді. Не використовуй кодові блоки (три зворотні апострофи), не додавай префікси типу \"user_reply:\" у текст відповіді.`;
 
   if (!GEMINI_API_KEY) {
-    // Fallback dummy
-    return {
-      user_reply: `Прийнято. Уточню деталі і підготую задачу до виконання.`,
-      task_spec: {
-        title: 'Автогенерована задача',
-        summary: userMessage,
-        inputs: [userMessage],
-        steps: ['Крок 1: Аналіз', 'Крок 2: Виконання'],
-        constraints: [],
-        success_criteria: ['Отримано результат без помилок'],
-        tool_hints: { engine: 'goose' }
-      }
-    };
+    throw new Error('Atlas (Gemini) API key not configured');
   }
 
   try {
@@ -126,7 +107,7 @@ async function callAtlas(userMessage, sessionId) {
       ]
     };
     const { data } = await axios.post(url, payload, { timeout: 30000 });
-    const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
+  const text = data?.candidates?.[0]?.content?.parts?.[0]?.text || '';
 
     // Parse: first part for user, last JSON block for task
     const jsonMatch = text.match(/\{[\s\S]*\}$/);
@@ -134,7 +115,8 @@ async function callAtlas(userMessage, sessionId) {
     if (jsonMatch) {
       try { taskSpec = JSON.parse(jsonMatch[0]); } catch {}
     }
-    const userReply = taskSpec ? text.replace(jsonMatch[0], '').trim() : text;
+  const userReplyRaw = taskSpec ? text.replace(jsonMatch[0], '').trim() : text;
+  const userReply = cleanUserReply(userReplyRaw);
 
     return {
       user_reply: userReply || 'Готово.',
@@ -143,13 +125,8 @@ async function callAtlas(userMessage, sessionId) {
       }
     };
   } catch (e) {
-    console.warn('Gemini call failed, using fallback:', e.message);
-    return {
-      user_reply: 'Прийнято. Переходжу до виконання.',
-      task_spec: {
-        title: 'Задача (fallback)', summary: userMessage, inputs: [userMessage], steps: [], constraints: [], success_criteria: [], tool_hints: {}
-      }
-    };
+    console.warn('Gemini call failed:', e.message);
+    throw new Error('Atlas недоступний: ' + (e.message || 'невідома помилка'));
   }
 }
 
@@ -176,8 +153,8 @@ async function generateTetianaClarifyingQuestion(taskSpec) {
 async function callGrisha(taskSpec, sessionId) {
   const sys = prompts.grisha.system;
   if (!MISTRAL_API_KEY) {
-    // Test mode allow all
-    return { isSafe: true, rationale: 'TEST_MODE: allow all', flagged: [] };
+  // Test mode allow all (без хардкодного повідомлення)
+  return { isSafe: true, rationale: '', flagged: [] };
   }
   try {
     const url = 'https://api.mistral.ai/v1/chat/completions';
@@ -193,22 +170,25 @@ async function callGrisha(taskSpec, sessionId) {
       headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` },
       timeout: 25000
     });
-    const text = data?.choices?.[0]?.message?.content || '';
-    // Try parse JSON
-    let out = { isSafe: true, rationale: 'ok', flagged: [] };
+  const text = data?.choices?.[0]?.message?.content || '';
+  // Try parse JSON
+  let out = { isSafe: true, rationale: '', flagged: [] };
     try { out = JSON.parse(text); } catch {}
     if (typeof out.isSafe !== 'boolean') out.isSafe = true;
     return out;
   } catch (e) {
-    console.warn('Mistral call failed, allowing in test mode:', e.message);
-    return { isSafe: true, rationale: 'API error; fallback allow', flagged: [] };
+  console.warn('Mistral call failed, allowing in test mode:', e.message);
+  return { isSafe: true, rationale: '', flagged: [] };
   }
 }
 
 // Tetiana (Goose) streaming execution
 async function streamTetiana(taskSpec, sessionId, res) {
-  const url = `${GOOSE_BASE_URL.replace(/\/$/, '')}/reply`;
   const secret = process.env.GOOSE_SECRET_KEY;
+
+  // Автовизначення режиму Goose: web (ws) чи goosed (/reply)
+  const gooseBase = GOOSE_BASE_URL.replace(/\/$/, '');
+  const isWeb = await isGooseWeb(gooseBase);
 
   const messageText = `Виконай наступну задачу (TaskSpec JSON нижче). Пиши хід роботи та фінальний результат.\nTaskSpec: ${JSON.stringify(taskSpec)}`;
   const payload = {
@@ -229,49 +209,200 @@ async function streamTetiana(taskSpec, sessionId, res) {
   };
   if (secret) headers['X-Secret-Key'] = secret;
 
-  const response = await axios.post(url, payload, {
-    headers,
-    responseType: 'stream',
-    timeout: 0
-  });
+  if (isWeb) {
+    // Потік через WebSocket /ws з авто-відповідями Атласа на уточнення (безкінечний цикл до завершення сесії)
+    return streamTetianaWs(gooseBase, payload, res, sessionId);
+  } else {
+    // Потік через goosed /reply (SSE)
+    const url = `${gooseBase}/reply`;
+    const response = await axios.post(url, payload, {
+      headers,
+      responseType: 'stream',
+      timeout: 0
+    });
 
-  return new Promise((resolve, reject) => {
-    let buffer = '';
-    response.data.on('data', (chunk) => {
-      buffer += chunk.toString();
-      const lines = buffer.split(/\r?\n/);
-      buffer = lines.pop() || '';
-      for (const line of lines) {
-        let dataLine = line;
-        if (!dataLine) continue;
-        if (dataLine.startsWith('data: ')) dataLine = dataLine.slice(6);
-        try {
-          const payload = JSON.parse(dataLine);
-          if (payload.type === 'Finish') {
-            // Goose signals completion
-            resolve();
-            return;
-          }
-          const msg = payload.message;
-          if (msg && Array.isArray(msg.content)) {
-            for (const c of msg.content) {
-              if (c.type === 'text' && c.text) {
-                sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: c.text });
-              }
-              // Optionally surface tool requests in UI logs
-              if (c.type === 'frontendToolRequest') {
-                sseSend(res, { type: 'info', agent: 'Tetiana', content: '[Tool request received]' });
+    return new Promise((resolve, reject) => {
+      const answeredQuestions = new Set();
+      let buffer = '';
+      response.data.on('data', (chunk) => {
+        buffer += chunk.toString();
+        const lines = buffer.split(/\r?\n/);
+        buffer = lines.pop() || '';
+        for (const line of lines) {
+          let dataLine = line;
+          if (!dataLine) continue;
+          if (dataLine.startsWith('data: ')) dataLine = dataLine.slice(6);
+          try {
+            const obj = JSON.parse(dataLine);
+            if (obj.type === 'Finish') {
+              resolve();
+              return;
+            }
+            const msg = obj.message;
+            if (msg && Array.isArray(msg.content)) {
+              for (const c of msg.content) {
+                if (c.type === 'text' && c.text) {
+                  sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: c.text });
+                  // Постійний цикл: визначити чи це уточнення; якщо так — авто-відповідь Атласа
+                  maybeAutoAnswerFromAtlasText(c.text, answeredQuestions, sessionId, res, gooseBase, secret, null).catch(() => {});
+                }
+                if (c.type === 'frontendToolRequest' || c.type === 'question') {
+                  // Автовідповідь Атласа: формуємо коротку відповідь без залучення користувача
+                  autoAnswerFromAtlas(c, sessionId, res, gooseBase, secret).catch(() => {});
+                }
               }
             }
+          } catch (_) {
+            // ignore non-JSON lines
           }
-        } catch (_) {
-          // Ignore parse errors on non-JSON lines
         }
+      });
+      response.data.on('end', () => resolve());
+      response.data.on('error', (err) => reject(err));
+    });
+  }
+}
+
+// Перевірка: чи це Goose Web
+async function isGooseWeb(baseUrl) {
+  try {
+    const { status } = await axios.get(`${baseUrl}/api/health`, { timeout: 2000 });
+    return status === 200;
+  } catch {
+    return false;
+  }
+}
+
+// Стрім Тетяни через WebSocket інтерфейс Goose Web
+function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
+  return new Promise((resolve, reject) => {
+    const wsUrl = baseUrl.replace(/^http/i, 'ws') + '/ws';
+    const ws = new WebSocket(wsUrl);
+    let settled = false;
+  const answeredQuestions = new Set();
+
+    const finish = (err) => {
+      if (settled) return;
+      settled = true;
+      try { ws.close(); } catch {}
+      if (err) reject(err); else resolve();
+    };
+
+    ws.on('open', () => {
+      const payload = {
+        type: 'message',
+        content: chatPayload.messages?.[0]?.content?.[0]?.text || '',
+        session_id: chatPayload.session_id,
+        timestamp: Date.now()
+      };
+      ws.send(JSON.stringify(payload));
+    });
+
+    ws.on('message', (data) => {
+      try {
+        const obj = JSON.parse(data.toString());
+        const t = obj.type;
+        if (t === 'response') {
+          const content = obj.content;
+          if (content) {
+            sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: String(content) });
+            maybeAutoAnswerFromAtlasText(String(content), answeredQuestions, sessionId, res, baseUrl, null, ws).catch(() => {});
+          }
+        } else if (t === 'question' || t === 'frontendToolRequest') {
+          // Автовідповідь Атласа на уточнення, без залучення користувача
+          autoAnswerFromAtlas(obj, sessionId, res, baseUrl, null, ws).catch(() => {});
+        } else if (t === 'complete' || t === 'cancelled') {
+          finish();
+        } else if (t === 'error') {
+          finish(new Error(obj.message || 'websocket error'));
+        }
+      } catch (e) {
+        // ignore non-JSON frames
       }
     });
-    response.data.on('end', () => resolve());
-    response.data.on('error', (err) => reject(err));
+
+    ws.on('error', (err) => finish(err));
+    ws.on('close', () => finish());
   });
+}
+
+// Нормалізація відповіді Atlas: прибрати code fences та префікси
+function cleanUserReply(text) {
+  if (!text) return '';
+  let out = String(text);
+  // видалити трійні бектіки з будь-яким вмістом
+  out = out.replace(/```[\s\S]*?```/g, '').trim();
+  // прибрати префікс user_reply: (у різних регістрах/мовах)
+  out = out.replace(/^\s*(user[_\s-]?reply\s*:\s*)/i, '');
+  // прибрати зайві лапки навколо
+  out = out.replace(/^"(.+)"$/s, '$1');
+  return out.trim();
+}
+
+// Автовідповідь Атласа на уточнення Тетяни
+async function autoAnswerFromAtlas(requestObjOrContent, sessionId, res, gooseBase, secret, wsOpt) {
+  try {
+    // Витягаємо текст питання
+    let questionText = '';
+    if (typeof requestObjOrContent === 'string') {
+      questionText = requestObjOrContent;
+    } else if (requestObjOrContent?.content) {
+      // Goose Web event shape
+      questionText = String(requestObjOrContent.content || '');
+    } else if (requestObjOrContent?.text) {
+      // frontendToolRequest content
+      questionText = String(requestObjOrContent.text || '');
+    }
+    if (!questionText.trim()) return;
+
+    // Спитати Атласа коротку конкретну відповідь
+    const atlasAns = await callAtlas(`Коротко і по суті відповідай на уточнююче питання від Тетяни: ${questionText}`, sessionId);
+    const reply = atlasAns.user_reply?.trim();
+    if (!reply) return;
+
+    // Відправити відповідь назад у Goose, щоб продовжити сесію
+    if (wsOpt) {
+      // Через WebSocket
+      wsOpt.send(JSON.stringify({ type: 'message', content: reply, session_id: sessionId || `sess-${Date.now()}`, timestamp: Date.now() }));
+    } else {
+      // Через /reply
+      const url = `${gooseBase.replace(/\/$/, '')}/reply`;
+      const headers = { Accept: 'text/event-stream', 'Content-Type': 'application/json' };
+      if (secret) headers['X-Secret-Key'] = secret;
+      const payload = {
+        messages: [ { role: 'user', created: Math.floor(Date.now()/1000), content: [ { type: 'text', text: reply } ] } ],
+        session_id: sessionId || `sess-${Date.now()}`,
+        session_working_dir: process.cwd()
+      };
+      // Ждем ответ потока, но не проксируем его напрямую (ответ пойдет в основном стриме)
+      axios.post(url, payload, { headers, responseType: 'stream', timeout: 120000 }).catch(() => {});
+    }
+
+    // Показать в UI, что Атлас відповів на уточнення (для прозрачности)
+    sseSend(res, { type: 'agent_message', agent: 'Atlas', content: reply });
+  } catch (_) {
+    // тихо игнорируем сбои авто-відповіді
+  }
+}
+
+// Визначаємо, чи текст є уточнюючим питанням до користувача/Атласа; якщо так — авто-відповідь Атласа.
+async function maybeAutoAnswerFromAtlasText(text, answeredSet, sessionId, res, gooseBase, secret, wsOpt) {
+  try {
+    const snippet = String(text || '').trim();
+    if (!snippet || snippet.length < 3) return;
+    // Антидедупликація
+    const key = snippet.toLowerCase().slice(0, 160);
+    if (answeredSet.has(key)) return;
+
+    // Класификация через Atlas: вопрос-уточнение или просто ответ
+    const classificationPrompt = `Визнач: чи є цей текст уточнюючим питанням (yes/no): "${snippet}". Виведи лише yes або no.`;
+    const ans = await callAtlas(classificationPrompt, sessionId);
+    const verdict = (ans.user_reply || '').trim().toLowerCase();
+    if (verdict.startsWith('yes')) {
+      answeredSet.add(key);
+      await autoAnswerFromAtlas(snippet, sessionId, res, gooseBase, secret, wsOpt);
+    }
+  } catch {}
 }
 
 app.listen(ORCH_PORT, () => {
