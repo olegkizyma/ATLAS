@@ -16,21 +16,58 @@ FRONTEND_PORT=5001
 
 mkdir -p "$LOG_DIR"
 
-# Optionally load extra context limits if file exists
+# Optionally load extra context limits and provider secrets if file exists
 if [[ -f "$ROOT/context_limits.env" ]]; then
   echo "==> Loading optional context limits from context_limits.env"
   # Export only ORCH_ and GOOSE_ variables to avoid side effects
   # shellcheck disable=SC2046
   set -a
-  # Read and export lines starting with ORCH_ or GOOSE_
+  # Read and export lines starting with supported prefixes (ORCH_, GOOSE_, provider tokens)
   while IFS= read -r line; do
     case "$line" in
-      ORCH_*|GOOSE_*) export "$line" || true ;;
+      ORCH_*|GOOSE_*|GITHUB_*|OPENAI_*|OPENROUTER_*|MISTRAL_*|GOOGLE_*|GEMINI_*|ANTHROPIC_*) export "$line" || true ;;
       *) : ;;
     esac
-  done < <(grep -E '^(ORCH_|GOOSE_)' "$ROOT/context_limits.env" | sed 's/[[:space:]]*#.*$//')
+  done < <(grep -E '^(ORCH_|GOOSE_|GITHUB_|OPENAI_|OPENROUTER_|MISTRAL_|GOOGLE_|GEMINI_|ANTHROPIC_)' "$ROOT/context_limits.env" | sed 's/[[:space:]]*#.*$//')
   set +a
 fi
+
+# Preflight provider warnings (best-effort)
+check_provider_secrets() {
+  local cfg="$GOOSE_DIR/goose/config.yaml"
+  local provider=""
+  if [[ -f "$cfg" ]]; then
+    provider=$(awk -F: '/^GOOSE_PROVIDER:/ { gsub(/^[ \t]+|[ \t]+$/, "", $2); print $2 }' "$cfg" 2>/dev/null | head -n1)
+  fi
+  case "$provider" in
+    github_copilot)
+      if [[ -z "${GITHUB_COPILOT_TOKEN:-}" ]]; then
+        echo "!! WARNING: GITHUB_COPILOT_TOKEN is not set. Goose provider=github_copilot may fail to generate." >&2
+      fi
+      ;;
+    openai)
+      if [[ -z "${OPENAI_API_KEY:-}" ]]; then
+        echo "!! WARNING: OPENAI_API_KEY is not set. Goose provider=openai may fail." >&2
+      fi
+      ;;
+    openrouter)
+      if [[ -z "${OPENROUTER_API_KEY:-}" ]]; then
+        echo "!! WARNING: OPENROUTER_API_KEY is not set. Goose provider=openrouter may fail." >&2
+      fi
+      ;;
+    *) : ;;
+  esac
+
+  # Orchestrator LLMs
+  if [[ -z "${MISTRAL_API_KEY:-}" ]]; then
+    echo "!! WARNING: MISTRAL_API_KEY is not set. Grisha policy/verification will be disabled." >&2
+  fi
+  if [[ -z "${GEMINI_API_KEY:-}${GOOGLE_API_KEY:-}" ]]; then
+    echo "!! WARNING: GEMINI_API_KEY/GOOGLE_API_KEY not set. Atlas enrichment will be disabled." >&2
+  fi
+}
+
+check_provider_secrets
 
 detect_goosed_port() {
   local cfg="$GOOSE_DIR/config.toml"
