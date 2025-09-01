@@ -144,8 +144,13 @@ class AtlasIntelligentChatManager {
             await this.streamFromOrchestrator(message);
             
         } catch (error) {
+            const errorMessage = await window.AtlasErrorHandler.generateIntelligentErrorMessage(
+                'відправка повідомлення до оркестратора',
+                error.message,
+                `спроба надіслати: "${message}"`
+            );
             this.log(`[ERROR] Failed to send message: ${error.message}`);
-            this.addMessage(`❌ Помилка відправки: ${error.message}`, 'error');
+            this.addMessage(errorMessage, 'error');
         } finally {
             this.setInputState(true);
         }
@@ -209,8 +214,12 @@ class AtlasIntelligentChatManager {
             
         } catch (error) {
             if (error.name === 'AbortError') {
+                const timeoutMessage = await window.AtlasErrorHandler.handleTimeoutError(
+                    'SSE стрім від оркестратора', 
+                    `відправка повідомлення: "${message}"`
+                );
                 this.log('[STREAM] Stream aborted by timeout');
-                this.addMessage('❌ Timeout: відповідь перевищила ліміт часу', 'error');
+                this.addMessage(timeoutMessage, 'error');
             } else {
                 throw error;
             }
@@ -248,7 +257,13 @@ class AtlasIntelligentChatManager {
                 break;
                 
             case 'error':
-                this.addMessage(`❌ ${content}`, 'error');
+                // Використовуємо розумну обробку помилок
+                const intelligentError = await window.AtlasErrorHandler.generateIntelligentErrorMessage(
+                    'отримання помилки від оркестратора',
+                    content,
+                    'обробка відповіді агента'
+                );
+                this.addMessage(intelligentError, 'error');
                 this.log(`[ERROR] ${content}`);
                 break;
                 
@@ -259,7 +274,12 @@ class AtlasIntelligentChatManager {
     
     async handleIntelligentResponse(data) {
         if (!data || !data.response) {
-            this.addMessage('❌ Порожня відповідь від системи', 'error');
+            const emptyResponseError = await window.AtlasErrorHandler.generateIntelligentErrorMessage(
+                'отримання відповіді від системи',
+                'порожня відповідь',
+                'очікування відповіді від агентів'
+            );
+            this.addMessage(emptyResponseError, 'error');
             return;
         }
         
