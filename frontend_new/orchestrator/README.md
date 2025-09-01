@@ -49,3 +49,13 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
    npm run start
 
 Then POST to http://127.0.0.1:5101/chat/stream (SSE).
+
+## Experimental / Optional
+
+The following files are provided for experiments and migration and are NOT required for normal operation:
+
+- `intelligent_server.js` — alternative server wrapper (experimental)
+- `.env.intelligent` — sample env for the alternative mode
+- `migrate_to_intelligent.sh` — migration helper script
+
+Use the standard `server.js` for production/dev. These files may change or be removed.

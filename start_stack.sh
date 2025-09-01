@@ -91,6 +91,19 @@ check_port 5102 || { echo "⚠️  Recovery bridge port 5102 busy (will attempt 
 
 echo "✅ Port check completed"
 
+# 1.5. Запуск Ukrainian TTS Mock (Port 3001) — Optional but recommended for Voice API
+echo "🎤 Starting Ukrainian TTS Mock (port 3001)..."
+if lsof -ti:3001 > /dev/null 2>&1; then
+    echo "⚠️  Port 3001 is busy. Skipping TTS mock startup. Set ATLAS_TTS_URL to your TTS endpoint."
+else
+    if [ -f "frontend_new/venv/bin/activate" ]; then
+        source frontend_new/venv/bin/activate
+    fi
+    nohup TTS_PORT=3001 python frontend_new/ukrainian_tts_server.py > logs/tts_mock.log 2>&1 &
+    echo $! > logs/tts_mock.pid
+    echo "✅ TTS mock started (PID: $(cat logs/tts_mock.pid)) on http://127.0.0.1:3001"
+fi
+
 # 2. Запуск Goose Web Interface (Port 3000) - Optional
 echo "🦆 Starting Goose Web Interface..."
 cd goose
@@ -136,6 +149,8 @@ else
     if [ -f "venv/bin/activate" ]; then
         source venv/bin/activate
     fi
+    # Пробрасываем URL TTS для Voice API (по умолчанию на 3001)
+    export ATLAS_TTS_URL=${ATLAS_TTS_URL:-http://127.0.0.1:3001/tts}
     python app/atlas_server.py > ../logs/frontend.log 2>&1 &
     echo $! > ../logs/frontend.pid
     echo "✅ Python frontend started (PID: $(cat ../logs/frontend.pid))"
