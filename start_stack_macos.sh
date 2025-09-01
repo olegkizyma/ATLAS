@@ -58,12 +58,61 @@ check_port() {
 
 # Перевірка портів
 echo "🔍 Checking ports availability..."
+if lsof -ti:3000 > /dev/null 2>&1; then
+    echo "⚠️  Goose web interface port 3000 busy (Goose will be skipped)"
+else
+    echo "✅ Port 3000 available for Goose"
+fi
 check_port 5001 || { echo "❌ Frontend port 5001 busy"; exit 1; }
 check_port 5101 || { echo "❌ Orchestrator port 5101 busy"; exit 1; }
 check_port 5102 || { echo "⚠️  Recovery bridge port 5102 busy (will attempt restart)"; }
 echo "✅ Port check completed"
 
-# 2. Запуск Node.js Orchestrator (Port 5101)
+# 2. Запуск Goose Web Interface (Port 3000) - Optional
+echo "🦆 Starting Goose Web Interface..."
+if lsof -ti:3000 > /dev/null 2>&1; then
+    echo "⚠️  Port 3000 is busy. Skipping Goose startup."
+else
+    cd goose
+    if [ -f "target/release/goose" ]; then
+        XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
+        echo $! > ../logs/goose.pid
+        echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+    elif command -v goose >/dev/null 2>&1; then
+        XDG_CONFIG_HOME=$(pwd) goose web > ../logs/goose.log 2>&1 &
+        echo $! > ../logs/goose.pid
+        echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+    elif [ -x "./download_cli.sh" ]; then
+        echo "📦 Goose binary not found. Downloading pre-built CLI..."
+        if CONFIGURE=false ./download_cli.sh; then
+            if [ -x "$HOME/.local/bin/goose" ]; then
+                XDG_CONFIG_HOME=$(pwd) "$HOME/.local/bin/goose" web > ../logs/goose.log 2>&1 &
+                echo $! > ../logs/goose.pid
+                echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+            else
+                echo "⚠️  Goose CLI downloaded but not found in PATH. Skipping Goose."
+            fi
+        else
+            echo "⚠️  Goose CLI download failed. Skipping Goose."
+        fi
+    elif command -v cargo >/dev/null 2>&1; then
+        echo "📦 Goose binary not found. Building with Cargo (this may take several minutes)..."
+        if cargo build --release --quiet; then
+            XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
+            echo $! > ../logs/goose.pid
+            echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+        else
+            echo "⚠️  Goose build failed. Continuing without Goose web interface."
+            echo "   Frontend will still work on http://localhost:5001"
+        fi
+    else
+        echo "⚠️  No Goose binary and no Cargo found. Skipping Goose web interface."
+        echo "   Frontend will still work on http://localhost:5001"
+    fi
+    cd ..
+fi
+
+# 3. Запуск Node.js Orchestrator (Port 5101)
 echo "🎭 Starting Node.js Orchestrator..."
 cd frontend_new/orchestrator
 # Check if Node.js dependencies are installed
@@ -76,7 +125,7 @@ echo $! > ../../logs/orchestrator.pid
 echo "✅ Node.js orchestrator started (PID: $(cat ../../logs/orchestrator.pid))"
 cd ../..
 
-# 3. Запуск Python Frontend (Port 5001)
+# 4. Запуск Python Frontend (Port 5001)
 echo "🧠 Starting Python Frontend..."
 cd frontend_new
 if [ -f "venv/bin/activate" ]; then
@@ -87,7 +136,7 @@ echo $! > ../logs/frontend.pid
 echo "✅ Python frontend started (PID: $(cat ../logs/frontend.pid))"
 cd ..
 
-# 4. Запуск Recovery Bridge (Port 5102)
+# 5. Запуск Recovery Bridge (Port 5102)
 echo "🔧 Starting Recovery Bridge..."
 cd frontend_new
 if [ -f "venv/bin/activate" ]; then
@@ -124,6 +173,13 @@ check_service() {
 check_service "Python Frontend" "http://localhost:5001" "logs/frontend.pid"
 check_service "Node.js Orchestrator" "http://localhost:5101/health" "logs/orchestrator.pid"
 
+# Check Goose only if it was started
+if [ -f "logs/goose.pid" ] && ps -p $(cat logs/goose.pid) > /dev/null 2>&1; then
+    check_service "Goose Web" "http://localhost:3000" "logs/goose.pid"
+else
+    echo "⚠️  Goose Web Interface not running (optional)"
+fi
+
 # Перевірка Recovery Bridge
 echo "🔧 Checking Recovery Bridge..."
 if [ -f "logs/recovery_bridge.pid" ] && ps -p $(cat logs/recovery_bridge.pid) > /dev/null 2>&1; then
@@ -136,11 +192,19 @@ echo ""
 echo "🎉 ATLAS macOS System Startup Complete!"
 echo ""
 echo "📊 Service Dashboard:"
+if [ -f "logs/goose.pid" ] && ps -p $(cat logs/goose.pid) > /dev/null 2>&1; then
+    echo "   🌐 Web Interface:    http://localhost:3000"
+else
+    echo "   🌐 Web Interface:    (not available - Goose not running)"
+fi
 echo "   🧠 Python Frontend:  http://localhost:5001"
 echo "   🎭 Orchestrator API: http://localhost:5101" 
 echo "   🔧 Recovery Bridge:  ws://localhost:5102"
 echo ""
 echo "📝 Logs:"
+if [ -f "logs/goose.log" ]; then
+    echo "   Goose:         logs/goose.log"
+fi
 echo "   Frontend:        logs/frontend.log"
 echo "   Orchestrator:    logs/orchestrator.log"
 echo "   Recovery Bridge: logs/recovery_bridge.log"
