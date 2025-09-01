@@ -1,7 +1,16 @@
 #!/bin/bash
 
 # ATLAS Intelligent Stack Startup Script
-# Запуск повного стеку ATL# 1. Запуск Python Environment Setup
+# Запуск повного стеку ATLAS
+
+# macOS users: Use ./start_stack_macos.sh for better compatibility
+if [[ "$OSTYPE" == "darwin"* ]]; then
+    echo "🍎 macOS detected. For optimal experience, use:"
+    echo "   ./start_stack_macos.sh"
+    echo ""
+    echo "Continuing with full stack (may require Rust/Cargo)..."
+    sleep 2
+fi# 1. Запуск Python Environment Setup
 echo "🐍 Setting up Python environment..."
 cd frontend_new
 if [ -f "setup_env.sh" ]; then
