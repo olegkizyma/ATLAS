@@ -549,6 +549,11 @@ app.post('/chat/stream', async (req, res) => {
     }
 
     sseHeaders(res);
+    // Keep-alive heartbeat every 15s to avoid client-side timeouts during long operations
+    const __heartbeat = setInterval(() => {
+      try { sseSend(res, { type: 'heartbeat', ts: Date.now() }); } catch (_) {}
+    }, 15000);
+    const __end = () => { try { clearInterval(__heartbeat); } catch (_) {} };
     sseSend(res, { type: 'start', agent: 'system', timestamp: Date.now() });
 
     // Smart Context Management: Check if we need to process context
@@ -568,9 +573,10 @@ app.post('/chat/stream', async (req, res) => {
     atlasOut = await callAtlas(message, sessionId, { msps });
   } catch (e) {
     // Мʼякий фолбэк: відповідь у чат‑режимі без запуску виконання
-    sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Зараз сервіс планування перевантажений (429). Відповім коротко і без запуску виконання: ' + (message.length > 160 ? message.slice(0,160) + '…' : message) });
-    sseSend(res, { type: 'complete', agent: 'system' });
-    return res.end();
+  sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Зараз сервіс планування перевантажений (429). Відповім коротко і без запуску виконання: ' + (message.length > 160 ? message.slice(0,160) + '…' : message) });
+  sseSend(res, { type: 'complete', agent: 'system' });
+  __end();
+  return res.end();
   }
   sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${atlasOut.user_reply || ''}` });
   if (typeof atlasOut._attemptsUsed === 'number') {
@@ -586,9 +592,10 @@ app.post('/chat/stream', async (req, res) => {
       intent = await classifyIntentSafe(message);
     }
     if (doNotExec || intent === 'chat') {
-      sseSend(res, { type: 'info', agent: 'system', content: 'Режим розмови: виконання не запускається.' });
-      sseSend(res, { type: 'complete', agent: 'system' });
-      return res.end();
+  sseSend(res, { type: 'info', agent: 'system', content: 'Режим розмови: виконання не запускається.' });
+  sseSend(res, { type: 'complete', agent: 'system' });
+  __end();
+  return res.end();
     }
   } catch (_) { /* ігноруємо, продовжуємо пайплайн */ }
 
@@ -610,8 +617,9 @@ app.post('/chat/stream', async (req, res) => {
       if (testMode) {
         sseSend(res, { type: 'info', agent: 'system', content: 'TEST MODE: безпековий блок вимкнено; продовжую виконання.' });
       } else {
-        sseSend(res, { type: 'complete', agent: 'system', content: 'Запит заблоковано політиками' });
-        return res.end();
+  sseSend(res, { type: 'complete', agent: 'system', content: 'Запит заблоковано політиками' });
+  __end();
+  return res.end();
       }
     }
 
@@ -631,9 +639,10 @@ app.post('/chat/stream', async (req, res) => {
   // 3.5) Check Tetyana's completion status before starting verification
   const completionStatus = await checkTetianaCompletionStatus(execText, sessionId);
   if (completionStatus.isComplete) {
-    sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: '[ТЕТЯНА] Задача виконана успішно!' });
-    sseSend(res, { type: 'complete', agent: 'system' });
-    return res.end();
+  sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: '[ТЕТЯНА] Задача виконана успішно!' });
+  sseSend(res, { type: 'complete', agent: 'system' });
+  __end();
+  return res.end();
   }
   
   if (!completionStatus.canContinue) {
@@ -729,8 +738,9 @@ app.post('/chat/stream', async (req, res) => {
           console.error('[ContextSummarizer] Failed to process interaction:', error);
         }
         
-        sseSend(res, { type: 'complete', agent: 'system' });
-        res.end();
+  sseSend(res, { type: 'complete', agent: 'system' });
+  try { __end?.(); } catch (_) {}
+  res.end();
         return;
       }
       
@@ -788,15 +798,18 @@ app.post('/chat/stream', async (req, res) => {
     // Після всіх циклів все ще не завершено
     sseSend(res, { type: 'agent_message', agent: 'Grisha', content: '[ГРИША] Після всіх спроб: завдання не вдалося довиконати. Потрібне ручне втручання або додаткові ресурси.' });
     sseSend(res, { type: 'complete', agent: 'system' });
+    try { __end?.(); } catch (_) {}
     res.end();
   } else {
     sseSend(res, { type: 'error', agent: 'Grisha', content: 'Відсутній ключ Mistral: неможливо провести перевірку/аудит.' });
+    try { __end?.(); } catch (_) {}
     res.end();
   }
   } catch (err) {
     console.error('orchestrator error', err);
     try {
       sseSend(res, { type: 'error', error: err.message || String(err) });
+      try { __end?.(); } catch (_) {}
       res.end();
     } catch {}
   }
