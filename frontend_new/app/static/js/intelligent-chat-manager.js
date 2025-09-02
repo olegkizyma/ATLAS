@@ -83,6 +83,12 @@ class AtlasIntelligentChatManager {
                     // Завантажуємо інформацію про агентів
                     await this.loadAgentInfo();
                     this.addVoiceControls();
+                    
+                    // Увімкнути голосову систему за замовчуванням
+                    if (!localStorage.getItem('atlas_voice_enabled')) {
+                        this.setVoiceEnabled(true);
+                        this.log('[VOICE] Voice system enabled by default');
+                    }
                 }
             }
         } catch (error) {
@@ -319,7 +325,8 @@ class AtlasIntelligentChatManager {
                                 
                                 // Initialize message accumulation for new agent
                                 if (this.voiceSystem.enabled && agent) {
-                                    this.voiceSystem.agentMessages.set(agent, '');
+                                    const canonical = this.getCanonicalAgentName(agent);
+                                    this.voiceSystem.agentMessages.set(canonical, '');
                                 }
                             }
                             
@@ -329,8 +336,9 @@ class AtlasIntelligentChatManager {
                                     
                                     // Accumulate content for TTS (don't synthesize yet)
                                     if (this.voiceSystem.enabled && agent) {
-                                        const existing = this.voiceSystem.agentMessages.get(agent) || '';
-                                        this.voiceSystem.agentMessages.set(agent, existing + content);
+                                        const canonical = this.getCanonicalAgentName(agent);
+                                        const existing = this.voiceSystem.agentMessages.get(canonical) || '';
+                                        this.voiceSystem.agentMessages.set(canonical, existing + content);
                                     }
                                 } else {
                                     this.addMessage(content, cls);
@@ -505,7 +513,7 @@ class AtlasIntelligentChatManager {
 
         if (!agentName) return;
 
-        const fullMessage = this.voiceSystem.agentMessages.get(agentName);
+    const fullMessage = this.voiceSystem.agentMessages.get(agentName);
         if (!fullMessage || fullMessage.trim().length < 10) {
             // Clear message and return if too short
             this.voiceSystem.agentMessages.delete(agentName);
@@ -871,3 +879,12 @@ function agentLabel(agent) {
     if (a.includes('atlas')) return 'assistant';
     return 'assistant';
 }
+
+// Canonicalize agent names from SSE events to voice system keys
+AtlasIntelligentChatManager.prototype.getCanonicalAgentName = function(agent) {
+    const a = String(agent || '').toLowerCase();
+    if (a.includes('grisha')) return 'grisha';
+    if (a.includes('tetiana') || a.includes('goose')) return 'tetyana';
+    // default assistant/atlas
+    return 'atlas';
+};

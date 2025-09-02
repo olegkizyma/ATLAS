@@ -226,15 +226,11 @@ function readMspsFromConfig() {
 
 function readMspsFromCommand() {
   try {
-  const cmd = process.env.MSP_DISCOVERY_CMD || 'goose msp list --json';
-  const cwd = process.env.MSP_DISCOVERY_CWD || process.cwd();
-  const timeout = parseInt(process.env.MSP_DISCOVERY_TIMEOUT || '5000', 10);
-  const out = execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
-    const json = JSON.parse(out);
-    const arr = Array.isArray(json?.servers) ? json.servers : Array.isArray(json) ? json : [];
-    return arr.filter(x => x && typeof x === 'object');
+  // MCP discovery відключено для Goose 1.7.0 через несумісність API
+  // Goose 1.7.0 не підтримує --json параметр для команди mcp
+  return [];
   } catch (e) {
-    if (process.env.DEBUG) console.warn('MSP command discovery failed:', e.message);
+    if (process.env.DEBUG) console.warn('MCP command discovery disabled:', e.message);
     return [];
   }
 }

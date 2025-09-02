@@ -188,7 +188,7 @@ else
     if [ -f "frontend_new/venv/bin/activate" ]; then
         source frontend_new/venv/bin/activate
     fi
-    nohup TTS_PORT=3001 python frontend_new/ukrainian_tts_server.py > logs/tts_mock.log 2>&1 &
+    nohup env TTS_PORT=3001 python frontend_new/ukrainian_tts_server.py > logs/tts_mock.log 2>&1 &
     echo $! > logs/tts_mock.pid
     echo "✅ TTS mock started (PID: $(cat logs/tts_mock.pid)) on http://127.0.0.1:3001"
 fi

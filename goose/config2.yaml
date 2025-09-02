@@ -1,0 +1,111 @@
+GOOSE_CLI_MIN_PRIORITY: 0.0
+OLLAMA_HOST: localhost
+GOOSE_SCHEDULER_TYPE: temporal
+GOOSE_ENABLE_ROUTER: 'false'
+GOOSE_RECIPE_GITHUB_REPO: https://github.com/olegkizyma/ATLAS.git
+GOOSE_PROVIDER: github_copilot
+extensions:
+  playwright:
+    enabled: true
+    type: stdio
+    name: playwright
+    cmd: node
+    args:
+    - /Users/dev/Documents/GitHub/ATLAS/goose/mcp/playwright/dist/index.js
+    envs: {}
+    env_keys: []
+    timeout: 300
+    description: Interact with web pages via Playwright MCP server
+    bundled: null
+    available_tools: []
+  autovisualiser:
+    enabled: true
+    type: builtin
+    name: autovisualiser
+    display_name: Auto Visualiser
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  developer:
+    enabled: true
+    type: builtin
+    name: developer
+    display_name: Developer
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  ukrainiannativetts:
+    enabled: true
+    type: stdio
+    name: ukrainiannativetts
+    cmd: /Users/dev/Documents/GitHub/ATLAS/goose/ukrainian-tts
+    args: []
+    envs: {}
+    env_keys: []
+    timeout: 300
+    description: Native Ukrainian Text-to-Speech with embedded environment setup
+    bundled: null
+    available_tools: []
+  tutorial:
+    enabled: true
+    type: builtin
+    name: tutorial
+    display_name: Tutorial
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  filesystem:
+    enabled: false
+    type: stdio
+    name: filesystem
+    cmd: uvx
+    args:
+    - mcp-server-filesystem
+    envs: {}
+    env_keys: []
+    timeout: 300
+    description: File system operations and management
+    bundled: null
+    available_tools: []
+  vscode:
+    enabled: true
+    type: stdio
+    name: vscode
+    cmd: /Users/dev/Documents/GitHub/ATLAS/goose/bin/npx
+    args:
+    - vscode-mcp-server
+    envs: {}
+    env_keys: []
+    timeout: 300
+    description: Provides a VSCode IDE integration for development workflows
+    bundled: null
+    available_tools: []
+  memory:
+    enabled: true
+    type: builtin
+    name: memory
+    display_name: Memory
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  computercontroller:
+    enabled: true
+    type: builtin
+    name: computercontroller
+    display_name: Computer Controller
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+GOOSE_MODEL: claude-sonnet-4
+GOOSE_AUTO_COMPACT_THRESHOLD: 0.3
+cursor-agent_configured: true
+gemini-cli_configured: true
+OLLAMA_TIMEOUT: '600'
+CURSOR_AGENT_COMMAND: cursor-agent
+GOOSE_MAX_TURNS: 1000
+GOOSE_MODE: auto

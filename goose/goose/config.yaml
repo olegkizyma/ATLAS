@@ -1,85 +1,85 @@
-GOOSE_MODE: auto
-GOOSE_MODEL: claude-sonnet-4
-GITHUB_COPILOT_TOKEN: null
-GOOSE_SCHEDULER_TYPE: temporal
+GOOSE_MODEL: gpt-4o
 extensions:
-  autovisualiser:
-    available_tools: []
-    bundled: true
-    description: null
-    display_name: Auto Visualiser
-    enabled: true
-    name: autovisualiser
-    timeout: 300
-    type: builtin
-  computercontroller:
-    available_tools: []
-    bundled: true
-    description: null
-    display_name: Computer Controller
-    enabled: true
-    name: computercontroller
-    timeout: 300
-    type: builtin
-  developer:
-    available_tools: []
-    bundled: true
-    description: null
-    display_name: Developer Tools
-    enabled: true
-    name: developer
-    timeout: 300
-    type: builtin
   filesystem:
-    available_tools: []
-    bundled: true
-    description: null
-    display_name: Filesystem
-    enabled: true
+    enabled: false
+    type: builtin
     name: filesystem
-    timeout: 300
-    type: builtin
-  jetbrains:
-    available_tools: []
-    bundled: true
+    display_name: Filesystem
     description: null
-    display_name: JetBrains
-    enabled: false
-    name: jetbrains
     timeout: 300
-    type: builtin
-  memory:
-    available_tools: []
     bundled: true
-    description: null
-    display_name: Memory
-    enabled: false
-    name: memory
-    timeout: 300
+    available_tools: []
+  tutorial:
+    enabled: true
     type: builtin
+    name: tutorial
+    display_name: Tutorial
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
   playwright:
+    enabled: true
+    type: stdio
+    name: playwright
+    cmd: node
     args:
     - /Users/dev/Documents/GitHub/ATLAS/goose/mcp/playwright/dist/index.js
-    available_tools: []
-    bundled: null
-    cmd: node
-    description: Interact with web pages via Playwright MCP server
-    enabled: true
-    env_keys: []
     envs: {}
-    name: playwright
+    env_keys: []
     timeout: 300
-    type: stdio
-  tutorial:
+    description: Interact with web pages via Playwright MCP server
+    bundled: null
     available_tools: []
-    bundled: true
-    description: null
-    display_name: Tutorial
+  computercontroller:
     enabled: true
-    name: tutorial
-    timeout: 300
     type: builtin
-GOOSE_ENABLE_ROUTER: 'true'
+    name: computercontroller
+    display_name: Computer Controller
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  developer:
+    enabled: true
+    type: builtin
+    name: developer
+    display_name: Developer Tools
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  jetbrains:
+    enabled: false
+    type: builtin
+    name: jetbrains
+    display_name: JetBrains
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  memory:
+    enabled: true
+    type: builtin
+    name: memory
+    display_name: Memory
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
+  autovisualiser:
+    enabled: true
+    type: builtin
+    name: autovisualiser
+    display_name: Auto Visualiser
+    description: null
+    timeout: 300
+    bundled: true
+    available_tools: []
 GOOSE_CLI_MIN_PRIORITY: 0.0
-GOOSE_PROVIDER: github_copilot
+GOOSE_SCHEDULER_TYPE: temporal
+GOOSE_MODE: auto
+GITHUB_COPILOT_TOKEN: null
+GOOSE_ENABLE_ROUTER: 'true'
 GOOSE_RECIPE_GITHUB_REPO: https://github.com/olegkizyma/ATLAS.git
+GOOSE_PROVIDER: github_copilot

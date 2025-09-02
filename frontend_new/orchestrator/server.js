@@ -44,6 +44,8 @@ const ORCH_AUTO_TRUNCATE_ON_TOKEN_LIMIT = String(process.env.ORCH_AUTO_TRUNCATE_
 const ORCH_CONTEXT_COMPRESSION_RATIO = parseFloat(process.env.ORCH_CONTEXT_COMPRESSION_RATIO || '0.7');
 // Force using goosed /reply (SSE) instead of Goose WebSocket interface
 const ORCH_FORCE_GOOSE_REPLY = String(process.env.ORCH_FORCE_GOOSE_REPLY || 'false') === 'true';
+// Force verification cycles even if Tetiana reports completion
+const ORCH_FORCE_VERIFICATION = String(process.env.ORCH_FORCE_VERIFICATION || 'false') === 'true';
 
 // Smart Context Management
 const contextSummarizer = new ContextSummarizer(
@@ -247,15 +249,11 @@ function readMspsFromConfig() {
 
 function readMspsFromCommand() {
   try {
-  const cmd = process.env.MSP_DISCOVERY_CMD || 'goose msp list --json';
-  const cwd = process.env.MSP_DISCOVERY_CWD || process.cwd();
-  const timeout = parseInt(process.env.MSP_DISCOVERY_TIMEOUT || '5000', 10);
-  const out = execSync(cmd, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'], timeout });
-    const json = JSON.parse(out);
-    const arr = Array.isArray(json?.servers) ? json.servers : Array.isArray(json) ? json : [];
-    return arr.filter(x => x && typeof x === 'object');
+  // MCP discovery відключено для Goose 1.7.0 через несумісність API
+  // Goose 1.7.0 не підтримує --json параметр для команди mcp
+  return [];
   } catch (e) {
-    if (process.env.DEBUG) console.warn('MSP command discovery failed:', e.message);
+    if (process.env.DEBUG) console.warn('MCP command discovery disabled:', e.message);
     return [];
   }
 }
@@ -638,11 +636,13 @@ app.post('/chat/stream', async (req, res) => {
 
   // 3.5) Check Tetyana's completion status before starting verification
   const completionStatus = await checkTetianaCompletionStatus(execText, sessionId);
-  if (completionStatus.isComplete) {
+  if (completionStatus.isComplete && !ORCH_FORCE_VERIFICATION) {
   sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: '[ТЕТЯНА] Задача виконана успішно!' });
   sseSend(res, { type: 'complete', agent: 'system' });
   __end();
   return res.end();
+  } else if (completionStatus.isComplete && ORCH_FORCE_VERIFICATION) {
+    sseSend(res, { type: 'info', agent: 'Grisha', content: '[ГРИША] Форсована перевірка: навіть при заявленому завершенні виконую незалежну верифікацію.' });
   }
   
   if (!completionStatus.canContinue) {
@@ -1466,7 +1466,10 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
     } catch (e) {
       const status = e?.response?.status;
       const msg = `[Tetiana][SSE] POST ${url} failed: ${status || e.message}`;
-      throw new Error(msg);
+  const err = new Error(msg);
+  // Attach status for upper-level handlers
+  err.status = status;
+  throw err;
     }
     return new Promise((resolve, reject) => {
       let collected = '';
@@ -1518,6 +1521,7 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
       const msg = e?.message || '';
       const tooLong = /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
       const notFound = /404|not\s*found/i.test(msg);
+  const toolCallsSeq = /tool_calls.*must\s*be\s*followed\s*by\s*tool\s*messages|tool\s*messages\s*responding\s*to\s*each\s*tool_call_id|messages?\s*with\s*role\s*['"]tool['"][^\n]*must\s*be\s*a\s*prece?e?d(?:ing|ent)\s*message\s*with\s*['"]tool_calls['"]/i.test(msg);
       if (tooLong) {
         console.log('[CONTEXT_LIMIT] Goose Web reported token overflow. Falling back to SSE with extra compression...');
         const fallbackMax = Math.max(2000, Math.floor(ORCH_MAX_MISTRAL_USER_CHARS * 0.5));
@@ -1526,16 +1530,75 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
           const est2 = estimateTokens(compressed);
           console.log(`[CONTEXT_LIMIT] Fallback prompt size: chars=${compressed.length}, estTokens=${est2}`);
         } catch {}
-        return await sendViaSse(compressed);
+        try {
+          return await sendViaSse(compressed);
+        } catch (err) {
+          if (err?.status === 404) {
+            console.log('[SSE_404_FALLBACK] /reply not available on Goose Web. Using direct local LLM for Tetiana...');
+            return await streamLocalTetianaDirect(compressed, res);
+          }
+          throw err;
+        }
+      } else if (toolCallsSeq) {
+        // Goose Web (provider github_copilot) вимагає клієнтських tool messages; переходимо на /reply SSE, який керує інструментами на боці агента
+        console.log('[WS_TOOLCALL_FALLBACK] Goose Web reported tool_calls sequencing requirement. Falling back to SSE /reply...');
+        try {
+          return await sendViaSse();
+        } catch (err) {
+          if (err?.status === 404) {
+            console.log('[SSE_404_FALLBACK] /reply not available on Goose Web. Using direct local LLM for Tetiana...');
+            return await streamLocalTetianaDirect(messageText, res);
+          }
+          throw err;
+        }
       } else if (notFound) {
         console.log('[ROUTE_FALLBACK] Goose Web /ws returned 404; trying /reply SSE...');
-        return await sendViaSse();
+        try {
+          return await sendViaSse();
+        } catch (err) {
+          if (err?.status === 404) {
+            console.log('[SSE_404_FALLBACK] /reply not available on Goose Web. Using direct local LLM for Tetiana...');
+            return await streamLocalTetianaDirect(messageText, res);
+          }
+          throw err;
+        }
       }
       throw e;
     }
   } else {
     // Потік через goosed /reply (SSE)
     return await sendViaSse();
+  }
+}
+
+// Локальний fallback для Тетяни без Goose: використовує Mistral (якщо є ключ) або локальний OpenAI-сумісний API
+async function streamLocalTetianaDirect(messageText, res) {
+  try {
+    sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Працюю в локальному режимі без Goose…' });
+    let full = '';
+    if (MISTRAL_API_KEY) {
+      const sys = 'Ти — Тетяна, практична виконавиця. Дай покрокову, прикладну відповідь з конкретикою.';
+      const out = await mistralChat(sys, ensurePromptBounds(messageText, ORCH_MAX_MISTRAL_USER_CHARS, 'Tetiana prompt (direct)'), { temperature: 0.2 });
+      full = String(out || '');
+    } else {
+      const msgs = [
+        { role: 'system', content: 'Ти — Тетяна, практична виконавиця. Дай покрокову, прикладну відповідь з конкретикою.' },
+        { role: 'user', content: ensurePromptBounds(messageText, ORCH_MAX_MISTRAL_USER_CHARS, 'Tetiana prompt (direct)') }
+      ];
+      full = await callFallbackAPI(msgs, FALLBACK_MODELS.atlas, { max_tokens: 1200, temperature: 0.3 });
+    }
+    // Стрімімо квазіріалтайм: розбиваємо по абзацах/реченнях
+    const chunks = String(full).split(/(?<=[.!?])\s+|\n+/);
+    for (const ch of chunks) {
+      if (!ch) continue;
+      sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: ch });
+      await sleep(40);
+    }
+    return full.trim();
+  } catch (err) {
+    console.error('[LocalTetiana] Fallback failed:', err.message);
+    sseSend(res, { type: 'error', agent: 'Tetiana', content: 'Локальний режим тимчасово недоступний' });
+    throw err;
   }
 }
 
@@ -1646,7 +1709,7 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
       if (settled) return;
       settled = true;
       try { ws.close(); } catch {}
-      if (err) reject(err); else resolve();
+      if (err) reject(err); else resolve(collected.trim());
     };
 
     ws.on('open', () => {
@@ -1689,8 +1752,10 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
   ws.on('close', () => { 
     // Аналізуємо зібраний вивід для відстеження використаних ресурсів
     analyzeExecutionOutput(collected, sessionId);
-    finish(); 
-    resolve(collected.trim()); 
+    if (!settled) {
+      settled = true;
+      resolve(collected.trim()); 
+    }
   });
   });
 }
