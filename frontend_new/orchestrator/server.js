@@ -820,8 +820,11 @@ async function callAtlas(userMessage, sessionId, options = {}) {
     process.env.GOOGLE_API_KEY,
     process.env.GENERATIVE_LANGUAGE_API_KEY
   ].filter((v, i, a) => v && a.indexOf(v) === i);
-  if (candidateKeys.length === 0) {
-    throw new Error('Atlas (Gemini) API key not configured');
+  
+  // Fallback to Mistral if Gemini is not available
+  if (candidateKeys.length === 0 || !candidateKeys[0]) {
+    console.log('[Atlas] Gemini API key not configured, falling back to Mistral');
+    return await callAtlasViaMistral(userMessage, sessionId, { msps, instruction, sys });
   }
 
   const payload = {
@@ -871,8 +874,17 @@ async function callAtlas(userMessage, sessionId, options = {}) {
   }
 
   if (!text) {
-    console.warn('Gemini call failed:', lastErr?.message);
-    throw new Error('Atlas недоступний: ' + (lastErr?.message || 'невідома помилка'));
+    console.warn('Gemini call failed, falling back to Mistral:', lastErr?.message);
+    if (MISTRAL_API_KEY) {
+      try {
+        return await callAtlasViaMistral(userMessage, sessionId, { msps, instruction: sys, mspsContext });
+      } catch (mistralErr) {
+        console.error('Mistral fallback also failed:', mistralErr.message);
+        throw new Error(`Atlas недоступний. Gemini: ${lastErr?.message || 'невідома помилка'}. Mistral: ${mistralErr.message}`);
+      }
+    } else {
+      throw new Error('Atlas недоступний: ' + (lastErr?.message || 'невідома помилка') + '. Mistral API key not configured for fallback.');
+    }
   }
 
   // Parse: first part for user, last JSON block for task
@@ -892,6 +904,63 @@ async function callAtlas(userMessage, sessionId, options = {}) {
     _attemptsUsed: usedAttempts,
     _keyUsed: keyUsed ? (keyUsed === process.env.GEMINI_API_KEY ? 'GEMINI_API_KEY' : keyUsed === process.env.GOOGLE_API_KEY ? 'GOOGLE_API_KEY' : 'GENERATIVE_LANGUAGE_API_KEY') : null
   };
+}
+
+// Fallback function to use Mistral when Gemini fails
+async function callAtlasViaMistral(userMessage, sessionId, options = {}) {
+  console.log('[Atlas] Using Mistral as Atlas fallback');
+  const { msps = [], instruction, sys, mspsContext = '' } = options;
+  
+  if (!MISTRAL_API_KEY) {
+    throw new Error('Mistral API key not configured for Atlas fallback');
+  }
+
+  const systemPrompt = sys || prompts.atlas?.system || 'You are Atlas, an AI assistant.';
+  const userPrompt = `${instruction}\n\n${mspsContext}\n\nUser: ${userMessage}`;
+
+  try {
+    const response = await mistralJsonOnly(
+      systemPrompt,
+      userPrompt,
+      { 
+        maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS || 5, 
+        temperature: 0.3, 
+        sessionId,
+        model: MISTRAL_MODEL || 'mistral-small-latest'
+      }
+    );
+
+    // Parse response similar to Gemini
+    let text = '';
+    if (typeof response === 'string') {
+      text = response;
+    } else if (response && response.content) {
+      text = response.content;
+    } else {
+      text = JSON.stringify(response);
+    }
+
+    // Parse: first part for user, last JSON block for task
+    const jsonMatch = text.match(/\{[\s\S]*\}$/);
+    let taskSpec = null;
+    if (jsonMatch) {
+      try { taskSpec = JSON.parse(jsonMatch[0]); } catch {}
+    }
+    const userReplyRaw = taskSpec ? text.replace(jsonMatch[0], '').trim() : text;
+    const userReply = cleanUserReply(userReplyRaw);
+
+    return {
+      user_reply: userReply || 'Готово.',
+      task_spec: taskSpec || {
+        title: 'Задача', summary: userMessage, inputs: [userMessage], steps: [], constraints: [], success_criteria: [], tool_hints: {}
+      },
+      _attemptsUsed: 1,
+      _keyUsed: 'MISTRAL_API_KEY (fallback)'
+    };
+  } catch (error) {
+    console.error('[Atlas] Mistral fallback failed:', error.message);
+    throw error;
+  }
 }
 
 // Create one clarifying question Tetiana might ask
