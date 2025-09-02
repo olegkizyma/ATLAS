@@ -6,7 +6,9 @@ import { z } from "zod";
 import { chromium } from "playwright";
 
 const server = new Server({ name: "goose-mcp-playwright", version: "0.1.0" }, {
-  capabilities: {},
+  capabilities: {
+    tools: {},
+  },
 });
 
 const inputSchema = z.object({ url: z.string().url(), path: z.string() });
