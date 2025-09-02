@@ -28,10 +28,11 @@ class AtlasIntelligentChatManager {
                 tetyana: { 
                     signature: '[ТЕТЯНА]', 
                     color: '#00ffff', 
-                    voice: 'oleksa',
-                    pitch: 1.1, 
-                    rate: 0.9,
-                    priority: 2
+                    voice: 'tetiana',
+                    pitch: 1.05, 
+                    rate: 1.0,
+                    priority: 2,
+                    noFallback: true // без фолбеку для Тетяни
                 },
                 grisha: { 
                     signature: '[ГРИША]', 
@@ -43,7 +44,7 @@ class AtlasIntelligentChatManager {
                 }
             },
             currentAudio: null,
-            fallbackVoices: ['dmytro', 'oleksa', 'robot'], // Fallback voice list
+            fallbackVoices: ['dmytro', 'oleksa', 'robot'], // Загальний список фолбеків (Тетяна їх не використовує)
             maxRetries: 2,
             // TTS synchronization system
             agentMessages: new Map(), // Store accumulated messages per agent  
@@ -569,15 +570,8 @@ class AtlasIntelligentChatManager {
             return;
         }
 
-        // Find the actual agent name from currentAgent class
-        let agentName = null;
-        for (const [name, config] of Object.entries(this.voiceSystem.agents)) {
-            if (currentAgent.includes(name) || currentAgent === 'assistant' && name === 'atlas') {
-                agentName = name;
-                break;
-            }
-        }
-
+        // Визначаємо канонічне ім'я агента за класом повідомлення
+        const agentName = this.getCanonicalAgentName(currentAgent);
         if (!agentName) return;
 
     const fullMessage = this.voiceSystem.agentMessages.get(agentName);
@@ -587,7 +581,7 @@ class AtlasIntelligentChatManager {
             return;
         }
 
-        this.log(`[VOICE] Finalizing TTS for ${agentName}: "${fullMessage.substring(0, 50)}..."`);
+    this.log(`[VOICE] Finalizing TTS for ${agentName}: "${fullMessage.substring(0, 50)}..."`);
 
         try {
             // Wait for previous TTS to complete
@@ -603,7 +597,7 @@ class AtlasIntelligentChatManager {
                 });
             }
 
-            // Synthesize full message
+            // Синтез: для Тетяни — лише [VOICE]-рядки, інакше — увесь текст
             await this.synthesizeAndPlay(fullMessage, agentName);
 
             // Clear the accumulated message
@@ -613,6 +607,25 @@ class AtlasIntelligentChatManager {
             this.log(`[VOICE] Failed to finalize agent message: ${error.message}`);
             this.voiceSystem.agentMessages.delete(agentName);
         }
+    }
+
+    // Витягає лише короткі рядки для озвучування у форматі [VOICE] ... або VOICE: ...
+    extractVoiceOnly(text) {
+        if (!text) return '';
+        const lines = String(text).split(/\r?\n/);
+        const picked = [];
+        for (const line of lines) {
+            const m1 = line.match(/^\s*\[VOICE\]\s*(.+)$/i);
+            const m2 = line.match(/^\s*VOICE\s*:\s*(.+)$/i);
+            const fragment = (m1 && m1[1]) || (m2 && m2[1]) || null;
+            if (fragment) {
+                // Обрізаємо до розумної довжини, щоб фрази були короткі
+                picked.push(fragment.trim());
+            }
+        }
+        const result = picked.join(' ').trim();
+        // Обмежуємо довжину фрази для промовляння
+        return result.length > 220 ? result.slice(0, 220) : result;
     }
 
     async processTTSQueue() {
@@ -655,6 +668,16 @@ class AtlasIntelligentChatManager {
             
             const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
             const voice = agentConfig.voice;
+
+            // Для Тетяни озвучуємо лише короткі рядки [VOICE]
+            let speechText = text;
+            if (agent === 'tetyana') {
+                speechText = this.extractVoiceOnly(text);
+                if (!speechText || speechText.trim().length === 0) {
+                    this.log('[VOICE] Skipping TTS for tetyana: no [VOICE] lines found');
+                    return;
+                }
+            }
             
             this.log(`[VOICE] Synthesizing ${agent} voice with ${voice} (attempt ${retryCount + 1})`);
             
@@ -665,7 +688,7 @@ class AtlasIntelligentChatManager {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    text: text,
+                    text: speechText,
                     agent: agent,
                     voice: voice,
                     pitch: agentConfig.pitch || 1.0,
@@ -675,8 +698,8 @@ class AtlasIntelligentChatManager {
             });
             
             if (!response.ok) {
-                // If specific voice fails, try fallback
-                if (retryCount < this.voiceSystem.maxRetries) {
+                // If specific voice fails, try fallback (крім Тетяни)
+                if (!agentConfig.noFallback && retryCount < this.voiceSystem.maxRetries) {
                     const fallbackVoice = this.voiceSystem.fallbackVoices[retryCount % this.voiceSystem.fallbackVoices.length];
                     this.log(`[VOICE] Voice synthesis failed, trying fallback: ${fallbackVoice}`);
                     
@@ -686,7 +709,7 @@ class AtlasIntelligentChatManager {
                             'Content-Type': 'application/json'
                         },
                         body: JSON.stringify({
-                            text: text,
+                            text: speechText,
                             agent: agent,
                             voice: fallbackVoice,
                             pitch: 1.0,
@@ -707,17 +730,20 @@ class AtlasIntelligentChatManager {
             }
             
             const audioBlob = await response.blob();
-            await this.playAudioBlob(audioBlob, `${agent} (${voice})`, { agent, text });
+            await this.playAudioBlob(audioBlob, `${agent} (${voice})`, { agent, text: speechText });
             
         } catch (error) {
-            if (retryCount < this.voiceSystem.maxRetries) {
+            const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
+            if (!agentConfig.noFallback && retryCount < this.voiceSystem.maxRetries) {
                 this.log(`[VOICE] Synthesis error, retrying: ${error.message}`);
                 await this.delay(1000 * (retryCount + 1)); // Progressive delay
                 return await this.synthesizeAndPlay(text, agent, retryCount + 1);
             } else {
                 this.log(`[VOICE] Voice synthesis failed after retries: ${error.message}`);
-                // Try browser's built-in speech synthesis as last resort
-                await this.fallbackToWebSpeech(text, agent);
+                // Без фолбеку для Тетяни: не використовуємо Web Speech
+                if (!agentConfig.noFallback) {
+                    await this.fallbackToWebSpeech(text, agent);
+                }
             }
         }
     }
@@ -990,7 +1016,7 @@ window.AtlasChatManager = AtlasIntelligentChatManager;
 function agentLabel(agent) {
     const a = (agent || '').toLowerCase();
     if (a.includes('grisha')) return 'grisha';
-    if (a.includes('tetiana') || a.includes('goose')) return 'tetiana';
+    if (a.includes('tetiana') || a.includes('tetyana') || a.includes('goose')) return 'tetyana';
     if (a.includes('atlas')) return 'assistant';
     return 'assistant';
 }
@@ -999,7 +1025,7 @@ function agentLabel(agent) {
 AtlasIntelligentChatManager.prototype.getCanonicalAgentName = function(agent) {
     const a = String(agent || '').toLowerCase();
     if (a.includes('grisha')) return 'grisha';
-    if (a.includes('tetiana') || a.includes('goose')) return 'tetyana';
+    if (a.includes('tetiana') || a.includes('tetyana') || a.includes('goose')) return 'tetyana';
     // default assistant/atlas
     return 'atlas';
 };

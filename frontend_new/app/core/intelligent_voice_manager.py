@@ -147,7 +147,9 @@ class IntelligentVoiceManager:
         # Базові параметри для агента
         base_params = {
             "atlas": {"pitch": 0.8, "speed": 0.9, "voice": "dmytro", "emotion": "confident"},
-            "tetyana": {"pitch": 1.1, "speed": 1.1, "voice": "oleksa", "emotion": "friendly"},
+            # Жіночий голос для Тетяни з короткими, чіткими фразами
+            # Доступні голоси: tetiana, mykyta, lada, dmytro, oleksa
+            "tetyana": {"pitch": 1.05, "speed": 1.0, "voice": "tetiana", "emotion": "friendly"},
             # Для реального серверу ukrainian-tts доступні голоси: tetiana, mykyta, lada, dmytro, oleksa
             # Мапимо Гришу на "mykyta" і додаємо fx="robot" для характерного тембру
             "grisha": {"pitch": 0.9, "speed": 1.0, "voice": "mykyta", "emotion": "serious", "fx": "robot"}
