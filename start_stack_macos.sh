@@ -84,16 +84,16 @@ ensure_goose_config_link() {
 
 # Пошук виконуваного goose
 resolve_goose_bin() {
-    if [ -x "$REPO_ROOT/goose/target/release/goose" ]; then
-        echo "$REPO_ROOT/goose/target/release/goose"
-        return 0
-    fi
     if [ -x "$HOME/.local/bin/goose" ]; then
         echo "$HOME/.local/bin/goose"
         return 0
     fi
     if command -v goose >/dev/null 2>&1; then
         command -v goose
+        return 0
+    fi
+    if [ -x "$REPO_ROOT/goose/target/release/goose" ]; then
+        echo "$REPO_ROOT/goose/target/release/goose"
         return 0
     fi
     echo ""
@@ -179,44 +179,41 @@ if lsof -ti:3000 > /dev/null 2>&1; then
 else
     # Узгодити конфіги перед запуском Goose Web
     ensure_goose_config_link
-        goose_env_report
-    cd goose
-    if [ -f "target/release/goose" ]; then
-        XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
-        echo $! > ../logs/goose.pid
-        echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
-    elif command -v goose >/dev/null 2>&1; then
-        XDG_CONFIG_HOME=$(pwd) goose web > ../logs/goose.log 2>&1 &
-        echo $! > ../logs/goose.pid
-        echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
-    elif [ -x "./download_cli.sh" ]; then
+                goose_env_report
+        (
+            cd goose
+            goose_bin=$(resolve_goose_bin)
+            if [ -z "$goose_bin" ] && [ -x "./download_cli.sh" ]; then
         echo "📦 Goose binary not found. Downloading pre-built CLI..."
         if CONFIGURE=false ./download_cli.sh; then
             if [ -x "$HOME/.local/bin/goose" ]; then
-                XDG_CONFIG_HOME=$(pwd) "$HOME/.local/bin/goose" web > ../logs/goose.log 2>&1 &
-                echo $! > ../logs/goose.pid
-                echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+                                goose_bin="$HOME/.local/bin/goose"
             else
                 echo "⚠️  Goose CLI downloaded but not found in PATH. Skipping Goose."
             fi
         else
             echo "⚠️  Goose CLI download failed. Skipping Goose."
         fi
-    elif command -v cargo >/dev/null 2>&1; then
+            fi
+            if [ -z "$goose_bin" ] && command -v cargo >/dev/null 2>&1; then
         echo "📦 Goose binary not found. Building with Cargo (this may take several minutes)..."
         if cargo build --release --quiet; then
-            XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
-            echo $! > ../logs/goose.pid
-            echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+                        goose_bin="./target/release/goose"
         else
             echo "⚠️  Goose build failed. Continuing without Goose web interface."
             echo "   Frontend will still work on http://localhost:5001"
-        fi
-    else
-        echo "⚠️  No Goose binary and no Cargo found. Skipping Goose web interface."
-        echo "   Frontend will still work on http://localhost:5001"
-    fi
-    cd ..
+                fi
+            fi
+            if [ -n "$goose_bin" ]; then
+                mkdir -p "$HOME/.local/share/goose/sessions"
+                TMPDIR="$HOME/.local/share/goose/sessions" XDG_CONFIG_HOME=$(pwd) "$goose_bin" web > ../logs/goose.log 2>&1 &
+                echo $! > ../logs/goose.pid
+                echo "✅ Goose web interface started (PID: $(cat ../logs/goose.pid))"
+            else
+                echo "⚠️  No Goose binary available. Skipping Goose web interface."
+                echo "   Frontend will still work on http://localhost:5001"
+            fi
+        )
 fi
 
 # 3. Запуск Node.js Orchestrator (Port 5101)
@@ -321,6 +318,7 @@ echo "🛠️  Management:"
 echo "   Stop system:  ./stop_stack.sh"
 echo "   View logs:    tail -f logs/*.log"
 echo "   Check status: ./status_stack.sh"
+echo "   Goose session: ./scripts/goose_session.sh"
 echo ""
 echo "🍎 ATLAS is now ready for intelligent multi-agent operations on macOS!"
 echo ""
