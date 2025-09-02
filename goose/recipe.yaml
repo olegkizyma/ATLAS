@@ -44,3 +44,5 @@ extensions:
     name: developer
   - type: builtin
     name: computercontroller
+  - type: builtin
+    name: playwright

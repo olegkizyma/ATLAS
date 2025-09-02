@@ -48,12 +48,16 @@ extensions:
     available_tools: []
   playwright:
     enabled: true
-    type: builtin
+    type: stdio
     name: playwright
-    display_name: Playwright
-    description: null
+    cmd: node
+    args:
+      - '/Users/dev/Documents/GitHub/ATLAS/goose/mcp/playwright/dist/index.js'
+    envs: {}
+    env_keys: []
     timeout: 300
-    bundled: true
+    description: Interact with web pages via Playwright MCP server
+    bundled: null
     available_tools: []
   jetbrains:
     enabled: true
