@@ -43,6 +43,95 @@ echo "🚀 Starting ATLAS Intelligent Multi-Agent System..."
 # Створення директорії для логів
 mkdir -p logs
 
+# Визначення кореня репозиторію (потрібно для налаштування Goose XDG_CONFIG_HOME)
+REPO_ROOT="$(pwd)"
+
+# Узгодження конфігів Goose: створюємо симлінк ~/.config/goose -> <repo>/goose/goose
+# та робимо безпечну копію config.yaml у ~/.config/ на випадок відновлення
+ensure_goose_config_link() {
+    local repo_conf_dir="$REPO_ROOT/goose/goose"
+    local user_config_base="$HOME/.config"
+    local user_conf_link="$user_config_base/goose"
+
+    mkdir -p "$user_config_base"
+
+    # 1) Зберігаємо копію актуального конфігу з репо
+    #    a) у ~/.config (плоский бекап)
+    #    b) якщо ~/.config/goose є реальною директорією (не лінком) — покладемо копію всередину неї, як просили
+    if [ -f "$repo_conf_dir/config.yaml" ]; then
+        local ts
+        ts=$(date +%Y%m%d_%H%M%S)
+        cp -f "$repo_conf_dir/config.yaml" "$user_config_base/goose.config.yaml.copy.$ts" 2>/dev/null || true
+        if [ -d "$user_conf_link" ] && [ ! -L "$user_conf_link" ]; then
+            mkdir -p "$user_conf_link"
+            cp -f "$repo_conf_dir/config.yaml" "$user_conf_link/config.yaml.copy.$ts" 2>/dev/null || true
+        fi
+    fi
+
+    # 2) Якщо вже є симлінк, що вказує на потрібну теку — нічого не робимо
+    if [ -L "$user_conf_link" ]; then
+        local link_target
+        link_target=$(readlink "$user_conf_link")
+        if [ "$link_target" = "$repo_conf_dir" ]; then
+            return 0
+        fi
+    fi
+
+    # 3) Відсуваємо існуючу теку/посилання у бекап, якщо таке є
+    if [ -e "$user_conf_link" ] || [ -L "$user_conf_link" ]; then
+        local ts
+        ts=$(date +%Y%m%d_%H%M%S)
+        mv -f "$user_conf_link" "$user_config_base/goose.backup.$ts" 2>/dev/null || true
+    fi
+
+    # 4) Створюємо симлінк на теку конфігів у репозиторії
+    ln -s "$repo_conf_dir" "$user_conf_link" 2>/dev/null || true
+}
+
+# Пошук виконуваного goose
+resolve_goose_bin() {
+    if [ -x "$REPO_ROOT/goose/target/release/goose" ]; then
+        echo "$REPO_ROOT/goose/target/release/goose"
+        return 0
+    fi
+    if [ -x "$HOME/.local/bin/goose" ]; then
+        echo "$HOME/.local/bin/goose"
+        return 0
+    fi
+    if command -v goose >/dev/null 2>&1; then
+        command -v goose
+        return 0
+    fi
+    echo ""
+    return 1
+}
+
+# Діагностика оточення Goose: симлінк і шляхи info
+goose_env_report() {
+    local logf="logs/goose_env.log"
+    [ -w "logs" ] || return 0
+    local goose_bin
+    goose_bin=$(resolve_goose_bin)
+    [ -n "$goose_bin" ] || return 0
+
+    {
+        echo "==== Goose environment check: $(date -u +%Y-%m-%dT%H:%M:%SZ) ===="
+        echo "GOOSE_BIN: $goose_bin"
+        echo "~/.config/goose link status:"
+        ls -l "$HOME/.config/goose" 2>&1 || true
+        if [ -L "$HOME/.config/goose" ]; then
+            echo "readlink ~/.config/goose -> $(readlink "$HOME/.config/goose")"
+        fi
+        echo "-- goose info (default env) --"
+        "$goose_bin" info 2>&1 || true
+        echo "-- goose info (XDG_CONFIG_HOME=$REPO_ROOT/goose) --"
+        XDG_CONFIG_HOME="$REPO_ROOT/goose" "$goose_bin" info 2>&1 || true
+        echo ""
+    } >> "$logf"
+
+    echo "📝 Goose env diagnostics written to $logf"
+}
+
 # Функція для перевірки доступності порту (macOS compatible)
 check_port() {
     local port=$1
@@ -106,6 +195,9 @@ fi
 
 # 2. Запуск Goose Web Interface (Port 3000) - Optional
 echo "🦆 Starting Goose Web Interface..."
+# Узгодити конфіги перед запуском Goose Web
+ensure_goose_config_link
+goose_env_report
 cd goose
 if [ -f "target/release/goose" ]; then
     XDG_CONFIG_HOME=$(pwd) ./target/release/goose web > ../logs/goose.log 2>&1 &
