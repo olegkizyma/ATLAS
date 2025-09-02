@@ -4,10 +4,12 @@
  */
 class AtlasIntelligentChatManager {
     constructor() {
-        this.isStreaming = false;
-        this.isStreamPending = false;
-        this.messages = [];
-        this.apiBase = (window.ATLAS_CFG && window.ATLAS_CFG.orchestratorBase) || window.location.origin;
+    this.isStreaming = false;
+    this.isStreamPending = false;
+    this.messages = [];
+    // Separate bases: orchestrator (Node, 5101) and frontend (Flask, 5001)
+    this.orchestratorBase = (window.ATLAS_CFG && window.ATLAS_CFG.orchestratorBase) || window.location.origin;
+    this.frontendBase = (window.ATLAS_CFG && window.ATLAS_CFG.frontendBase) || window.location.origin;
         this.retryCount = 0;
         this.maxRetries = 3;
         
@@ -66,7 +68,7 @@ class AtlasIntelligentChatManager {
     async initVoiceSystem() {
         try {
             // Перевіряємо доступність voice API
-            const response = await fetch(`${this.apiBase}/api/voice/health`);
+            const response = await fetch(`${this.frontendBase}/api/voice/health`);
             if (response.ok) {
                 const data = await response.json();
                 this.voiceSystem.enabled = data.success;
@@ -86,7 +88,7 @@ class AtlasIntelligentChatManager {
     
     async loadAgentInfo() {
         try {
-            const response = await fetch(`${this.apiBase}/api/voice/agents`);
+            const response = await fetch(`${this.frontendBase}/api/voice/agents`);
             if (response.ok) {
                 const data = await response.json();
                 if (data.success && data.agents) {
@@ -195,7 +197,7 @@ class AtlasIntelligentChatManager {
         const maxRetries = 3;
         const baseDelay = 1000; // 1 second base delay
         const maxDelay = 10000; // 10 seconds max delay
-        const timeoutDuration = Math.min(60000 + (retryAttempt * 30000), 240000); // Progressive timeout: 1min -> 4min
+    const timeoutDuration = Math.min(120000 + (retryAttempt * 60000), 420000); // Progressive timeout: 2min -> 7min
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
@@ -208,12 +210,10 @@ class AtlasIntelligentChatManager {
         try {
             this.log(`Starting Orchestrator stream (attempt ${retryAttempt + 1}/${maxRetries + 1})...`);
             
-            const response = await fetch(`${this.apiBase}/chat/stream`, {
+        const response = await fetch(`${this.orchestratorBase}/chat/stream`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive'
+            'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ 
                     message, 
@@ -383,7 +383,7 @@ class AtlasIntelligentChatManager {
     async processVoiceResponse(responseText) {
         try {
             // Визначаємо агента та підготовляємо відповідь
-            const prepareResponse = await fetch(`${this.apiBase}/api/voice/prepare_response`, {
+            const prepareResponse = await fetch(`${this.frontendBase}/api/voice/prepare_response`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -469,7 +469,7 @@ class AtlasIntelligentChatManager {
             this.log(`[VOICE] Synthesizing ${agent} voice with ${voice} (attempt ${retryCount + 1})`);
             
             // Синтезуємо голос з налаштуваннями агента
-            const response = await fetch(`${this.apiBase}/api/voice/synthesize`, {
+            const response = await fetch(`${this.frontendBase}/api/voice/synthesize`, {
                 method: 'POST',
                 headers: {
                     'Content-Type': 'application/json'
@@ -490,7 +490,7 @@ class AtlasIntelligentChatManager {
                     const fallbackVoice = this.voiceSystem.fallbackVoices[retryCount % this.voiceSystem.fallbackVoices.length];
                     this.log(`[VOICE] Voice synthesis failed, trying fallback: ${fallbackVoice}`);
                     
-                    const fallbackResponse = await fetch(`${this.apiBase}/api/voice/synthesize`, {
+                    const fallbackResponse = await fetch(`${this.frontendBase}/api/voice/synthesize`, {
                         method: 'POST',
                         headers: {
                             'Content-Type': 'application/json'

@@ -6,8 +6,10 @@ class AtlasChatManager {
     constructor() {
         this.isStreaming = false;
         this.isStreamPending = false;
-        this.messages = [];
-    this.apiBase = (window.ATLAS_CFG && window.ATLAS_CFG.orchestratorBase) || window.location.origin;
+    this.messages = [];
+    // Separate bases: orchestrator (Node) and frontend (Flask)
+    this.orchestratorBase = (window.ATLAS_CFG && window.ATLAS_CFG.orchestratorBase) || window.location.origin;
+    this.frontendBase = (window.ATLAS_CFG && window.ATLAS_CFG.frontendBase) || window.location.origin;
         this.retryCount = 0;
         this.maxRetries = 3;
         
@@ -87,7 +89,7 @@ class AtlasChatManager {
         const maxRetries = 3;
         const baseDelay = 1000; // 1 second base delay
         const maxDelay = 10000; // 10 seconds max delay
-        const timeoutDuration = Math.min(60000 + (retryAttempt * 30000), 240000); // Progressive timeout: 1min -> 4min
+    const timeoutDuration = Math.min(120000 + (retryAttempt * 60000), 420000); // Progressive timeout: 2min -> 7min
         
         const controller = new AbortController();
         const timeoutId = setTimeout(() => {
@@ -99,12 +101,10 @@ class AtlasChatManager {
             this.isStreaming = true;
             this.log(`Starting Orchestrator stream (attempt ${retryAttempt + 1}/${maxRetries + 1})...`);
             
-            const response = await fetch(`${this.apiBase}/chat/stream`, {
+        const response = await fetch(`${this.orchestratorBase}/chat/stream`, {
                 method: 'POST',
                 headers: {
-                    'Content-Type': 'application/json',
-                    'Cache-Control': 'no-cache',
-                    'Connection': 'keep-alive'
+            'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ 
                     message, 
