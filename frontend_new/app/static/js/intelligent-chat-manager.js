@@ -44,7 +44,12 @@ class AtlasIntelligentChatManager {
             },
             currentAudio: null,
             fallbackVoices: ['dmytro', 'oleksa', 'robot'], // Fallback voice list
-            maxRetries: 2
+            maxRetries: 2,
+            // TTS synchronization system
+            agentMessages: new Map(), // Store accumulated messages per agent  
+            ttsQueue: [], // Queue for TTS processing
+            isProcessingTTS: false, // Flag to prevent parallel TTS processing
+            lastAgentComplete: null // Track when agent finishes speaking
         };
         
         this.init();
@@ -262,6 +267,12 @@ class AtlasIntelligentChatManager {
                     if (data === '[DONE]') { 
                         this.log('Stream completed successfully'); 
                         clearInterval(activityCheckInterval);
+                        
+                        // Finalize last agent message for TTS
+                        if (currentAgent && this.voiceSystem.enabled) {
+                            await this.finalizeAgentMessage(currentAgent);
+                        }
+                        
                         return;
                     }
                     
@@ -282,6 +293,12 @@ class AtlasIntelligentChatManager {
                         if (type === 'complete') {
                             this.log('Orchestrator signaled completion');
                             clearInterval(activityCheckInterval);
+                            
+                            // Finalize last agent message for TTS
+                            if (currentAgent && this.voiceSystem.enabled) {
+                                await this.finalizeAgentMessage(currentAgent);
+                            }
+                            
                             return;
                         }
                         
@@ -290,21 +307,30 @@ class AtlasIntelligentChatManager {
                             const cls = role === 'assistant' ? 'assistant' : role;
                             
                             if (currentAgent !== cls) {
+                                // Previous agent finished - process accumulated message for TTS
+                                if (currentAgent && this.voiceSystem.enabled) {
+                                    await this.finalizeAgentMessage(currentAgent);
+                                }
+                                
                                 currentAgent = cls;
                                 this.addMessage('', cls);
                                 const lastMsg = this.chatContainer.lastElementChild;
                                 currentTextNode = lastMsg ? lastMsg.querySelector('.message-text') : null;
+                                
+                                // Initialize message accumulation for new agent
+                                if (this.voiceSystem.enabled && agent) {
+                                    this.voiceSystem.agentMessages.set(agent, '');
+                                }
                             }
                             
                             if (content) {
                                 if (currentTextNode) {
                                     this.appendToMessage(currentTextNode, content);
                                     
-                                    // Process voice response if enabled
+                                    // Accumulate content for TTS (don't synthesize yet)
                                     if (this.voiceSystem.enabled && agent) {
-                                        await this.processAgentVoice(content, agent).catch(e => 
-                                            this.log(`Voice synthesis error: ${e.message}`)
-                                        );
+                                        const existing = this.voiceSystem.agentMessages.get(agent) || '';
+                                        this.voiceSystem.agentMessages.set(agent, existing + content);
                                     }
                                 } else {
                                     this.addMessage(content, cls);
@@ -319,6 +345,11 @@ class AtlasIntelligentChatManager {
             }
             
             clearInterval(activityCheckInterval);
+            
+            // Finalize last agent message for TTS
+            if (currentAgent && this.voiceSystem.enabled) {
+                await this.finalizeAgentMessage(currentAgent);
+            }
             
         } catch (error) {
             clearTimeout(timeoutId);
@@ -434,12 +465,6 @@ class AtlasIntelligentChatManager {
         }
         
         try {
-            // Stop any current audio playback
-            if (this.voiceSystem.currentAudio) {
-                this.voiceSystem.currentAudio.pause();
-                this.voiceSystem.currentAudio = null;
-            }
-            
             const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
             
             // Short text fragments don't need voice synthesis
@@ -447,11 +472,101 @@ class AtlasIntelligentChatManager {
                 return;
             }
             
-            // Synthesize voice with agent-specific settings
-            await this.synthesizeAndPlay(text, agent);
+            // Add to TTS queue instead of immediate synthesis
+            this.voiceSystem.ttsQueue.push({
+                text: text,
+                agent: agent,
+                timestamp: Date.now()
+            });
+            
+            // Process queue if not already processing
+            if (!this.voiceSystem.isProcessingTTS) {
+                await this.processTTSQueue();
+            }
             
         } catch (error) {
             this.log(`[VOICE] Agent voice processing error: ${error.message}`);
+        }
+    }
+
+    async finalizeAgentMessage(currentAgent) {
+        if (!this.voiceSystem.enabled || !this.isVoiceEnabled()) {
+            return;
+        }
+
+        // Find the actual agent name from currentAgent class
+        let agentName = null;
+        for (const [name, config] of Object.entries(this.voiceSystem.agents)) {
+            if (currentAgent.includes(name) || currentAgent === 'assistant' && name === 'atlas') {
+                agentName = name;
+                break;
+            }
+        }
+
+        if (!agentName) return;
+
+        const fullMessage = this.voiceSystem.agentMessages.get(agentName);
+        if (!fullMessage || fullMessage.trim().length < 10) {
+            // Clear message and return if too short
+            this.voiceSystem.agentMessages.delete(agentName);
+            return;
+        }
+
+        this.log(`[VOICE] Finalizing TTS for ${agentName}: "${fullMessage.substring(0, 50)}..."`);
+
+        try {
+            // Wait for previous TTS to complete
+            if (this.voiceSystem.currentAudio) {
+                await new Promise(resolve => {
+                    if (this.voiceSystem.currentAudio.ended || this.voiceSystem.currentAudio.paused) {
+                        resolve();
+                    } else {
+                        this.voiceSystem.currentAudio.onended = resolve;
+                        // Timeout after 10 seconds
+                        setTimeout(resolve, 10000);
+                    }
+                });
+            }
+
+            // Synthesize full message
+            await this.synthesizeAndPlay(fullMessage, agentName);
+
+            // Clear the accumulated message
+            this.voiceSystem.agentMessages.delete(agentName);
+
+        } catch (error) {
+            this.log(`[VOICE] Failed to finalize agent message: ${error.message}`);
+            this.voiceSystem.agentMessages.delete(agentName);
+        }
+    }
+
+    async processTTSQueue() {
+        if (this.voiceSystem.isProcessingTTS || this.voiceSystem.ttsQueue.length === 0) {
+            return;
+        }
+
+        this.voiceSystem.isProcessingTTS = true;
+
+        try {
+            while (this.voiceSystem.ttsQueue.length > 0) {
+                const ttsItem = this.voiceSystem.ttsQueue.shift();
+                
+                // Wait for current TTS to finish
+                if (this.voiceSystem.currentAudio && !this.voiceSystem.currentAudio.paused) {
+                    await new Promise(resolve => {
+                        this.voiceSystem.currentAudio.onended = resolve;
+                        // Timeout after 30 seconds
+                        setTimeout(resolve, 30000);
+                    });
+                }
+
+                // Synthesize the text
+                await this.synthesizeAndPlay(ttsItem.text, ttsItem.agent);
+            }
+        } catch (error) {
+            this.log(`[VOICE] TTS queue processing error: ${error.message}`);
+        } finally {
+            this.voiceSystem.isProcessingTTS = false;
         }
     }
 
@@ -542,6 +657,8 @@ class AtlasIntelligentChatManager {
                 audio.onended = () => {
                     URL.revokeObjectURL(audioUrl);
                     this.voiceSystem.currentAudio = null;
+                    this.voiceSystem.lastAgentComplete = Date.now();
+                    this.log(`[VOICE] Finished playing ${description}`);
                     resolve();
                 };
                 
@@ -550,6 +667,10 @@ class AtlasIntelligentChatManager {
                     URL.revokeObjectURL(audioUrl);
                     this.voiceSystem.currentAudio = null;
                     reject(error);
+                };
+                
+                audio.oncanplay = () => {
+                    this.log(`[VOICE] Starting playback of ${description} (duration: ${audio.duration?.toFixed(1) || 'unknown'}s)`);
                 };
                 
                 audio.play().then(() => {

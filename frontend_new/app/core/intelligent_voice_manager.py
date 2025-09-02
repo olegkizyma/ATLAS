@@ -22,8 +22,8 @@ class IntelligentVoiceManager:
     
     def __init__(self):
         self.voice_config = self._load_voice_config()
-        # TTS endpoint (default 3001 to avoid conflict with Goose Web on 3000); override via ATLAS_TTS_URL
-        self.ukrainian_tts_url = os.getenv("ATLAS_TTS_URL", "http://localhost:3001/tts")
+        # TTS endpoint (default 3000 to match Ukrainian TTS server); override via ATLAS_TTS_URL
+        self.ukrainian_tts_url = os.getenv("ATLAS_TTS_URL", "http://localhost:3000/tts")
         self.fallback_enabled = False  # Вимкнено згідно вимог - тільки розумна система
         
     def _load_voice_config(self) -> Dict:

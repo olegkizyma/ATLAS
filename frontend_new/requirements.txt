@@ -1,5 +1,6 @@
 # Minimal dependencies for ATLAS Frontend v2.0 (Python server)
 Flask~=3.0
+flask-cors~=6.0
 requests~=2.32
 
 # Intelligent Recovery System dependencies
