@@ -1086,6 +1086,12 @@ async function grishaAssessCompletion(taskSpec, execText, verifyText, sessionId 
 
 // Check Tetyana's completion status from her execution output
 async function checkTetianaCompletionStatus(execText, sessionId) {
+  // Якщо execText не визначено, повернути стан за замовчуванням
+  if (typeof execText !== 'string') {
+    console.warn('[checkTetianaCompletionStatus] execText is undefined or not a string. Returning default status.');
+    return { isComplete: false, canContinue: true, reason: 'Executor output was not captured, assuming continuation is possible.' };
+  }
+
   if (!MISTRAL_API_KEY) {
     // Without Mistral, we assume task needs verification
     return { isComplete: false, canContinue: true, reason: 'No AI available to assess completion' };
@@ -1169,7 +1175,7 @@ async function grishaAnalyzeVerificationResults(taskSpec, execText, verification
 
 Відповідь у JSON: {
   "isComplete": boolean,
-  "issues": ["список проблем"],
+  "issues": "список проблем",
   "reasoning": "пояснення рішення",
   "detailed_feedback": "детальний аналіз",
   "atlas_refinement_hint": "підказка для Atlas щодо доопрацювання"
@@ -1178,9 +1184,10 @@ async function grishaAnalyzeVerificationResults(taskSpec, execText, verification
   const tsSummary = summarizeTaskSpec(taskSpec);
   const execTail = capTail(execText || '', ORCH_MAX_EXEC_REPORT_CHARS);
   
-  let verificationSummary = verificationResults.map((vr, i) => 
-    `Завдання ${i + 1}: ${vr.task}\nРезультат: ${vr.result.slice(-500)}`
-  ).join('\n\n');
+  let verificationSummary = verificationResults.map((vr, i) => {
+    const resultText = (typeof vr.result === 'string') ? vr.result.slice(-500) : '[немає результату]';
+    return `Завдання ${i + 1}: ${vr.task}\nРезультат: ${resultText}`;
+  }).join('\n\n');
   
   let userMessage = `TaskSpec: ${JSON.stringify(tsSummary)}\n\nОригінальний вивід:\n${execTail}\n\nРезультати верифікації:\n${verificationSummary}`;
   
