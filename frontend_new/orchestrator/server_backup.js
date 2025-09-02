@@ -165,44 +165,23 @@ function analyzeExecutionOutput(output, sessionId) {
 
 function getRecommendedResources(sessionId, currentCycle) {
   const state = sessionCycleState.get(sessionId);
-  if (!state) {
-    return { 
-      mode: "normal", 
-      msps: [], 
-      tools: [], 
-      reason: "Нова сесія - повний доступ до ресурсів" 
+  const mode = getExecutionMode(sessionId, currentCycle);
+  
+  if (mode.mode === "msp_specific" && state) {
+    // 3-й цикл: повертаємо найчастіше використовувані MSP
+    return {
+      msps: Array.from(state.usedMSPs).slice(0, 3), // топ-3 MSP
+      reason: "Базуючись на попередньому використанні"
+    };
+  } else if (mode.mode === "tool_specific" && state) {
+    // 6-й цикл: фокус на інструментах із попереднього стану
+    return {
+      tools: Array.from(state.usedTools).slice(-3), // останні 3 інструменти
+      reason: "Завершення на основі останнього стану"
     };
   }
-
-  if (currentCycle === 3) {
-    // Цикл 3: Обмеження до конкретних MSP (топ-3 найбільш використовуваних)
-    const topMSPs = Array.from(state.usedMSPs).slice(0, 3);
-    return {
-      mode: "msp_specific",
-      msps: topMSPs,
-      tools: [],
-      reason: `Цикл 3: Обмеження до найчастіше використовуваних MSP: ${topMSPs.join(', ')}`
-    };
-  } else if (currentCycle === 6) {
-    // Цикл 6: Обмеження до конкретних інструментів (останні 3 використані)
-    const recentTools = Array.from(state.usedTools).slice(-3);
-    return {
-      mode: "tool_specific",
-      msps: [],
-      tools: recentTools,
-      reason: `Цикл 6: Обмеження до останніх використовуваних інструментів: ${recentTools.join(', ')}`
-    };
-  } else {
-    // Стандартні цикли: рекомендації на основі попереднього використання
-    const suggestedMSPs = Array.from(state.usedMSPs).slice(0, 5);
-    const suggestedTools = Array.from(state.usedTools).slice(-5);
-    return {
-      mode: "normal",
-      msps: suggestedMSPs,
-      tools: suggestedTools,
-      reason: "Рекомендації на основі попереднього використання"
-    };
-  }
+  
+  return { reason: "Повний доступ до ресурсів" };
 }
 
 // Intent classifier (chat vs task) with Gemini keys rotation
@@ -628,85 +607,62 @@ app.post('/chat/stream', async (req, res) => {
     mode: initialMode.mode
   }, initialRecommended);
 
-  // 3.5) Check Tetyana's completion status before starting verification
-  const completionStatus = await checkTetianaCompletionStatus(execText, sessionId);
-  if (completionStatus.isComplete) {
-    sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: '[ТЕТЯНА] Задача виконана успішно!' });
-    sseSend(res, { type: 'complete', agent: 'system' });
-    return res.end();
-  }
-  
-  if (!completionStatus.canContinue) {
-    sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: '[ТЕТЯНА] Не можу продовжити виконання задачі.' });
-    sseSend(res, { type: 'info', agent: 'Grisha', content: '[ГРИША] Tetyana не може продовжити. Переходжу до аналізу проблем.' });
-  }
-
-  // 4) Grisha independent verification sessions (requires Grisha API key)
+  // 4) Post-execution verification loop (requires Grisha API key)
   if (MISTRAL_API_KEY) {
-    let maxCycles = ORCH_MAX_REFINEMENT_CYCLES;
-    let currentCycle = 1;
-    
-    while (currentCycle <= maxCycles) {
+    for (let cycle = 1; cycle <= ORCH_MAX_REFINEMENT_CYCLES; cycle++) {
       // Адаптивна логіка на основі циклу
-      const mode = getExecutionMode(sessionId, currentCycle);
-      const recommended = getRecommendedResources(sessionId, currentCycle);
+      const mode = getExecutionMode(sessionId, cycle);
+      const recommended = getRecommendedResources(sessionId, cycle);
       
-      sseSend(res, { type: 'info', agent: 'Grisha', content: `[ГРИША] Створюю незалежну сесію перевірки (цикл ${currentCycle}/${maxCycles}) - ${mode.description}` });
+      sseSend(res, { type: 'info', agent: 'Grisha', content: `Запускаю перевірку виконання (цикл ${cycle}/${ORCH_MAX_REFINEMENT_CYCLES}) - ${mode.description}` });
       
-      // Grisha створює цільові завдання для перевірки
-      const verificationTasks = await grishaCreateTargetedVerificationTasks(
+      // Передаємо інформацію про режим виконання до планувальника верифікації
+      const plan = await grishaGenerateVerificationPlan(
         atlasOut.task_spec, 
         execText, 
         msps, 
-        { cycle: currentCycle, mode: mode.mode, recommended, sessionId }
+        { cycle, mode: mode.mode, recommended, sessionId }
       );
       
-      if (!verificationTasks || verificationTasks.length === 0) {
-        sseSend(res, { type: 'info', agent: 'Grisha', content: '[ГРИША] Немає специфічних завдань для перевірки.' });
-        break;
+      const verifySession = `${sessionId || `sess-${Date.now()}`}-verify-${cycle}`;
+      sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Перевіряю результати…' });
+      if (plan?.inter_agent_note_ua) {
+        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `[ГРИША] ${plan.inter_agent_note_ua}` });
+      }
+      if (typeof plan._attemptsUsed === 'number') {
+  sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (verification plan): ${plan._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
+      }
+      let verifyPrompt = plan.verification_prompt;
+      
+      // Додаємо інформацію про режим виконання
+      if (mode.mode !== "normal") {
+        verifyPrompt += `\n\nРежим виконання: ${mode.description}`;
+        if (recommended.reason) {
+          verifyPrompt += `\nОснова: ${recommended.reason}`;
+        }
       }
       
-      // Виконуємо кожне цільове завдання через окремі сесії з Tetiana
-      let allVerificationResults = [];
-      for (let i = 0; i < verificationTasks.length; i++) {
-        const task = verificationTasks[i];
-        const taskSession = `${sessionId || `sess-${Date.now()}`}-verify-${currentCycle}-task-${i}`;
-        
-        sseSend(res, { type: 'info', agent: 'Grisha', content: `[ГРИША] Завдання ${i + 1}/${verificationTasks.length}: ${task.description}` });
-        sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Виконую цільове завдання перевірки…' });
-        
-        const taskResult = await streamTetianaMessage(
-          task.prompt,
-          taskSession,
-          res,
-          { expectSpecificOutput: true }
-        );
-        
-        allVerificationResults.push({
-          task: task.description,
-          prompt: task.prompt,
-          result: taskResult,
-          session: taskSession
-        });
+      // Якщо Гріша пропонує конкретні інструменти, додаємо їх до промпту
+      if (Array.isArray(plan.suggested_tools) && plan.suggested_tools.length > 0) {
+        verifyPrompt += `\n\nРекомендовані інструменти: ${plan.suggested_tools.join(', ')}`;
       }
       
-      // Grisha аналізує всі результати і дає вердикт
-      const grishaVerdict = await grishaAnalyzeVerificationResults(
-        atlasOut.task_spec, 
-        execText, 
-        allVerificationResults,
-        { cycle: currentCycle, mode: mode.mode }
+      const verifyText = await streamTetianaMessage(
+        verifyPrompt,
+        verifySession,
+        res
       );
-      
-      if (grishaVerdict.isComplete) {
-        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `[ГРИША] Вердикт: Завдання виконано повністю. ${grishaVerdict.reasoning}` });
+
+      const judgement = await grishaAssessCompletion(atlasOut.task_spec, execText, verifyText, sessionId);
+  if (judgement.isComplete) {
+        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: 'Перевірка пройдена. Завдання виконано повністю.' });
         
         // Context Summarization: Process completed interaction
         try {
           if (sessionId) {
             await contextSummarizer.processNewInteraction(
               message, 
-              `${atlasOut.user_reply}\n${execText}\n[VERIFICATION]\n${allVerificationResults.map(r => r.result).join('\n')}`, 
+              `${atlasOut.user_reply}\n${execText}`, 
               {
                 generateResponse: async (messages, options) => {
                   // Simple AI client for summarization using Mistral
@@ -729,64 +685,41 @@ app.post('/chat/stream', async (req, res) => {
           console.error('[ContextSummarizer] Failed to process interaction:', error);
         }
         
-        sseSend(res, { type: 'complete', agent: 'system' });
-        res.end();
-        return;
+  sseSend(res, { type: 'complete', agent: 'system' });
+  res.end();
+  return;
       }
-      
-      // Завдання не завершене - Grisha передає проблеми Atlas для планування доопрацювання
-      const issues = grishaVerdict.issues || [];
-      const issuesText = issues.join('; ');
-      sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `[ГРИША] Виявлено проблеми: ${issuesText}` });
-      
-      if (grishaVerdict?.detailed_feedback) {
-        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `[ГРИША] Детальний аналіз: ${grishaVerdict.detailed_feedback}` });
+      if (typeof judgement._attemptsUsed === 'number') {
+        sseSend(res, { type: 'info', agent: 'Grisha', content: `Спроб (judge): ${judgement._attemptsUsed}/${ORCH_GRISHA_MAX_ATTEMPTS}` });
       }
-      // Atlas створює план доопрацювання з урахуванням циклу та режиму
-      let refinePrompt = `Задача виконана неповністю. Проблеми: ${issuesText}.
-Цикл: ${currentCycle}/${maxCycles}. Режим: ${mode.description}.
-Сформуй *план виправлення* для доопрацювання:`;
-      
-      if (currentCycle === 3) {
-        refinePrompt += `\n\nОБОВ'ЯЗКОВО: Використовуй тільки ці MSP сервери (не рекомендації, а вимоги): ${JSON.stringify(recommended.msps || [])}`;
-      } else if (currentCycle === 6) {
-        refinePrompt += `\n\nОБОВ'ЯЗКОВО: Використовуй тільки ці інструменти step-by-step (формальні інструкції): ${JSON.stringify(recommended.tools || [])}`;
+
+  const issuesText = (judgement.issues || []).join('; ');
+      sseSend(res, { type: 'agent_message', agent: 'Grisha', content: `Виявлено невідповідності: ${issuesText || 'потрібне доопрацювання'}` });
+      if (judgement?.inter_agent_note_ua) {
+        sseSend(res, { type: 'agent_message', agent: 'Grisha', content: judgement.inter_agent_note_ua });
       }
+  const refineBase = `Задача виконана неповністю. Проблеми: ${issuesText}.
+Сформуй *план виправлення* для доопрацювання. Замість повного нового TaskSpec, створи компактний, що містить *лише* кроки для виправлення невиконаних success_criteria.
+- Сфокусуйся на невиконаних критеріях.
+- Кожен крок має бути спрямований на збір конкретного доказу (значення, стан, URL).
+- Зроби план максимально коротким і точним.`;
+      const refineMsg = judgement?.atlas_refine_prompt_ua ? `${refineBase}\n\nДодаткова підказка від Гріші:\n${judgement.atlas_refine_prompt_ua}` : refineBase;
+      const atlasRefine = await callAtlas(refineMsg, sessionId);
+      sseSend(res, { type: 'agent_message', agent: 'Atlas', content: atlasRefine.user_reply || 'Доопрацьовую задачу.' });
+      sseSend(res, { type: 'info', agent: 'Tetiana', content: 'Продовжую доопрацювання…' });
       
-      if (grishaVerdict?.atlas_refinement_hint) {
-        refinePrompt += `\n\nПідказка від Гріші: ${grishaVerdict.atlas_refinement_hint}`;
-      }
+      // Отримуємо адаптивний контекст для циклу доопрацювання
+      const adaptiveContext = getExecutionMode(sessionId, cycle);
+      const recommendedResources = await getRecommendedResources(sessionId, adaptiveContext.mode);
       
-      const atlasRefine = await callAtlas(refinePrompt, sessionId);
-      sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${atlasRefine.user_reply || 'Доопрацьовую план.'}` });
-      sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Продовжую доопрацювання…' });
-      
-      // Отримуємо адаптивний контекст для циклу доопрацювання з правильним застосуванням обмежень
-      const refinementContext = getExecutionMode(sessionId, currentCycle);
-      const refinementResources = await getRecommendedResources(sessionId, refinementContext.mode);
-      
-      // Для циклів 3 та 6 застосовуємо жорсткі обмеження
-      if (currentCycle === 3 || currentCycle === 6) {
-        refinementContext.enforced = true; // позначаємо як обов'язкові, не рекомендації
-      }
-      
-      const extraText = await streamTetianaExecute(
-        atlasRefine.task_spec, 
-        sessionId, 
-        res, 
-        refinementContext, 
-        refinementResources
-      );
-      
-      execText = `${execText}\n\n[REFINEMENT ${currentCycle}]\n${extraText}`;
+      const extraText = await streamTetianaExecute(atlasRefine.task_spec, sessionId, res, adaptiveContext, recommendedResources);
+      execText = `${execText}\n\n[REFINEMENT ${cycle}]\n${extraText}`;
       
       // Оновлюємо стан сесії після кожного циклу доопрацювання
-      updateSessionState(sessionId, currentCycle + 1);
-      currentCycle++;
+      updateSessionState(sessionId, cycle + 1); // cycle тут починається з 1
     }
-    
-    // Після всіх циклів все ще не завершено
-    sseSend(res, { type: 'agent_message', agent: 'Grisha', content: '[ГРИША] Після всіх спроб: завдання не вдалося довиконати. Потрібне ручне втручання або додаткові ресурси.' });
+    // Після циклів все ще не завершено
+    sseSend(res, { type: 'agent_message', agent: 'Grisha', content: 'Після усіх спроб: завдання не довиконане. Потрібні додаткові дії.' });
     sseSend(res, { type: 'complete', agent: 'system' });
     res.end();
   } else {
@@ -1015,134 +948,6 @@ async function grishaAssessCompletion(taskSpec, execText, verifyText, sessionId 
   }
 }
 
-// Check Tetyana's completion status from her execution output
-async function checkTetianaCompletionStatus(execText, sessionId) {
-  if (!MISTRAL_API_KEY) {
-    // Without Mistral, we assume task needs verification
-    return { isComplete: false, canContinue: true, reason: 'No AI available to assess completion' };
-  }
-  
-  const sys = `Ти - аналітик завершеності задач. Проаналізуй вивід виконавця (Тетяна) і визнач:
-1. isComplete: чи явно сказала Тетяна, що завдання ЗАВЕРШЕНО
-2. canContinue: чи може Тетяна продовжити роботу, чи сказала що НЕ МОЖЕ
-3. reason: коротке пояснення твого рішення
-
-Відповідь тільки у форматі JSON: {"isComplete": boolean, "canContinue": boolean, "reason": "string"}`;
-
-  const userMessage = `Проаналізуй вивід Тетяни на предмет завершеності:\n\n${execText.slice(-2000)}`;
-  
-  try {
-    const result = await mistralJsonOnly(sys, userMessage, { 
-      maxAttempts: 3, 
-      temperature: 0.1, 
-      sessionId 
-    });
-    
-    return {
-      isComplete: result.isComplete || false,
-      canContinue: result.canContinue !== false, // default true unless explicitly false
-      reason: result.reason || 'Аналіз завершено'
-    };
-  } catch (e) {
-    console.warn('Failed to assess completion status:', e.message);
-    return { isComplete: false, canContinue: true, reason: 'Помилка аналізу завершеності' };
-  }
-}
-
-// Grisha: створює цільові завдання для незалежної перевірки
-async function grishaCreateTargetedVerificationTasks(taskSpec, execText, msps = [], context = {}) {
-  if (!MISTRAL_API_KEY) throw new Error('Grisha targeted verification requires Mistral API key');
-  
-  const sys = `Ти - Гріша, експерт з безпеки та верифікації. 
-Створи список цільових завдань для перевірки виконання через окремі сесії з виконавцем (Тетяна).
-Кожне завдання має бути конкретним і спрямованим на отримання специфічної інформації.
-
-Приклади цільових завдань:
-- "Покажи мені скріншоти всіх екранів"
-- "Виконай в командному рядку цю команду і скажи вивід"
-- "Перевір стан конкретного сервісу"
-- "Підтверди наявність конкретного файлу або значення"
-
-Відповідь у JSON: {"tasks": [{"description": "опис завдання", "prompt": "точний промпт для Тетяни"}]}`;
-
-  const tsSummary = summarizeTaskSpec(taskSpec);
-  const execTail = capTail(execText || '', ORCH_MAX_EXEC_REPORT_CHARS);
-  let userMessage = `TaskSpec: ${JSON.stringify(tsSummary)}\n\nВивід виконавця:\n${execTail}`;
-  
-  // Додаємо контекст циклу та режиму
-  if (context.cycle && context.mode) {
-    userMessage += `\n\nЦикл: ${context.cycle}, Режим: ${context.mode}`;
-    if (context.recommended) {
-      userMessage += `\nРекомендовані ресурси: ${JSON.stringify(context.recommended)}`;
-    }
-  }
-  
-  try {
-    const result = await mistralJsonOnly(sys, userMessage, { 
-      maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, 
-      temperature: 0.2, 
-      sessionId: context.sessionId 
-    });
-    
-    return Array.isArray(result.tasks) ? result.tasks : [];
-  } catch (e) {
-    console.warn('Failed to create verification tasks:', e.message);
-    return [];
-  }
-}
-
-// Grisha: аналізує результати всіх верифікаційних завдань і дає вердикт
-async function grishaAnalyzeVerificationResults(taskSpec, execText, verificationResults, context = {}) {
-  if (!MISTRAL_API_KEY) throw new Error('Grisha verdict requires Mistral API key');
-  
-  const sys = `Ти - Гріша, суддя завершеності завдань. 
-Проаналізуй результати всіх верифікаційних завдань і дай фінальний вердикт.
-
-Відповідь у JSON: {
-  "isComplete": boolean,
-  "issues": ["список проблем"],
-  "reasoning": "пояснення рішення",
-  "detailed_feedback": "детальний аналіз",
-  "atlas_refinement_hint": "підказка для Atlas щодо доопрацювання"
-}`;
-
-  const tsSummary = summarizeTaskSpec(taskSpec);
-  const execTail = capTail(execText || '', ORCH_MAX_EXEC_REPORT_CHARS);
-  
-  let verificationSummary = verificationResults.map((vr, i) => 
-    `Завдання ${i + 1}: ${vr.task}\nРезультат: ${vr.result.slice(-500)}`
-  ).join('\n\n');
-  
-  let userMessage = `TaskSpec: ${JSON.stringify(tsSummary)}\n\nОригінальний вивід:\n${execTail}\n\nРезультати верифікації:\n${verificationSummary}`;
-  
-  if (context.cycle && context.mode) {
-    userMessage += `\n\nКонтекст: Цикл ${context.cycle}, Режим ${context.mode}`;
-  }
-  
-  try {
-    const result = await mistralJsonOnly(sys, userMessage, { 
-      maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, 
-      temperature: 0.1, 
-      sessionId: context.sessionId 
-    });
-    
-    return {
-      isComplete: result.isComplete || false,
-      issues: Array.isArray(result.issues) ? result.issues : [],
-      reasoning: result.reasoning || 'Аналіз завершено',
-      detailed_feedback: result.detailed_feedback || '',
-      atlas_refinement_hint: result.atlas_refinement_hint || ''
-    };
-  } catch (e) {
-    console.warn('Failed to analyze verification results:', e.message);
-    return { 
-      isComplete: false, 
-      issues: ['Помилка аналізу верифікації: ' + (e.message || 'невідома помилка')],
-      reasoning: 'Технічна помилка під час аналізу'
-    };
-  }
-}
-
 // Tetiana: универсальный стрим произвольного повідомлення
 async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
   const secret = process.env.GOOSE_SECRET_KEY;
@@ -1274,19 +1079,14 @@ async function streamTetianaExecute(taskSpec, sessionId, res, adaptiveContext = 
   // Гріша перевіряє активні MSP перед виконанням
   let liveMsps = await getAvailableMsps();
   
-  // Адаптивна логіка: обмеження MSP на основі циклу та режиму
+  // Адаптивна логіка: обмеження MSP на основі циклу
   if (adaptiveContext.mode === "msp_specific" && recommendedResources?.msps?.length) {
-    const isEnforced = adaptiveContext.enforced || adaptiveContext.cycle === 3;
-    
     liveMsps = liveMsps.filter(msp => 
       recommendedResources.msps.some(rec => 
         msp.name && msp.name.toLowerCase().includes(rec.toLowerCase())
       )
     );
-    
-    if (liveMsps.length === 0 && !isEnforced) {
-      liveMsps = await getAvailableMsps(); // fallback тільки якщо не обов'язково
-    }
+    if (liveMsps.length === 0) liveMsps = await getAvailableMsps(); // fallback до всіх MSP
   }
   
   let mspsContext = '';
@@ -1295,17 +1095,9 @@ async function streamTetianaExecute(taskSpec, sessionId, res, adaptiveContext = 
     mspsContext = `\n\nАктивні MSP сервери (перевірено Гришею): ${capHead(s, ORCH_MAX_MSPS_CHARS)}`;
     
     if (adaptiveContext.mode === "msp_specific") {
-      const enforcementLevel = (adaptiveContext.enforced || adaptiveContext.cycle === 3) ? "ОБОВ'ЯЗКОВО" : "рекомендується";
-      mspsContext += `\n\n[АДАПТИВНИЙ РЕЖИМ] Цикл ${adaptiveContext.cycle || 'поточний'}: ${enforcementLevel} використовувати тільки ці MSP сервери: ${recommendedResources?.msps?.join(', ') || 'всі доступні'}.`;
-      if (enforcementLevel === "ОБОВ'ЯЗКОВО") {
-        mspsContext += ` Не використовуй інші сервери.`;
-      }
+      mspsContext += `\n\n[АДАПТИВНИЙ РЕЖИМ] Цикл ${adaptiveContext.cycle || 'поточний'}: Обмеження до конкретних MSP серверів: ${recommendedResources?.msps?.join(', ') || 'всі доступні'}.`;
     } else if (adaptiveContext.mode === "tool_specific") {
-      const enforcementLevel = (adaptiveContext.enforced || adaptiveContext.cycle === 6) ? "ОБОВ'ЯЗКОВО виконати step-by-step" : "рекомендується";
-      mspsContext += `\n\n[АДАПТИВНИЙ РЕЖИМ] Цикл ${adaptiveContext.cycle || 'поточний'}: ${enforcementLevel} використовувати тільки ці інструменти: ${recommendedResources?.tools?.join(', ') || 'найкращі доступні'}.`;
-      if (enforcementLevel.includes("ОБОВ'ЯЗКОВО")) {
-        mspsContext += ` Виконуй формальні покрокові інструкції без відхилень.`;
-      }
+      mspsContext += `\n\n[АДАПТИВНИЙ РЕЖИМ] Цикл ${adaptiveContext.cycle || 'поточний'}: Сфокусуйся на інструментах: ${recommendedResources?.tools?.join(', ') || 'найкращі доступні'}.`;
     }
   }
   
