@@ -603,6 +603,8 @@ class AtlasIntelligentChatManager {
             this.log(`[VOICE] Web Speech fallback failed: ${error.message}`);
         }
     }
+    
+    addVoiceMessage(text, agent, signature) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message assistant agent-${agent}`;
         
