@@ -52,6 +52,17 @@ class AtlasIntelligentChatManager {
             lastAgentComplete: null // Track when agent finishes speaking
         };
         
+        // Поведінка синхронізації TTS з наступними повідомленнями та кроками виконання
+        this.ttsSync = {
+            // Якщо true — нові повідомлення користувача будуть чекати завершення поточного озвучування
+            blockNextMessageUntilTTSComplete: true,
+            // Диспатчити DOM-події для інтеграції сторонніх модулів (кроки виконання, аналітика)
+            dispatchEvents: true,
+            // Хуки керування кроками виконання (за потреби заміни цими методами зовні)
+            onTTSStart: () => {},
+            onTTSEnd: () => {}
+        };
+        
         this.init();
     }
     
@@ -66,8 +77,21 @@ class AtlasIntelligentChatManager {
         }
         
         this.setupEventListeners();
+        this.setupTTSEventBridges();
         await this.initVoiceSystem();
         this.log('[CHAT] Intelligent Atlas Chat Manager with Voice System initialized');
+    }
+
+    setupTTSEventBridges() {
+        // Приклад інтеграції з кроками виконання програми (слухачі подій)
+        window.addEventListener('atlas-tts-started', (e) => {
+            // e.detail: { agent, text }
+            // TODO: тут можна поставити «крок: відтворення голосу почалося»
+        });
+        window.addEventListener('atlas-tts-ended', (e) => {
+            // e.detail: { agent, text }
+            // TODO: тут можна перейти до наступного кроку після завершення озвучування
+        });
     }
     
     async initVoiceSystem() {
@@ -171,6 +195,11 @@ class AtlasIntelligentChatManager {
             return;
         }
         
+        // За потреби — чекаємо завершення поточного озвучування перед надсиланням нового повідомлення
+        if (this.ttsSync.blockNextMessageUntilTTSComplete) {
+            await this.waitForTTSIdle(15000); // м'який таймаут 15с, щоб не блокувати назавжди
+        }
+        
         this.addMessage(message, 'user');
         this.chatInput.value = '';
         this.setInputState(false);
@@ -185,6 +214,26 @@ class AtlasIntelligentChatManager {
         } finally {
             this.setInputState(true);
         }
+    }
+
+    // Очікувати завершення усіх поточних TTS (поточне відтворення + черга)
+    async waitForTTSIdle(timeoutMs = 20000) {
+        try {
+            const start = Date.now();
+            // Швидкий вихід, якщо нічого не відтворюється
+            if (!this.voiceSystem.currentAudio && this.voiceSystem.ttsQueue.length === 0) return;
+            
+            await new Promise(resolve => {
+                const check = () => {
+                    const idle = (!this.voiceSystem.currentAudio || this.voiceSystem.currentAudio.paused || this.voiceSystem.currentAudio.ended)
+                                  && this.voiceSystem.ttsQueue.length === 0;
+                    if (idle) return resolve();
+                    if (Date.now() - start > timeoutMs) return resolve();
+                    setTimeout(check, 200);
+                };
+                check();
+            });
+        } catch (_) { /* no-op */ }
     }
     
     async handleIntelligentResponse(data) {
@@ -323,6 +372,24 @@ class AtlasIntelligentChatManager {
                                 const lastMsg = this.chatContainer.lastElementChild;
                                 currentTextNode = lastMsg ? lastMsg.querySelector('.message-text') : null;
                                 
+                                // Додаємо лейбл спікера (для асистента) при старті нової бульбашки
+                                if (lastMsg && cls === 'assistant') {
+                                    const canonical = this.getCanonicalAgentName(agent);
+                                    const agentCfg = this.voiceSystem.agents[canonical] || {};
+                                    const displaySignature = agentCfg.signature || `[${canonical.toUpperCase()}]`;
+                                    const color = agentCfg.color || '#00ff00';
+                                    if (!lastMsg.querySelector('.agent-label')) {
+                                        const labelDiv = document.createElement('div');
+                                        labelDiv.className = 'agent-label';
+                                        labelDiv.textContent = displaySignature;
+                                        labelDiv.style.fontWeight = '600';
+                                        labelDiv.style.fontFamily = 'monospace';
+                                        labelDiv.style.color = color;
+                                        labelDiv.style.marginBottom = '4px';
+                                        lastMsg.insertBefore(labelDiv, currentTextNode || lastMsg.firstChild);
+                                    }
+                                }
+                                
                                 // Initialize message accumulation for new agent
                                 if (this.voiceSystem.enabled && agent) {
                                     const canonical = this.getCanonicalAgentName(agent);
@@ -435,9 +502,9 @@ class AtlasIntelligentChatManager {
             if (prepareResponse.ok) {
                 const prepData = await prepareResponse.json();
                 if (prepData.success) {
-                    // Відображаємо повідомлення з підписом агента
+                    // Відображаємо ТІЛЬКИ зміст без лейблу на початку
                     this.addVoiceMessage(
-                        prepData.display_text,
+                        prepData.text,
                         prepData.agent,
                         prepData.signature
                     );
@@ -640,7 +707,7 @@ class AtlasIntelligentChatManager {
             }
             
             const audioBlob = await response.blob();
-            await this.playAudioBlob(audioBlob, `${agent} (${voice})`);
+            await this.playAudioBlob(audioBlob, `${agent} (${voice})`, { agent, text });
             
         } catch (error) {
             if (retryCount < this.voiceSystem.maxRetries) {
@@ -655,18 +722,44 @@ class AtlasIntelligentChatManager {
         }
     }
     
-    async playAudioBlob(audioBlob, description) {
+    async playAudioBlob(audioBlob, description, meta = {}) {
         return new Promise((resolve, reject) => {
             try {
                 const audioUrl = URL.createObjectURL(audioBlob);
                 const audio = new Audio(audioUrl);
                 this.voiceSystem.currentAudio = audio;
+                const agent = meta.agent || 'atlas';
+                const text = meta.text || '';
+                
+                // Підсвічуємо останнє повідомлення агента як «озвучується»
+                let speakingEl = null;
+                try {
+                    const messages = this.chatContainer.querySelectorAll(`.message.assistant.agent-${agent}`);
+                    if (messages && messages.length > 0) {
+                        speakingEl = messages[messages.length - 1];
+                        speakingEl.classList.add('speaking');
+                    }
+                } catch (_) {}
                 
                 audio.onended = () => {
                     URL.revokeObjectURL(audioUrl);
                     this.voiceSystem.currentAudio = null;
                     this.voiceSystem.lastAgentComplete = Date.now();
                     this.log(`[VOICE] Finished playing ${description}`);
+
+                    // Знімаємо підсвічування
+                    if (speakingEl) speakingEl.classList.remove('speaking');
+
+                    // Подія завершення TTS
+                    try {
+                        if (this.ttsSync.dispatchEvents) {
+                            window.dispatchEvent(new CustomEvent('atlas-tts-ended', { detail: { agent, text } }));
+                        }
+                        this.ttsSync.onTTSEnd();
+                    } catch (_) {}
+
+                    // Розблокування інпуту, якщо був заблокований через TTS
+                    this.checkAndUnlockInput();
                     resolve();
                 };
                 
@@ -674,6 +767,7 @@ class AtlasIntelligentChatManager {
                     this.log(`[VOICE] Audio playback error: ${error}`);
                     URL.revokeObjectURL(audioUrl);
                     this.voiceSystem.currentAudio = null;
+                    if (speakingEl) speakingEl.classList.remove('speaking');
                     reject(error);
                 };
                 
@@ -683,6 +777,17 @@ class AtlasIntelligentChatManager {
                 
                 audio.play().then(() => {
                     this.log(`[VOICE] Playing ${description}`);
+                    // Подія старту TTS
+                    try {
+                        if (this.ttsSync.dispatchEvents) {
+                            window.dispatchEvent(new CustomEvent('atlas-tts-started', { detail: { agent, text } }));
+                        }
+                        this.ttsSync.onTTSStart();
+                    } catch (_) {}
+                    // Блокуємо ввід, щоб синхронізувати «наступне повідомлення» з озвучуванням
+                    if (this.ttsSync.blockNextMessageUntilTTSComplete) {
+                        this.setInputState(false);
+                    }
                 }).catch(reject);
                 
             } catch (error) {
@@ -739,13 +844,24 @@ class AtlasIntelligentChatManager {
         
         const agentConfig = this.voiceSystem.agents[agent];
         const color = agentConfig ? agentConfig.color : '#00ff00';
+    const displaySignature = signature || (agentConfig && agentConfig.signature) || `[${agent.toUpperCase()}]`;
+        
+    // Видимий лейбл спікера
+    const labelDiv = document.createElement('div');
+    labelDiv.className = 'agent-label';
+    labelDiv.textContent = displaySignature;
+    labelDiv.style.fontWeight = '600';
+    labelDiv.style.fontFamily = 'monospace';
+    labelDiv.style.color = color;
+    labelDiv.style.marginBottom = '4px';
         
         const textDiv = document.createElement('div');
         textDiv.className = 'message-text';
         textDiv.innerHTML = this.formatMessage(text);
         textDiv.style.borderLeft = `3px solid ${color}`;
         
-        messageDiv.appendChild(textDiv);
+    messageDiv.appendChild(labelDiv);
+    messageDiv.appendChild(textDiv);
         this.chatContainer.appendChild(messageDiv);
         this.scrollToBottom();
         
@@ -788,12 +904,11 @@ class AtlasIntelligentChatManager {
     }
     
     formatMessage(text) {
-        // Форматування тексту з підтримкою підписів агентів
-        return text
-            .replace(/\[ATLAS\]/g, '<span class="agent-signature atlas">[ATLAS]</span>')
-            .replace(/\[ТЕТЯНА\]/g, '<span class="agent-signature tetyana">[ТЕТЯНА]</span>')
-            .replace(/\[ГРИША\]/g, '<span class="agent-signature grisha">[ГРИША]</span>')
-            .replace(/\n/g, '<br>');
+        // Прибираємо службовий лейбл на початку (напр. [ATLAS] або ATLAS:)
+        const stripped = (text || '').replace(/^\s*\[(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\]\s*/i, '')
+                                      .replace(/^\s*(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\s*:\s*/i, '');
+        // Далі звичайне форматування переносів
+        return stripped.replace(/\n/g, '<br>');
     }
     
     toggleVoice() {

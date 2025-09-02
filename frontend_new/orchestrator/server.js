@@ -44,6 +44,10 @@ const ORCH_AUTO_TRUNCATE_ON_TOKEN_LIMIT = String(process.env.ORCH_AUTO_TRUNCATE_
 const ORCH_CONTEXT_COMPRESSION_RATIO = parseFloat(process.env.ORCH_CONTEXT_COMPRESSION_RATIO || '0.7');
 // Force using goosed /reply (SSE) instead of Goose WebSocket interface
 const ORCH_FORCE_GOOSE_REPLY = String(process.env.ORCH_FORCE_GOOSE_REPLY || 'false') === 'true';
+// If provider is GitHub Copilot, prefer SSE to avoid strict tool_calls sequencing errors over WS
+const ORCH_SSE_FOR_GITHUB_COPILOT = String(process.env.ORCH_SSE_FOR_GITHUB_COPILOT || 'true') === 'true';
+// Optional manual override of detected Goose provider (useful if Goose API not accessible)
+const ORCH_GOOSE_PROVIDER = process.env.ORCH_GOOSE_PROVIDER || '';
 // Force verification cycles even if Tetiana reports completion
 const ORCH_FORCE_VERIFICATION = String(process.env.ORCH_FORCE_VERIFICATION || 'false') === 'true';
 
@@ -263,6 +267,48 @@ async function getAvailableMsps() {
   const byCmd = readMspsFromCommand();
   if (byCmd.length) return byCmd;
   return readMspsFromConfig();
+}
+
+// --- Goose provider detection (with simple cache) ---
+let __cachedGooseProvider = null;
+let __cachedGooseProviderAt = 0;
+async function resolveGooseProvider() {
+  try {
+    // 1) Env override wins
+    if (ORCH_GOOSE_PROVIDER) return ORCH_GOOSE_PROVIDER;
+    // Cache for 30s
+    const now = Date.now();
+    if (__cachedGooseProvider && (now - __cachedGooseProviderAt < 30000)) return __cachedGooseProvider;
+    const base = GOOSE_BASE_URL.replace(/\/$/, '');
+    const url = `${base}/config/read`;
+    const secret = process.env.GOOSE_SECRET_KEY;
+    const headers = { 'Content-Type': 'application/json' };
+    if (secret) headers['X-Secret-Key'] = secret;
+    try {
+      const { data } = await axios.post(url, { key: 'GOOSE_PROVIDER', is_secret: false }, { headers, timeout: 4000 });
+      const prov = (typeof data === 'string' ? data : (data?.value || data)) || '';
+      if (prov) {
+        __cachedGooseProvider = String(prov);
+        __cachedGooseProviderAt = now;
+        return __cachedGooseProvider;
+      }
+    } catch (_) {
+      // Fallback to local config file if present
+      try {
+        const cfgPath = path.resolve(path.dirname(new URL(import.meta.url).pathname), '../../goose/config.yaml');
+        if (fs.existsSync(cfgPath)) {
+          const raw = fs.readFileSync(cfgPath, 'utf8');
+          const m = raw.match(/\bGOOSE_PROVIDER\s*:\s*([\w\-]+)/);
+          if (m && m[1]) {
+            __cachedGooseProvider = m[1];
+            __cachedGooseProviderAt = now;
+            return __cachedGooseProvider;
+          }
+        }
+      } catch {}
+    }
+  } catch {}
+  return null;
 }
 
 // --- Helpers: robust JSON parsing and Mistral JSON calls ---
@@ -523,6 +569,26 @@ app.get('/health/llm', async (_, res) => {
     }
   }
   res.json(out);
+});
+
+// Diagnostics: show detected Goose provider and routing preference
+app.get('/health/goose', async (_, res) => {
+  try {
+    const provider = (await resolveGooseProvider()) || 'unknown';
+    const base = GOOSE_BASE_URL.replace(/\/$/, '');
+    const isWeb = await isGooseWeb(base);
+    const forcedSse = ORCH_FORCE_GOOSE_REPLY || (ORCH_SSE_FOR_GITHUB_COPILOT && String(provider).toLowerCase() === 'github_copilot');
+    res.json({
+      base,
+      provider,
+      uiDetected: isWeb,
+      willUseSSE: forcedSse || !isWeb,
+      forcedSse,
+      notes: forcedSse ? 'SSE forced for provider/rule' : 'Auto-detect'
+    });
+  } catch (e) {
+    res.status(500).json({ error: e?.message || 'failed' });
+  }
 });
 
 // List available MSP servers (optional config-powered)
@@ -1420,13 +1486,16 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
   // Автовизначення режиму Goose: web (ws) чи goosed (/reply)
   const gooseBase = GOOSE_BASE_URL.replace(/\/$/, '');
   const isWebDetected = await isGooseWeb(gooseBase);
-  const isWeb = ORCH_FORCE_GOOSE_REPLY ? false : isWebDetected;
+  // If provider is GitHub Copilot and the flag is enabled, force SSE to avoid WS tool/tool_calls sequencing issues
+  const gooseProvider = (await resolveGooseProvider() || '').toLowerCase();
+  const providerForcesSse = ORCH_SSE_FOR_GITHUB_COPILOT && gooseProvider === 'github_copilot';
+  const isWeb = (ORCH_FORCE_GOOSE_REPLY || providerForcesSse) ? false : isWebDetected;
 
   // Guard prompt size to avoid 400 from upstream providers
   const safeMessageText = ensurePromptBounds(messageText, ORCH_MAX_MISTRAL_USER_CHARS, 'Tetiana prompt');
   try {
     const est = estimateTokens(safeMessageText);
-    console.log(`[CONTEXT_LIMIT] Tetiana prompt size: chars=${safeMessageText.length}, estTokens=${est}, mode=${isWeb ? 'websocket' : 'sse'}`);
+  console.log(`[CONTEXT_LIMIT] Tetiana prompt size: chars=${safeMessageText.length}, estTokens=${est}, mode=${isWeb ? 'websocket' : 'sse'}${providerForcesSse ? ' (forced for github_copilot)' : ''}`);
   } catch {}
 
   const payload = {
@@ -1567,7 +1636,27 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
     }
   } else {
     // Потік через goosed /reply (SSE)
-    return await sendViaSse();
+    try {
+      return await sendViaSse();
+    } catch (err) {
+      if (err?.status === 404) {
+        if (providerForcesSse) {
+          // For github_copilot we avoid WS to prevent tool/tool_calls 400; go straight to local fallback
+          console.log('[SSE_404_FALLBACK] /reply not available; provider=github_copilot -> using local Tetiana');
+          return await streamLocalTetianaDirect(messageText, res);
+        } else {
+          // If /reply is missing (common on Goose Web UI), try WebSocket /ws once before local fallback
+          console.log('[SSE_404_FALLBACK] /reply 404 on Goose. Trying WebSocket /ws...');
+          try {
+            return await streamTetianaWs(gooseBase, payload, res, sessionId);
+          } catch (wsErr) {
+            console.log('[WS_FALLBACK_FAIL] WebSocket path also failed. Falling back to local Tetiana:', wsErr?.message || wsErr);
+            return await streamLocalTetianaDirect(messageText, res);
+          }
+        }
+      }
+      throw err;
+    }
   }
 }
 

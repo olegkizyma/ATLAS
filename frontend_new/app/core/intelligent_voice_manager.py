@@ -164,19 +164,34 @@ class IntelligentVoiceManager:
         
         return params
     
+    def _strip_known_signatures(self, text: str) -> str:
+        """Прибрати службові лейбли на початку повідомлення (напр. [АТЛАС], [ГРИША], ATLAS:, ТЕТЯНА:)"""
+        try:
+            if not text:
+                return ""
+            patterns = [
+                r"^\s*\[(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\]\s*",
+                r"^\s*(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\s*:\s*",
+            ]
+            cleaned = text
+            for p in patterns:
+                cleaned = re.sub(p, "", cleaned, flags=re.IGNORECASE)
+            return cleaned.strip()
+        except Exception:
+            return text
+
     def synthesize_speech(self, text: str, agent: Optional[Agent] = None) -> Dict:
         """
         Синтезувати мовлення для тексту
         Якщо агент не вказано - визначає автоматично
         """
         if agent is None:
+            # Визначаємо спікера і одночасно очищаємо текст від підписів
             agent, cleaned_text = self.detect_speaker_from_response(text)
-            text = cleaned_text
-        
-        # Додаємо підпис агента, якщо його немає
-        signature = self.voice_config.get(agent, {}).get("response_signature", f"[{agent.upper()}]")
-        if signature not in text:
-            text = f"{signature} {text}"
+            text = self._strip_known_signatures(cleaned_text)
+        else:
+            # Агент відомий — все одно прибираємо можливі лейбли з початку
+            text = self._strip_known_signatures(text)
         
         voice_params = self.get_voice_parameters(agent)
         
