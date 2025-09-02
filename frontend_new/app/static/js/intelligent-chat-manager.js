@@ -11,15 +11,38 @@ class AtlasIntelligentChatManager {
         this.retryCount = 0;
         this.maxRetries = 3;
         
-        // Voice system properties
+        // Voice system properties with enhanced agent differentiation
         this.voiceSystem = {
             enabled: false,
             agents: {
-                atlas: { signature: '[ATLAS]', color: '#00ff00', voice: 'dmytro' },
-                tetyana: { signature: '[ТЕТЯНА]', color: '#00ffff', voice: 'oleksa' },
-                grisha: { signature: '[ГРИША]', color: '#ffff00', voice: 'robot' }
+                atlas: { 
+                    signature: '[ATLAS]', 
+                    color: '#00ff00', 
+                    voice: 'dmytro',
+                    pitch: 1.0,
+                    rate: 1.0,
+                    priority: 1 
+                },
+                tetyana: { 
+                    signature: '[ТЕТЯНА]', 
+                    color: '#00ffff', 
+                    voice: 'oleksa',
+                    pitch: 1.1, 
+                    rate: 0.9,
+                    priority: 2
+                },
+                grisha: { 
+                    signature: '[ГРИША]', 
+                    color: '#ffff00', 
+                    voice: 'robot',
+                    pitch: 0.9,
+                    rate: 1.1,
+                    priority: 3 
+                }
             },
-            currentAudio: null
+            currentAudio: null,
+            fallbackVoices: ['dmytro', 'oleksa', 'robot'], // Fallback voice list
+            maxRetries: 2
         };
         
         this.init();
@@ -168,22 +191,41 @@ class AtlasIntelligentChatManager {
         }
     }
     
-    async streamFromOrchestrator(message) {
+    async streamFromOrchestrator(message, retryAttempt = 0) {
+        const maxRetries = 3;
+        const baseDelay = 1000; // 1 second base delay
+        const maxDelay = 10000; // 10 seconds max delay
+        const timeoutDuration = Math.min(60000 + (retryAttempt * 30000), 240000); // Progressive timeout: 1min -> 4min
+        
         const controller = new AbortController();
-        const timeoutId = setTimeout(() => controller.abort(), 180000); // 3 хв
+        const timeoutId = setTimeout(() => {
+            this.log(`Request timeout after ${timeoutDuration/1000}s (attempt ${retryAttempt + 1})`);
+            controller.abort();
+        }, timeoutDuration);
+        
         this.isStreaming = true;
         
         try {
-            this.log('Starting Orchestrator stream...');
+            this.log(`Starting Orchestrator stream (attempt ${retryAttempt + 1}/${maxRetries + 1})...`);
+            
             const response = await fetch(`${this.apiBase}/chat/stream`, {
                 method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ message, sessionId: this.getSessionId() }),
+                headers: { 
+                    'Content-Type': 'application/json',
+                    'Cache-Control': 'no-cache',
+                    'Connection': 'keep-alive'
+                },
+                body: JSON.stringify({ 
+                    message, 
+                    sessionId: this.getSessionId(),
+                    retryAttempt: retryAttempt
+                }),
                 signal: controller.signal
             });
             
             if (!response.ok) {
-                throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+                const errorText = await response.text().catch(() => 'Unknown error');
+                throw new Error(`HTTP ${response.status}: ${response.statusText} - ${errorText}`);
             }
             
             const reader = response.body?.getReader();
@@ -192,11 +234,24 @@ class AtlasIntelligentChatManager {
             const decoder = new TextDecoder();
             let currentAgent = null;
             let currentTextNode = null;
+            let lastActivity = Date.now();
+            
+            // Monitor for stream inactivity
+            const activityCheckInterval = setInterval(() => {
+                if (Date.now() - lastActivity > 30000) { // 30s inactivity
+                    this.log('Stream inactive for 30s, checking connection...');
+                    clearInterval(activityCheckInterval);
+                }
+            }, 10000);
             
             while (true) {
                 const { done, value } = await reader.read();
-                if (done) break;
+                if (done) {
+                    clearInterval(activityCheckInterval);
+                    break;
+                }
                 
+                lastActivity = Date.now();
                 const chunk = decoder.decode(value, { stream: true });
                 const lines = chunk.split('\n');
                 
@@ -204,45 +259,115 @@ class AtlasIntelligentChatManager {
                     if (!line || line.trim() === '') continue;
                     if (!line.startsWith('data: ')) continue;
                     const data = line.slice(6);
-                    if (data === '[DONE]') { this.log('Stream completed'); break; }
+                    if (data === '[DONE]') { 
+                        this.log('Stream completed successfully'); 
+                        clearInterval(activityCheckInterval);
+                        return;
+                    }
                     
                     try {
                         const evt = JSON.parse(data);
-                        const { type, agent, content } = evt;
+                        const { type, agent, content, error } = evt;
+                        
                         if (type === 'start' || type === 'info') {
                             this.log(`${agent || 'system'}: ${content || type}`);
                             continue;
                         }
+                        
                         if (type === 'error') {
-                            this.addMessage(`Помилка оркестратора: ${evt.error || 'невідома'}`, 'error');
+                            this.addMessage(`Помилка оркестратора: ${error || evt.error || 'невідома'}`, 'error');
                             continue;
                         }
+                        
                         if (type === 'complete') {
                             this.log('Orchestrator signaled completion');
-                            continue;
+                            clearInterval(activityCheckInterval);
+                            return;
                         }
+                        
                         if (type === 'agent_message') {
                             const role = agentLabel(agent);
-                            const cls = role === 'assistant' ? 'assistant' : role; // fall back to 'assistant'
+                            const cls = role === 'assistant' ? 'assistant' : role;
+                            
                             if (currentAgent !== cls) {
                                 currentAgent = cls;
                                 this.addMessage('', cls);
                                 const lastMsg = this.chatContainer.lastElementChild;
                                 currentTextNode = lastMsg ? lastMsg.querySelector('.message-text') : null;
                             }
+                            
                             if (content) {
                                 if (currentTextNode) {
                                     this.appendToMessage(currentTextNode, content);
+                                    
+                                    // Process voice response if enabled
+                                    if (this.voiceSystem.enabled && agent) {
+                                        await this.processAgentVoice(content, agent).catch(e => 
+                                            this.log(`Voice synthesis error: ${e.message}`)
+                                        );
+                                    }
                                 } else {
                                     this.addMessage(content, cls);
                                 }
                             }
                         }
-                    } catch (_) {
-                        // ігноруємо нечитаємі chunk-и
+                    } catch (parseError) {
+                        this.log(`Chunk parse error: ${parseError.message}`, 'warning');
+                        // Continue processing other chunks
                     }
                 }
             }
+            
+            clearInterval(activityCheckInterval);
+            
+        } catch (error) {
+            clearTimeout(timeoutId);
+            this.isStreaming = false;
+            
+            // Check if this is an abort error
+            if (error.name === 'AbortError') {
+                this.log(`Request aborted (timeout or manual cancel) - attempt ${retryAttempt + 1}`);
+                
+                if (retryAttempt < maxRetries) {
+                    const retryDelay = Math.min(baseDelay * Math.pow(2, retryAttempt), maxDelay);
+                    this.addMessage(`Переривання зв'язку. Повторна спроба через ${retryDelay/1000}с...`, 'warning');
+                    
+                    await this.delay(retryDelay);
+                    return await this.streamFromOrchestrator(message, retryAttempt + 1);
+                } else {
+                    throw new Error(`Перевищено максимальну кількість спроб (${maxRetries + 1}). Перевірте з'єднання з інтернетом.`);
+                }
+            }
+            
+            // Check for network errors
+            if (error.message.includes('fetch') || error.message.includes('network') || error.message.includes('ERR_')) {
+                this.log(`Network error: ${error.message} - attempt ${retryAttempt + 1}`);
+                
+                if (retryAttempt < maxRetries) {
+                    const retryDelay = Math.min(baseDelay * Math.pow(2, retryAttempt), maxDelay);
+                    this.addMessage(`Помилка мережі. Повторна спроба через ${retryDelay/1000}с...`, 'warning');
+                    
+                    await this.delay(retryDelay);
+                    return await this.streamFromOrchestrator(message, retryAttempt + 1);
+                }
+            }
+            
+            // Check for server errors (5xx) that might be temporary
+            if (error.message.includes('HTTP 5')) {
+                this.log(`Server error: ${error.message} - attempt ${retryAttempt + 1}`);
+                
+                if (retryAttempt < maxRetries) {
+                    const retryDelay = Math.min(baseDelay * Math.pow(2, retryAttempt), maxDelay);
+                    this.addMessage(`Серверна помилка. Повторна спроба через ${retryDelay/1000}с...`, 'warning');
+                    
+                    await this.delay(retryDelay);
+                    return await this.streamFromOrchestrator(message, retryAttempt + 1);
+                }
+            }
+            
+            // If we get here, either it's a non-retryable error or we've exhausted retries
+            throw error;
+            
         } finally {
             clearTimeout(timeoutId);
             this.isStreaming = false;
@@ -297,7 +422,40 @@ class AtlasIntelligentChatManager {
         }
     }
     
-    async synthesizeAndPlay(text, agent) {
+    // Helper method for retry delays
+    delay(ms) {
+        return new Promise(resolve => setTimeout(resolve, ms));
+    }
+    
+    // Enhanced voice processing for different agents
+    async processAgentVoice(text, agent) {
+        if (!this.voiceSystem.enabled || !this.isVoiceEnabled()) {
+            return;
+        }
+        
+        try {
+            // Stop any current audio playback
+            if (this.voiceSystem.currentAudio) {
+                this.voiceSystem.currentAudio.pause();
+                this.voiceSystem.currentAudio = null;
+            }
+            
+            const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
+            
+            // Short text fragments don't need voice synthesis
+            if (text.length < 10) {
+                return;
+            }
+            
+            // Synthesize voice with agent-specific settings
+            await this.synthesizeAndPlay(text, agent);
+            
+        } catch (error) {
+            this.log(`[VOICE] Agent voice processing error: ${error.message}`);
+        }
+    }
+
+    async synthesizeAndPlay(text, agent, retryCount = 0) {
         try {
             // Зупиняємо поточне відтворення
             if (this.voiceSystem.currentAudio) {
@@ -305,7 +463,12 @@ class AtlasIntelligentChatManager {
                 this.voiceSystem.currentAudio = null;
             }
             
-            // Синтезуємо голос
+            const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
+            const voice = agentConfig.voice;
+            
+            this.log(`[VOICE] Synthesizing ${agent} voice with ${voice} (attempt ${retryCount + 1})`);
+            
+            // Синтезуємо голос з налаштуваннями агента
             const response = await fetch(`${this.apiBase}/api/voice/synthesize`, {
                 method: 'POST',
                 headers: {
@@ -313,37 +476,131 @@ class AtlasIntelligentChatManager {
                 },
                 body: JSON.stringify({
                     text: text,
-                    agent: agent
-                })
+                    agent: agent,
+                    voice: voice,
+                    pitch: agentConfig.pitch || 1.0,
+                    rate: agentConfig.rate || 1.0
+                }),
+                timeout: 15000 // 15 second timeout for TTS
             });
             
-            if (response.ok) {
-                const audioBlob = await response.blob();
+            if (!response.ok) {
+                // If specific voice fails, try fallback
+                if (retryCount < this.voiceSystem.maxRetries) {
+                    const fallbackVoice = this.voiceSystem.fallbackVoices[retryCount % this.voiceSystem.fallbackVoices.length];
+                    this.log(`[VOICE] Voice synthesis failed, trying fallback: ${fallbackVoice}`);
+                    
+                    const fallbackResponse = await fetch(`${this.apiBase}/api/voice/synthesize`, {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            text: text,
+                            agent: agent,
+                            voice: fallbackVoice,
+                            pitch: 1.0,
+                            rate: 1.0
+                        }),
+                        timeout: 15000
+                    });
+                    
+                    if (!fallbackResponse.ok) {
+                        throw new Error(`Fallback TTS failed: ${fallbackResponse.status}`);
+                    }
+                    
+                    const audioBlob = await fallbackResponse.blob();
+                    return await this.playAudioBlob(audioBlob, `${agent} (fallback: ${fallbackVoice})`);
+                } else {
+                    throw new Error(`TTS synthesis failed: ${response.status}`);
+                }
+            }
+            
+            const audioBlob = await response.blob();
+            await this.playAudioBlob(audioBlob, `${agent} (${voice})`);
+            
+        } catch (error) {
+            if (retryCount < this.voiceSystem.maxRetries) {
+                this.log(`[VOICE] Synthesis error, retrying: ${error.message}`);
+                await this.delay(1000 * (retryCount + 1)); // Progressive delay
+                return await this.synthesizeAndPlay(text, agent, retryCount + 1);
+            } else {
+                this.log(`[VOICE] Voice synthesis failed after retries: ${error.message}`);
+                // Try browser's built-in speech synthesis as last resort
+                await this.fallbackToWebSpeech(text, agent);
+            }
+        }
+    }
+    
+    async playAudioBlob(audioBlob, description) {
+        return new Promise((resolve, reject) => {
+            try {
                 const audioUrl = URL.createObjectURL(audioBlob);
-                
                 const audio = new Audio(audioUrl);
                 this.voiceSystem.currentAudio = audio;
                 
                 audio.onended = () => {
                     URL.revokeObjectURL(audioUrl);
                     this.voiceSystem.currentAudio = null;
+                    resolve();
                 };
                 
                 audio.onerror = (error) => {
                     this.log(`[VOICE] Audio playback error: ${error}`);
                     URL.revokeObjectURL(audioUrl);
                     this.voiceSystem.currentAudio = null;
+                    reject(error);
                 };
                 
-                await audio.play();
-                this.log(`[VOICE] Playing ${agent} voice response`);
+                audio.play().then(() => {
+                    this.log(`[VOICE] Playing ${description}`);
+                }).catch(reject);
                 
-            } else {
-                this.log(`[VOICE] TTS synthesis failed: ${response.status}`);
+            } catch (error) {
+                reject(error);
+            }
+        });
+    }
+    
+    // Fallback to browser's Web Speech API
+    async fallbackToWebSpeech(text, agent) {
+        if (!('speechSynthesis' in window)) {
+            this.log('[VOICE] No speech synthesis available');
+            return;
+        }
+        
+        try {
+            const utterance = new SpeechSynthesisUtterance(text);
+            const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
+            
+            // Configure voice parameters based on agent
+            utterance.pitch = agentConfig.pitch || 1.0;
+            utterance.rate = agentConfig.rate || 1.0;
+            utterance.volume = 0.8;
+            
+            // Try to find a suitable voice
+            const voices = speechSynthesis.getVoices();
+            const ukrainianVoice = voices.find(v => v.lang.includes('uk') || v.name.includes('Ukrainian'));
+            const englishVoice = voices.find(v => v.lang.includes('en'));
+            
+            if (ukrainianVoice) {
+                utterance.voice = ukrainianVoice;
+            } else if (englishVoice) {
+                utterance.voice = englishVoice;
             }
             
+            utterance.onstart = () => {
+                this.log(`[VOICE] Playing ${agent} with Web Speech API`);
+            };
+            
+            utterance.onerror = (error) => {
+                this.log(`[VOICE] Web Speech error: ${error.error}`);
+            };
+            
+            speechSynthesis.speak(utterance);
+            
         } catch (error) {
-            this.log(`[VOICE] Error in voice synthesis: ${error.message}`);
+            this.log(`[VOICE] Web Speech fallback failed: ${error.message}`);
         }
     }
     
