@@ -157,19 +157,41 @@ check_port 5101 || { echo "❌ Orchestrator port 5101 busy"; exit 1; }
 check_port 5102 || { echo "⚠️  Recovery bridge port 5102 busy (will attempt restart)"; }
 echo "✅ Port check completed"
 
-# 1.5. Запуск Ukrainian TTS Mock (Port 3001) — Optional but recommended for Voice API
-echo "🎤 Starting Ukrainian TTS Mock (port 3001)..."
-if lsof -ti:3001 > /dev/null 2>&1; then
-    echo "⚠️  Port 3001 is busy. Skipping TTS mock startup. Set ATLAS_TTS_URL to your TTS endpoint."
-else
-    cd frontend_new
-    if [ -f "venv/bin/activate" ]; then
-        source venv/bin/activate
+# 1.5. Запуск Ukrainian TTS (Mock або Реальний) на Port 3001
+if [ "${REAL_TTS_MODE:-false}" = "true" ]; then
+    echo "🎤 Starting REAL Ukrainian TTS (ukrainian-tts) on port 3001..."
+    if lsof -ti:3001 > /dev/null 2>&1; then
+        echo "⚠️  Port 3001 is busy. Skipping real TTS startup."
+    else
+        (
+            cd ukrainian-tts
+            # Активуємо окреме віртуальне середовище для реального TTS, якщо є
+            if [ -f ".venv/bin/activate" ]; then
+                source .venv/bin/activate
+            elif [ -f "venv/bin/activate" ]; then
+                source venv/bin/activate
+            fi
+            # Визначимо девайс для macOS (mps доступний на Apple Silicon)
+            TTS_DEVICE=${TTS_DEVICE:-mps}
+            python tts_server.py --host 127.0.0.1 --port 3001 --device "$TTS_DEVICE" > ../logs/tts_real.log 2>&1 &
+            echo $! > ../logs/tts_real.pid
+            echo "✅ REAL TTS started (PID: $(cat ../logs/tts_real.pid)) on http://127.0.0.1:3001"
+        )
     fi
-    TTS_PORT=3001 python ukrainian_tts_server.py > ../logs/tts_mock.log 2>&1 &
-    echo $! > ../logs/tts_mock.pid
-    echo "✅ TTS mock started (PID: $(cat ../logs/tts_mock.pid)) on http://127.0.0.1:3001"
-    cd ..
+else
+    echo "🎤 Starting Ukrainian TTS Mock (port 3001)..."
+    if lsof -ti:3001 > /dev/null 2>&1; then
+        echo "⚠️  Port 3001 is busy. Skipping TTS mock startup. Set ATLAS_TTS_URL to your TTS endpoint."
+    else
+        cd frontend_new
+        if [ -f "venv/bin/activate" ]; then
+            source venv/bin/activate
+        fi
+        TTS_PORT=3001 python ukrainian_tts_server.py > ../logs/tts_mock.log 2>&1 &
+        echo $! > ../logs/tts_mock.pid
+        echo "✅ TTS mock started (PID: $(cat ../logs/tts_mock.pid)) on http://127.0.0.1:3001"
+        cd ..
+    fi
 fi
 
 # 2. Запуск Goose Web Interface (Port 3000) - Optional
@@ -235,6 +257,7 @@ cd frontend_new
 if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
 fi
+# Якщо користувач не встановив ATLAS_TTS_URL, використовуємо локальний порт 3001
 export ATLAS_TTS_URL=${ATLAS_TTS_URL:-http://127.0.0.1:3001/tts}
 python app/atlas_server.py > ../logs/frontend.log 2>&1 &
 echo $! > ../logs/frontend.pid

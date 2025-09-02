@@ -79,9 +79,10 @@ stop_service "Python Frontend" "logs/frontend.pid"
 echo "🦆 Stopping Goose Web Interface..."
 stop_service "Goose Web Interface" "logs/goose.pid"
 
-# 4.5. Зупинка Ukrainian TTS Mock (Port 3001)
-echo "🎤 Stopping Ukrainian TTS Mock..."
+# 4.5. Зупинка Ukrainian TTS (Mock/Real) (Port 3001)
+echo "🎤 Stopping Ukrainian TTS services..."
 stop_service "Ukrainian TTS Mock" "logs/tts_mock.pid"
+stop_service "Ukrainian TTS Real" "logs/tts_real.pid"
 
 # 5. Додаткова очистка процесів за іменем
 echo "🧹 Cleaning up remaining processes..."
@@ -112,7 +113,7 @@ check_and_kill_port() {
 }
 
 check_and_kill_port 3000 "Goose Web"
-check_and_kill_port 3001 "Ukrainian TTS Mock"
+check_and_kill_port 3001 "Ukrainian TTS"
 check_and_kill_port 5001 "Python Frontend"  
 check_and_kill_port 5101 "Node.js Orchestrator"
 check_and_kill_port 5102 "Recovery Bridge"

@@ -148,7 +148,9 @@ class IntelligentVoiceManager:
         base_params = {
             "atlas": {"pitch": 0.8, "speed": 0.9, "voice": "dmytro", "emotion": "confident"},
             "tetyana": {"pitch": 1.1, "speed": 1.1, "voice": "oleksa", "emotion": "friendly"},
-            "grisha": {"pitch": 0.9, "speed": 1.0, "voice": "robot", "emotion": "serious"}
+            # Для реального серверу ukrainian-tts доступні голоси: tetiana, mykyta, lada, dmytro, oleksa
+            # Мапимо Гришу на "mykyta" і додаємо fx="robot" для характерного тембру
+            "grisha": {"pitch": 0.9, "speed": 1.0, "voice": "mykyta", "emotion": "serious", "fx": "robot"}
         }
         
         params = base_params.get(agent, base_params["atlas"]).copy()
@@ -185,7 +187,10 @@ class IntelligentVoiceManager:
                 "voice": voice_params.get("voice", "dmytro"),
                 "speed": voice_params.get("speed", 1.0),
                 "pitch": voice_params.get("pitch", 1.0),
-                "emotion": voice_params.get("emotion", "neutral")
+                "emotion": voice_params.get("emotion", "neutral"),
+                "fx": voice_params.get("fx", "none"),
+                # Для реального серверу ukrainian-tts потрібно явно повертати аудіо
+                "return_audio": True
             }
             
             logger.info(f"Синтезуємо мовлення для {agent}: {voice_params}")
@@ -194,10 +199,16 @@ class IntelligentVoiceManager:
                 self.ukrainian_tts_url, 
                 json=payload,
                 timeout=30,
-                headers={"Content-Type": "application/json"}
+                headers={
+                    "Content-Type": "application/json",
+                    "Accept": "audio/wav,application/octet-stream"
+                }
             )
             
-            if response.status_code == 200:
+            if response.status_code == 200 and (
+                response.headers.get("Content-Type", "").startswith("audio/wav")
+                or response.headers.get("content-type", "").startswith("audio/wav")
+            ):
                 return {
                     "success": True,
                     "agent": agent,
@@ -206,12 +217,18 @@ class IntelligentVoiceManager:
                     "text": text
                 }
             else:
-                logger.error(f"TTS помилка {response.status_code}: {response.text}")
+                # Якщо сервер повернув JSON (наприклад, реальний ukrainian-tts без return_audio)
+                # або інший тип вмісту — реєструємо у лог і повертаємо помилку з деталями
+                preview = response.text[:300] if hasattr(response, "text") else ""
+                logger.error(
+                    f"TTS помилка {response.status_code} (ctype={response.headers.get('Content-Type')}): {preview}"
+                )
                 return {
                     "success": False,
                     "error": f"TTS server error: {response.status_code}",
                     "agent": agent,
-                    "text": text
+                    "text": text,
+                    "details": preview
                 }
                 
         except Exception as e:
