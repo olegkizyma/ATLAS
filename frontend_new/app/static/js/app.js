@@ -30,12 +30,8 @@ class AtlasApp {
             this.managers.status = new AtlasStatusManager();
             
             // Використовуємо інтелектуальний чат-менеджер з голосовою системою
+            // Конструктор сам викликає initVoiceSystem(); додатковий виклик прибрано, щоб уникнути дублю
             this.managers.chat = new AtlasIntelligentChatManager();
-            
-            // Ініціалізуємо голосову систему
-            this.managers.chat.initVoiceSystem().catch(e => 
-                console.warn('Voice system init failed:', e.message)
-            );
             
             // Ініціалізуємо мінімалістичний чат
             this.initMinimalChat();

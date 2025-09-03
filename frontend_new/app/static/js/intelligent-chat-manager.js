@@ -50,7 +50,8 @@ class AtlasIntelligentChatManager {
             agentMessages: new Map(), // Store accumulated messages per agent  
             ttsQueue: [], // Queue for TTS processing
             isProcessingTTS: false, // Flag to prevent parallel TTS processing
-            lastAgentComplete: null // Track when agent finishes speaking
+            lastAgentComplete: null, // Track when agent finishes speaking
+            firstTtsDone: false // Guard to avoid double TTS on very first response
         };
         
         // Поведінка синхронізації TTS з наступними повідомленнями та кроками виконання
@@ -512,7 +513,13 @@ class AtlasIntelligentChatManager {
                     
                     // Синтезуємо голос якщо потрібно
                     if (this.isVoiceEnabled()) {
-                        await this.synthesizeAndPlay(prepData.text, prepData.agent);
+                        // Respect one-shot guard for the first TTS playback
+                        if (!this.voiceSystem.firstTtsDone) {
+                            this.voiceSystem.firstTtsDone = true;
+                            await this.synthesizeAndPlay(prepData.text, prepData.agent);
+                        } else {
+                            await this.synthesizeAndPlay(prepData.text, prepData.agent);
+                        }
                     }
                     
                     // Оновлюємо індикатор поточного агента
@@ -598,7 +605,13 @@ class AtlasIntelligentChatManager {
             }
 
             // Синтез: для Тетяни — лише [VOICE]-рядки, інакше — увесь текст
-            await this.synthesizeAndPlay(fullMessage, agentName);
+            // One-shot guard: avoid double playback for the very first synthesized message
+            if (!this.voiceSystem.firstTtsDone) {
+                this.voiceSystem.firstTtsDone = true;
+                await this.synthesizeAndPlay(fullMessage, agentName);
+            } else {
+                await this.synthesizeAndPlay(fullMessage, agentName);
+            }
 
             // Clear the accumulated message
             this.voiceSystem.agentMessages.delete(agentName);

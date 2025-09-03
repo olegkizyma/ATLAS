@@ -118,7 +118,6 @@ check_and_kill_port() {
 
 check_and_kill_port 3000 "Goose Web"
 check_and_kill_port 3001 "Ukrainian TTS"
-check_and_kill_port 3010 "Fallback LLM"
 check_and_kill_port 5001 "Python Frontend"  
 check_and_kill_port 5101 "Node.js Orchestrator"
 check_and_kill_port 5102 "Recovery Bridge"

@@ -3,6 +3,7 @@ import cors from 'cors';
 import dotenv from 'dotenv';
 import fs from 'fs';
 import path from 'path';
+import os from 'os';
 import axios from 'axios';
 import WebSocket from 'ws';
 import { execSync } from 'child_process';
@@ -50,6 +51,11 @@ const ORCH_SSE_FOR_GITHUB_COPILOT = String(process.env.ORCH_SSE_FOR_GITHUB_COPIL
 const ORCH_GOOSE_PROVIDER = process.env.ORCH_GOOSE_PROVIDER || '';
 // Force verification cycles even if Tetiana reports completion
 const ORCH_FORCE_VERIFICATION = String(process.env.ORCH_FORCE_VERIFICATION || 'false') === 'true';
+// Optional: enable OpenRouter as last-resort multi-provider fallback
+const ORCH_ENABLE_OPENROUTER_FALLBACK = String(process.env.ORCH_ENABLE_OPENROUTER_FALLBACK || 'true') === 'true';
+const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY || '';
+const OPENROUTER_API_URL = (process.env.OPENROUTER_API_URL || 'https://openrouter.ai/api/v1').replace(/\/$/, '');
+const OPENROUTER_MODELS_FILE = process.env.OPENROUTER_MODELS_FILE || path.resolve(path.dirname(new URL(import.meta.url).pathname), 'openrouter_models.json');
 
 // Smart Context Management
 const contextSummarizer = new ContextSummarizer(
@@ -67,6 +73,92 @@ const GEMINI_API_URL = (process.env.GEMINI_API_URL || 'https://generativelanguag
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-latest';
 const MISTRAL_FALLBACK_MODEL = process.env.MISTRAL_FALLBACK_MODEL || 'mistral-large-latest';
+// Optional: comma-separated list for cascade fallback, e.g. "mistral-small-latest,mistral-medium-latest,mistral-large-latest"
+const MISTRAL_MODEL_CANDIDATES = (() => {
+  const raw = (process.env.MISTRAL_MODEL_CANDIDATES || '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  // Default to primary + single fallback if list not provided
+  const defaults = [MISTRAL_MODEL, MISTRAL_FALLBACK_MODEL].filter(Boolean);
+  // De-duplicate while preserving order
+  const seen = new Set();
+  const out = (raw.length ? raw : defaults).filter(m => {
+    if (seen.has(m)) return false; seen.add(m); return true;
+  });
+  return out;
+})();
+
+// --- OpenRouter helpers ---
+function loadOpenRouterModels() {
+  try {
+    const envCsv = (process.env.OPENROUTER_MODEL_CANDIDATES || '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    let fileList = [];
+    if (fs.existsSync(OPENROUTER_MODELS_FILE)) {
+      try {
+        const raw = fs.readFileSync(OPENROUTER_MODELS_FILE, 'utf8');
+        const parsed = JSON.parse(raw);
+        // Support both array format and OpenAI-style format with data array
+        if (Array.isArray(parsed)) {
+          fileList = parsed.filter(x => typeof x === 'string' && x.trim());
+        } else if (parsed.data && Array.isArray(parsed.data)) {
+          fileList = parsed.data
+            .filter(item => item && typeof item.id === 'string')
+            .map(item => item.id.trim())
+            .filter(Boolean);
+        }
+      } catch (e) {
+        console.warn('[OpenRouter] Failed to read models file:', e.message);
+      }
+    }
+    const combined = [...envCsv, ...fileList];
+    // De-duplicate
+    const seen = new Set();
+    return combined.filter(m => { if (!m || seen.has(m)) return false; seen.add(m); return true; });
+  } catch {
+    return [];
+  }
+}
+
+async function openRouterChat(system, user, { temperature = 0, timeout = ORCH_GRISHA_TIMEOUT_MS, models = null } = {}) {
+  if (!ORCH_ENABLE_OPENROUTER_FALLBACK || !OPENROUTER_API_KEY) throw new Error('OpenRouter fallback disabled or API key missing');
+  const url = `${OPENROUTER_API_URL}/chat/completions`;
+  const candidates = Array.isArray(models) && models.length ? models : loadOpenRouterModels();
+  if (!candidates.length) throw new Error('No OpenRouter models configured');
+  const headers = {
+    'Authorization': `Bearer ${OPENROUTER_API_KEY}`,
+    'Content-Type': 'application/json'
+  };
+  let lastErr = null;
+  for (const model of candidates) {
+    try {
+      if (process.env.DEBUG) console.log(`[OpenRouter] Trying model: ${model}`);
+      const payload = {
+        model,
+        messages: [
+          { role: 'system', content: system },
+          { role: 'user', content: user }
+        ],
+        temperature
+      };
+      const { data } = await axios.post(url, payload, { headers, timeout });
+      const text = data?.choices?.[0]?.message?.content;
+      if (text && typeof text === 'string') return text;
+      // If empty or unexpected, continue to next
+      lastErr = new Error('Empty response');
+    } catch (e) {
+      lastErr = e;
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error?.message || e?.message || '';
+      if (process.env.DEBUG) console.warn(`[OpenRouter] Model ${model} failed (${status || 'ERR'}: ${msg}). Trying next...`);
+      // continue
+    }
+  }
+  throw lastErr || new Error('OpenRouter failed for all candidates');
+}
 
 // Adaptive execution system - cycle-based MSP/tool targeting
 const sessionCycleState = new Map(); // sessionId -> { cycleCount, usedTools, usedMSPs, lastState }
@@ -436,28 +528,41 @@ function summarizeTaskSpec(ts, { maxChars = ORCH_MAX_TASKSPEC_SUMMARY_CHARS, max
   }
 }
 
-async function mistralChat(system, user, { temperature = 0, timeout = ORCH_GRISHA_TIMEOUT_MS, model = MISTRAL_MODEL } = {}) {
+async function mistralChat(system, user, { temperature = 0, timeout = ORCH_GRISHA_TIMEOUT_MS, model = null, models = null } = {}) {
   const url = 'https://api.mistral.ai/v1/chat/completions';
   const makePayload = (m) => ({ model: m, messages: [ { role: 'system', content: system }, { role: 'user', content: user } ], temperature });
-  try {
-    const { data } = await axios.post(url, makePayload(model), { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout });
-    return data?.choices?.[0]?.message?.content || '';
-  } catch (e) {
-    const status = e?.response?.status;
-    const msg = e?.response?.data?.error?.message || e?.message || '';
-    const tokenLimit = status === 400 && /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
-    const retriable = status === 429 || (status >= 500 && status < 600) || tokenLimit;
-    const fbModel = MISTRAL_FALLBACK_MODEL && MISTRAL_FALLBACK_MODEL !== model ? MISTRAL_FALLBACK_MODEL : null;
-    if (retriable && fbModel) {
-      try {
-        const { data } = await axios.post(url, makePayload(fbModel), { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout });
-        return data?.choices?.[0]?.message?.content || '';
-      } catch (e2) {
-        throw e2;
-      }
+  // Build candidate list: explicit models -> single model -> global candidates
+  const baseCandidates = Array.isArray(models) && models.length
+    ? models
+    : (model ? [model, ...MISTRAL_MODEL_CANDIDATES.filter(x => x !== model)] : MISTRAL_MODEL_CANDIDATES);
+
+  let lastErr = null;
+  for (const m of baseCandidates) {
+    try {
+      if (process.env.DEBUG) console.log(`[Grisha] Calling Mistral model: ${m}`);
+      const { data } = await axios.post(url, makePayload(m), { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout });
+      return data?.choices?.[0]?.message?.content || '';
+    } catch (e) {
+      lastErr = e;
+      const status = e?.response?.status;
+      const msg = e?.response?.data?.error?.message || e?.message || '';
+      const tokenLimit = status === 400 && /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
+      const retriable = status === 429 || (status >= 500 && status < 600) || tokenLimit;
+      if (process.env.DEBUG) console.warn(`[Grisha] Model ${m} failed (${status || 'ERR'}: ${msg}). ${retriable ? 'Trying next candidate...' : 'Not retriable.'}`);
+      if (!retriable) break; // don't cascade on non-retriable errors
+      // else continue to next model
     }
-    throw e;
   }
+  // If Mistral candidates exhausted, try OpenRouter as last-resort (if enabled)
+  if (ORCH_ENABLE_OPENROUTER_FALLBACK && OPENROUTER_API_KEY) {
+    try {
+      if (process.env.DEBUG) console.warn('[Grisha] Mistral candidates exhausted. Switching to OpenRouter cascade...');
+      return await openRouterChat(system, user, { temperature, timeout });
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  throw lastErr || new Error('Mistral/OpenRouter call failed for all candidate models');
 }
 
 async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATTEMPTS, temperature = 0, sessionId = null } = {}) {
@@ -598,12 +703,25 @@ app.get('/health/goose', async (_, res) => {
     const base = GOOSE_BASE_URL.replace(/\/$/, '');
     const isWeb = await isGooseWeb(base);
     const forcedSse = ORCH_FORCE_GOOSE_REPLY || (ORCH_SSE_FOR_GITHUB_COPILOT && String(provider).toLowerCase() === 'github_copilot');
+
+    // NEW: короткий префлайт токена для діагностики
+    let tokenInfo = { ok: null, source: null, reason: null };
+    if (String(provider).toLowerCase() === 'github_copilot') {
+      try {
+        const t = await hasCopilotTokenLocalCached();
+        tokenInfo = { ok: !!t.ok, source: t.source || null, reason: t.reason || null };
+      } catch (e) {
+        tokenInfo = { ok: false, source: null, reason: e?.message || 'token preflight error' };
+      }
+    }
+
     res.json({
       base,
       provider,
       uiDetected: isWeb,
       willUseSSE: forcedSse || !isWeb,
       forcedSse,
+      token: tokenInfo,
       notes: forcedSse ? 'SSE forced for provider/rule' : 'Auto-detect'
     });
   } catch (e) {
@@ -656,13 +774,19 @@ app.post('/chat/stream', async (req, res) => {
   try {
     atlasOut = await callAtlas(message, sessionId, { msps });
   } catch (e) {
-    // Мʼякий фолбэк: відповідь у чат‑режимі без запуску виконання
-  sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Зараз сервіс планування перевантажений (429). Відповім коротко і без запуску виконання: ' + (message.length > 160 ? message.slice(0,160) + '…' : message) });
-  sseSend(res, { type: 'complete', agent: 'system' });
-  __end();
-  return res.end();
+    // Логуємо помилку для діагностики
+    console.error('[Atlas] Error during Atlas call:', e.message);
+    
+    // Показуємо, що використовуємо fallback
+    sseSend(res, { type: 'info', agent: 'Atlas', content: `[ATLAS] Помилка основного сервісу: ${e.message}. Спробую fallback...` });
+    
+    // Повертаємо мінімальну відповідь, якщо всі fallback не спрацювали
+    sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Всі сервіси недоступні. Спробуйте пізніше або перевірте налаштування.' });
+    sseSend(res, { type: 'complete', agent: 'system' });
+    __end();
+    return res.end();
   }
-  sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${atlasOut.user_reply || ''}` });
+  // ВИВІД ВІДПОВІДІ АТЛАСА ПЕРЕНЕСЕНО НИЖЧЕ, щоб уникнути дублювання у chat-режимі
   if (typeof atlasOut._attemptsUsed === 'number') {
     sseSend(res, { type: 'info', agent: 'Atlas', content: `[ATLAS] Спроб: ${atlasOut._attemptsUsed}/${ORCH_ATLAS_MAX_ATTEMPTS}` });
   }
@@ -676,7 +800,7 @@ app.post('/chat/stream', async (req, res) => {
       intent = await classifyIntentSafe(message);
     }
     if (doNotExec || intent === 'chat') {
-      // Віддаємо відповідь Атласа у чат і завершуємо стрім без запуску виконання
+      // Віддаємо відповідь Атласа у чат і завершуємо стрім без запуску виконання (ОДИН РАЗ)
       const reply = atlasOut.user_reply || politeFallbackReply(message);
       if (reply && reply.trim()) {
         sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${reply}` });
@@ -685,6 +809,12 @@ app.post('/chat/stream', async (req, res) => {
       sseSend(res, { type: 'complete', agent: 'system' });
       __end();
       return res.end();
+    } else {
+      // Режим виконання: показуємо відповідь Атласа один раз перед перевіркою Гриші
+      const reply = atlasOut.user_reply || '';
+      if (reply && reply.trim()) {
+        sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${reply}` });
+      }
     }
   } catch (_) { /* ігноруємо, продовжуємо пайплайн */ }
 
@@ -1092,7 +1222,7 @@ async function callAtlas(userMessage, sessionId, options = {}) {
 // Enhanced fallback system using local OpenAI-compatible API
 const FALLBACK_API_BASE = process.env.FALLBACK_API_BASE || 'http://localhost:3010/v1';
 const FALLBACK_MODELS = {
-  atlas: process.env.FALLBACK_ATLAS_MODEL || 'gpt-4o-mini',
+  atlas: process.env.FALLBACK_ATLAS_MODEL || 'openai/gpt-4o-mini',
   grisha: process.env.FALLBACK_GRISHA_MODEL || 'microsoft/Phi-3.5-mini-instruct'
 };
 
@@ -1337,7 +1467,7 @@ async function grishaGenerateVerificationPlan(taskSpec, execText, msps = [], ada
   
   const user = `TaskSpecSummary: ${JSON.stringify(tsSummary)}\n\nExecutor report (tail):\n${execTail}${mspsContext}`;
   try {
-    const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0, sessionId: adaptiveContext.sessionId });
+    const out = await mistralJsonOnly(sys, user, { maxAttempts: ORCH_GRISHA_MAX_ATTEMPTS, temperature: 0, sessionId });
     if (typeof out.verification_prompt !== 'string' || !out.verification_prompt.trim()) {
       out.verification_prompt = 'Верифікуй повноту виконання і надай докази з мапінгом критеріїв -> артефакти.';
     }
@@ -1466,6 +1596,7 @@ async function grishaAnalyzeVerificationResults(taskSpec, execText, verification
   "atlas_refinement_hint": "підказка для Atlas щодо доопрацювання"
 }`;
 
+ 
   const tsSummary = summarizeTaskSpec(taskSpec);
   const execTail = capTail(execText || '', ORCH_MAX_EXEC_REPORT_CHARS);
   
@@ -1507,25 +1638,23 @@ async function grishaAnalyzeVerificationResults(taskSpec, execText, verification
 // Tetiana: универсальный стрим произвольного повідомлення
 async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
   const secret = process.env.GOOSE_SECRET_KEY;
-
-  // База Goose
   const gooseBase = GOOSE_BASE_URL.replace(/\/$/, '');
-  // Визначення провайдера (через /config/read)
   const gooseProvider = (await resolveGooseProvider() || '').toLowerCase();
 
-  // Префлайт: якщо провайдер github_copilot і відсутній токен, одразу повідомляємо в чат і завершуємо без спроб /reply чи /ws
+  // FIX: використовуємо локальний префлайт info.json + secrets.yaml
   if (gooseProvider === 'github_copilot') {
     try {
-      const ok = await hasCopilotToken(gooseBase, secret);
-      if (!ok) {
-        sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Провайдер Tetiana = GitHub Copilot: не знайдено GITHUB_COPILOT_TOKEN у Goose (config/secrets). Додайте токен через Goose Configurator та перезапустіть стек. Запит до Tetiana пропущено без спроб /reply або /ws.' });
+      const tokenCheck = await hasCopilotTokenLocalCached();
+      if (!tokenCheck.ok) {
+        sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] Провайдер Tetiana = GitHub Copilot: токен не знайдено/недійсний (${tokenCheck.reason || 'невідомо'}). Переконайтесь, що у ${getGooseConfigDir()}/githubcopilot/info.json є валідний токен або додайте його у secrets.yaml, потім перезапустіть стек.` });
         sseSend(res, { type: 'complete' });
         return '';
+      } else {
+        console.log(`[Tetiana] Copilot token OK via ${tokenCheck.source}`);
       }
     } catch (e) {
       console.warn('[Preflight][github_copilot] Token check failed:', e?.message || e);
-      // Навіть якщо перевірка впала, поводимось обережно: не викликаємо /reply або /ws, щоб відповідати вимозі користувача
-      sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Не вдалося перевірити наявність GITHUB_COPILOT_TOKEN у Goose. Будь ласка, перевірте налаштування в Goose Configurator. Запит до Tetiana пропущено без спроб /reply або /ws.' });
+      sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Не вдалося перевірити GITHUB_COPILOT_TOKEN (помилка префлайту). Перевірте Goose. Запит до Tetiana пропущено.' });
       sseSend(res, { type: 'complete' });
       return '';
     }
@@ -1732,12 +1861,12 @@ async function streamLocalTetianaDirect(messageText, res) {
     // sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Працюю в локальному режимі без Goose…' });
     let full = '';
     if (MISTRAL_API_KEY) {
-      const sys = 'Ти — Тетяна, практична виконавиця. Дай покрокову, прикладну відповідь з конкретикою.';
+      const sys = 'Ти — Тетяна, практична виконавиця завдань та практикуюча спеціалістка.';
       const out = await mistralChat(sys, ensurePromptBounds(messageText, ORCH_MAX_MISTRAL_USER_CHARS, 'Tetiana prompt (direct)'), { temperature: 0.2 });
       full = String(out || '');
     } else {
       const msgs = [
-        { role: 'system', content: 'Ти — Тетяна, практична виконавиця. Дай покрокову, прикладну відповідь з конкретикою.' },
+        { role: 'system', content: 'Ти — Тетяна, практична виконавиця завдань та практикуюча спеціалістка.' },
         { role: 'user', content: ensurePromptBounds(messageText, ORCH_MAX_MISTRAL_USER_CHARS, 'Tetiana prompt (direct)') }
       ];
       full = await callFallbackAPI(msgs, FALLBACK_MODELS.atlas, { max_tokens: 1200, temperature: 0.3 });
@@ -1851,95 +1980,6 @@ async function isGooseWeb(baseUrl) {
   return false;
 }
 
-// Перевірка наявності GITHUB_COPILOT_TOKEN у Goose через API конфігів/секретів
-let __copilotTokenCache = { base: '', ok: false, ts: 0 };
-async function hasCopilotToken(baseUrl, sharedSecret) {
-  const base = (baseUrl || GOOSE_BASE_URL).replace(/\/$/, '');
-  // Кеш 4 секунди на однакову базу
-  try {
-    const now = Date.now();
-    if (__copilotTokenCache.base === base && (now - __copilotTokenCache.ts) < 4000) {
-      return __copilotTokenCache.ok;
-    }
-  } catch {}
-
-  // Если это Goose Web, API /config/* недоступен — проверяем локальный кэш токена Copilot
-  try {
-    const web = await isGooseWeb(base);
-    if (web) {
-      // ~/.config/goose -> <repo>/goose/goose (симлинк создаётся стартовым скриптом)
-      const os = require('os');
-      const path = require('path');
-      const fs = require('fs');
-      const infoPath = path.join(os.homedir(), '.config', 'goose', 'githubcopilot', 'info.json');
-      if (fs.existsSync(infoPath)) {
-        try {
-          const raw = fs.readFileSync(infoPath, 'utf-8');
-          const json = JSON.parse(raw);
-          // Форматы: { expires_at: ISO8601, info: { expires_at: epoch? } }
-          let expTs = 0;
-          if (typeof json.expires_at === 'string') {
-            const t = Date.parse(json.expires_at);
-            if (!Number.isNaN(t)) expTs = t;
-          }
-          if (!expTs && json.info && typeof json.info.expires_at === 'number') {
-            // seconds epoch
-            expTs = json.info.expires_at * 1000;
-          }
-          // Считаем токен валидным, если есть файл и (либо нет явного срока, либо он в будущем на >30s)
-          const ok = !expTs || (Date.now() + 30000 < expTs);
-          __copilotTokenCache = { base, ok, ts: Date.now() };
-          if (ok) return true;
-        } catch (_) {
-          // файл есть, но не читается — считаем, что не ок
-          __copilotTokenCache = { base, ok: false, ts: Date.now() };
-          // продолжим проверку secrets.yaml ниже
-        }
-      }
-      // Дополнительно: проверим secrets.yaml для GITHUB_COPILOT_TOKEN (file-based secrets)
-      try {
-        const secretsPath = path.join(os.homedir(), '.config', 'goose', 'secrets.yaml');
-        if (fs.existsSync(secretsPath)) {
-          const text = fs.readFileSync(secretsPath, 'utf-8');
-          // грубая проверка: ключ присутствует и не равен null/пусто
-          const m = text.match(/(^|\n)\s*GITHUB_COPILOT_TOKEN\s*:\s*(.+)/);
-          if (m) {
-            const val = m[2].trim();
-            if (val && val.toLowerCase() !== 'null' && val !== '""' && val !== "''") {
-              __copilotTokenCache = { base, ok: true, ts: Date.now() };
-              return true;
-            }
-          }
-        }
-      } catch (_) {}
-      __copilotTokenCache = { base, ok: false, ts: Date.now() };
-      return false;
-    }
-  } catch {}
-
-  // Иначе: это goosed (сервер API). Пробуем /config/* с корректным заголовком
-  const headers = sharedSecret ? { 'X-Secret-Key': sharedSecret } : {};
-  try {
-    const url = `${base}/config/read`;
-    const { data } = await axios.post(url, { key: 'GITHUB_COPILOT_TOKEN', is_secret: true }, { headers, timeout: 3000 });
-    // Для секретов read возвращает true/false (без значения)
-    if (data === true || (data && data.value)) {
-      __copilotTokenCache = { base, ok: true, ts: Date.now() };
-      return true;
-    }
-  } catch (_) {}
-  try {
-    const url = `${base}/config/secrets`;
-    const { data } = await axios.post(url, { action: 'get', key: 'GITHUB_COPILOT_TOKEN' }, { headers, timeout: 3000 });
-    if (data && data.value) {
-      __copilotTokenCache = { base, ok: true, ts: Date.now() };
-      return true;
-    }
-  } catch (_) {}
-  __copilotTokenCache = { base, ok: false, ts: Date.now() };
-  return false;
-}
-
 // Стрім Тетяни через WebSocket інтерфейс Goose Web
 function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
   return new Promise((resolve, reject) => {
@@ -1974,12 +2014,11 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
           const content = obj.content;
           if (content) {
             sseSend(res, { type: 'agent_message', agent: 'Tetiana', content: String(content) });
-            // maybeAutoAnswerFromAtlasText временно отключён из-за конфликтов API
+            // Автовідповідь тимчасово відключена у WS-режимі через можливі конфлікти з провайдером
             // maybeAutoAnswerFromAtlasText(String(content), answeredQuestions, sessionId, res, baseUrl, null, ws).catch(() => {});
             collected += String(content) + '\n';
           }
         } else if (t === 'question' || t === 'frontendToolRequest') {
-          // Автовідповідь Атласа на уточнення тимчасово відключена через конфлікти з GitHub Copilot API
           // autoAnswerFromAtlas(obj, sessionId, res, baseUrl, null, ws).catch(() => {});
           console.log('[DEBUG] Question/frontendToolRequest received but auto-answer disabled:', obj.type);
         } else if (t === 'complete' || t === 'cancelled') {
@@ -1993,53 +2032,15 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
     });
 
     ws.on('error', (err) => finish(err));
-  ws.on('close', () => { 
-    // Аналізуємо зібраний вивід для відстеження використаних ресурсів
-    analyzeExecutionOutput(collected, sessionId);
-    if (!settled) {
-      settled = true;
-      resolve(collected.trim()); 
-    }
-  });
+    ws.on('close', () => {
+      // Аналізуємо зібраний вивід для відстеження використаних ресурсів
+      try { analyzeExecutionOutput(collected, sessionId); } catch {}
+      finish();
+    });
   });
 }
 
-// Нормалізація відповіді Atlas: прибрати code fences та префікси
-function cleanUserReply(text) {
-  if (!text) return '';
-  let out = String(text);
-  // видалити трійні бектіки з будь-яким вмістом
-  out = out.replace(/```[\s\S]*?```/g, '').trim();
-  // прибрати префікс user_reply: (у різних регістрах/мовах)
-  out = out.replace(/^\s*(user[_\s-]?reply\s*:\s*)/i, '');
-  // прибрати зайві лапки навколо
-  out = out.replace(/^"(.+)"$/s, '$1');
-  return out.trim();
-}
-
-// Чемний запасний варіант відповіді, коли модель не дала явного тексту перед JSON
-function politeFallbackReply(userMessage = '') {
-  try {
-    const msg = String(userMessage || '').trim().toLowerCase();
-    // Прості евристики привітання / імʼя
-    if (/(^|\b)(привіт|вітаю|хай|здоров|hello|hi)(\b|[!,.?])/i.test(msg)) {
-      return 'Привіт! Я ATLAS. Чим допомогти?';
-    }
-    if (/(як(\s+ти\s+)?тебе\s+зват|як\s+зват|хто\s+ти|what\s+is\s+your\s+name|who\s+are\s+you)/i.test(msg)) {
-      return 'Мене звати ATLAS. Я тут, щоб допомогти.';
-    }
-    // Питання без явних ключових слів
-    if (msg.endsWith('?')) {
-      return 'Я тут. Коротко відповім і зорієнтую далі.';
-    }
-    // Загальний випадок
-    return 'Я тут і готовий допомогти. Розкажіть детальніше, що потрібно.';
-  } catch (_) {
-    return 'Я тут і готовий допомогти.';
-  }
-}
-
-// Автовідповідь Атласа на уточнення Тетяни
+// Автовідповідь Атласа на уточнення Тетяни (використовується у SSE-режимі)
 async function autoAnswerFromAtlas(requestObjOrContent, sessionId, res, gooseBase, secret, wsOpt) {
   try {
     // Витягаємо текст питання
@@ -2081,83 +2082,143 @@ async function autoAnswerFromAtlas(requestObjOrContent, sessionId, res, gooseBas
       });
     }
 
-    // Показати в UI, що Атлас відповів на уточнення (для прозрачности)
+    // Показати в UI, що Атлас відповів на уточнення (для прозорості)
     sseSend(res, { type: 'agent_message', agent: 'Atlas', content: reply });
   } catch (_) {
-    // тихо игнорируем сбои авто-відповіді
+    // тихо ігноруємо збої авто-відповіді
   }
 }
 
-// Визначаємо, чи текст є уточнюючим питанням до користувача/Атласа; якщо так — авто-відповідь Атласа.
+// Визначаємо, чи текст є уточнюючим питанням; якщо так — авто-відповідь Атласа
 async function maybeAutoAnswerFromAtlasText(text, answeredSet, sessionId, res, gooseBase, secret, wsOpt) {
   try {
     const snippet = String(text || '').trim();
     if (!snippet || snippet.length < 3) return;
-    // Антидедупликація
+    // Антидедуплікація
     const key = snippet.toLowerCase().slice(0, 160);
     if (answeredSet.has(key)) return;
 
-    // Класификация через Atlas: вопрос-уточнение или просто ответ
-  const classifierSystem = prompts.atlas.classifier_system || 'You are a concise classifier. Answer strictly yes or no.';
-  const classificationPrompt = `${classifierSystem}\nВизнач: чи є цей текст уточнюючим питанням (yes/no): "${snippet}". Виведи лише yes або no.`;
+    // Класифікація через Atlas: питання-уточнення чи ні
+    const classifierSystem = prompts.atlas?.classifier_system || 'You are a concise classifier. Answer strictly yes or no.';
+    const classificationPrompt = `${classifierSystem}\nВизнач: чи є цей текст уточнюючим питанням (yes/no): "${snippet}". Виведи лише yes або no.`;
     const ans = await callAtlas(classificationPrompt, sessionId);
-    const verdict = (ans.user_reply || '').trim().toLowerCase();
-    if (verdict.startsWith('yes')) {
-      answeredSet.add(key);
-      await autoAnswerFromAtlas(snippet, sessionId, res, gooseBase, secret, wsOpt);
-    }
-  } catch {}
+    const label = String(ans?.user_reply || '').trim().toLowerCase();
+    if (label !== 'yes') return;
+    answeredSet.add(key);
+
+    // Автовідповідь від Атласа
+    await autoAnswerFromAtlas(snippet, sessionId, res, gooseBase, secret, wsOpt);
+  } catch (_) {
+    // мовчазно ігноруємо помилки
+  }
 }
 
-// Context management endpoints
-app.get('/context/stats', (req, res) => {
-  try {
-    const stats = contextSummarizer.getStats();
-    res.json({
-      success: true,
-      stats: stats,
-      maxContextTokens: contextSummarizer.maxContextTokens,
-      summaryRatio: contextSummarizer.summaryRatio
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
+// === Goose/Copilot token preflight (file-based) ===
+let __copilotTokenCache = { ok: null, ts: 0, reason: '', source: '' };
 
-app.post('/context/clear', (req, res) => {
-  try {
-    contextSummarizer.clearState();
-    res.json({
-      success: true,
-      message: 'Context cleared successfully'
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
+function getGooseConfigDir() {
+  const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
+  // у наших скриптах XDG_CONFIG_HOME=/.../ATLAS/goose, тож конфіги лежать у <XDG>/goose
+  return path.join(xdg, 'goose');
+}
 
-app.get('/context/formatted', (req, res) => {
+function readCopilotInfoJson() {
   try {
-    const formatted = contextSummarizer.formatForAiPrompt();
-    res.json({
-      success: true,
-      formattedContext: formatted,
-      length: formatted.length
-    });
-  } catch (error) {
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
-  }
-});
+    const p = path.join(getGooseConfigDir(), 'githubcopilot', 'info.json');
+    if (!fs.existsSync(p)) return { ok: false, reason: 'info.json not found' };
+    const raw = fs.readFileSync(p, 'utf-8');
+    const j = JSON.parse(raw);
 
+    // Більш толерантний парсер: допускаємо token/expires_at як у root, так і в info{}
+    const token = (j && (j.token || j?.info?.token)) || null;
+    if (!token || typeof token !== 'string' || token.trim().length < 16) {
+      return { ok: false, reason: 'token missing in info.json' };
+    }
+    // epoch (число) або ISO-рядок у root/info
+    let expEpoch = Number(j?.info?.expires_at);
+    if (!Number.isFinite(expEpoch)) expEpoch = Number(j?.expires_at);
+    if (!Number.isFinite(expEpoch)) {
+      const iso = j?.expires_at || j?.info?.expires_at_iso || j?.info?.expires_at_str || null;
+      if (!iso) return { ok: false, reason: 'expires_at missing' };
+      const t = Date.parse(iso);
+      if (!Number.isFinite(t)) return { ok: false, reason: 'expires_at invalid' };
+      expEpoch = Math.floor(t / 1000);
+    }
+    const now = Math.floor(Date.now() / 1000);
+    if (expEpoch <= now + 60) return { ok: false, reason: 'token expired in info.json' };
+    return { ok: true, source: 'info.json' };
+  } catch (e) {
+    return { ok: false, reason: `info.json error: ${e.message}` };
+  }
+}
+
+function readCopilotTokenFromSecretsYaml() {
+  try {
+    const p = path.join(getGooseConfigDir(), 'secrets.yaml');
+    if (!fs.existsSync(p)) return { ok: false, reason: 'secrets.yaml not found' };
+    const raw = fs.readFileSync(p, 'utf-8');
+    // простий парсер YAML-рядка ключа (без зовнішніх залежностей)
+    const m = raw.match(/^\s*GITHUB_COPILOT_TOKEN\s*:\s*(.+)\s*$/m);
+    if (!m) return { ok: false, reason: 'GITHUB_COPILOT_TOKEN not in secrets.yaml' };
+    let v = m[1].trim();
+    if (v.startsWith('"') && v.endsWith('"')) v = v.slice(1, -1);
+    if (v.startsWith("'") && v.endsWith("'")) v = v.slice(1, -1);
+    if (!v || v.toLowerCase() === 'null') return { ok: false, reason: 'empty token in secrets.yaml' };
+    return { ok: true, source: 'secrets.yaml' };
+  } catch (e) {
+    return { ok: false, reason: `secrets.yaml error: ${e.message}` };
+  }
+}
+
+async function hasCopilotTokenLocalCached() {
+  const now = Date.now();
+  if (now - __copilotTokenCache.ts < 4000 && __copilotTokenCache.ok !== null) {
+    return __copilotTokenCache;
+  }
+  // 1) пріоритет — info.json
+  let res = readCopilotInfoJson();
+  if (!res.ok) {
+    // 2) fallback — secrets.yaml (GOOSE_DISABLE_KEYRING=1)
+    const res2 = readCopilotTokenFromSecretsYaml();
+    res = res2.ok ? res2 : res; // якщо yaml ок — беремо його; інакше зберігаємо причину з info.json
+  }
+  __copilotTokenCache = { ...res, ts: now };
+  return __copilotTokenCache;
+}
+
+// Десь у вході стріму Тетяни, ДО будь-яких запитів до Goose:
+/*
+if (provider === 'github_copilot') {
+  const tokenCheck = await hasCopilotTokenLocalCached();
+  if (!tokenCheck.ok) {
+    log.warn(`[Tetiana] Copilot token preflight failed: ${tokenCheck.reason}`);
+    // надіслати SSE у чат і завершити
+    sendSseAgentMessage('Atlas', 
+      `Провайдер Tetiana = GitHub Copilot: токен не знайдено/прострочено (${tokenCheck.reason}). ` +
+      `Переконайтесь, що у ${getGooseConfigDir()}/githubcopilot/info.json є чинний токен або додайте його у secrets.yaml, ` +
+      `потім перезапустіть стек.`);
+    sendSseComplete();
+    return;
+  } else {
+    log.info(`[Tetiana] Copilot token OK via ${tokenCheck.source}`);
+  }
+}
+*/
+
+// Helper function to clean user reply
+function cleanUserReply(text) {
+  if (!text) return '';
+  let out = String(text);
+  // видалити трійні бектіки з будь-яким вмістом
+  out = out.replace(/```[\s\S]*?```/g, '').trim();
+  // прибрати префікс user_reply: (у різних регістрах/мовах)
+  out = out.replace(/^\s*(user[_\s-]?reply\s*:\s*)/i, '');
+  // прибрати зайві лапки навколо
+  out = out.replace(/^"(.+)"$/s, '$1');
+  return out.trim();
+}
+
+// Запуск сервера
 app.listen(ORCH_PORT, () => {
   console.log(`Orchestrator running on http://127.0.0.1:${ORCH_PORT}`);
   console.log(`Smart Context Summarization: ${contextSummarizer.maxContextTokens} max tokens, ${Math.round(contextSummarizer.summaryRatio * 100)}% summary ratio`);

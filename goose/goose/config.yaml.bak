@@ -1,7 +1,10 @@
-GOOSE_PROVIDER: github_copilot
-GOOSE_MODEL: gpt-4o
-GOOSE_SCHEDULER_TYPE: temporal
+GOOSE_ENABLE_ROUTER: 'true'
 GITHUB_COPILOT_TOKEN: null
+GOOSE_SCHEDULER_TYPE: temporal
+GOOSE_CLI_MIN_PRIORITY: 0.0
+GOOSE_MODE: auto
+GOOSE_MODEL: gpt-4o
+GOOSE_PROVIDER: github_copilot
 extensions:
   autovisualiser:
     available_tools: []
@@ -79,7 +82,4 @@ extensions:
     name: tutorial
     timeout: 300
     type: builtin
-GOOSE_ENABLE_ROUTER: 'true'
 GOOSE_RECIPE_GITHUB_REPO: https://github.com/olegkizyma/ATLAS.git
-GOOSE_MODE: auto
-GOOSE_CLI_MIN_PRIORITY: 0.0

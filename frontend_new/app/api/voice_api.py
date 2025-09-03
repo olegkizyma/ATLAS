@@ -160,14 +160,26 @@ def get_agents():
 def voice_health():
     """Перевірка здоров'я voice API"""
     try:
-        # Перевіряємо доступність TTS сервера
-        test_result = voice_manager.synthesize_speech("тест", "atlas")
-        tts_available = test_result.get("success", False)
+        # Перевіряємо доступність TTS сервера без запуску реального синтезу
+        import os
+        import requests
+        tts_url = os.getenv('ATLAS_TTS_URL', 'http://127.0.0.1:3001/tts')
+        # Спроба health-пінгу якщо доступний /health
+        tts_health = 'unknown'
+        try:
+            base = tts_url.rsplit('/tts', 1)[0]
+            health_resp = requests.get(f"{base}/health", timeout=2)
+            if health_resp.ok:
+                tts_health = 'available'
+            else:
+                tts_health = f"error:{health_resp.status_code}"
+        except Exception:
+            tts_health = 'unavailable'
         
         return jsonify({
             "success": True,
             "voice_manager": "operational",
-            "tts_server": "available" if tts_available else "unavailable",
+            "tts_server": tts_health,
             "agents_count": 3,
             "supported_agents": ["atlas", "tetyana", "grisha"]
         })
