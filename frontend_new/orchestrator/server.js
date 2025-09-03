@@ -66,6 +66,7 @@ const GEMINI_API_URL = (process.env.GEMINI_API_URL || 'https://generativelanguag
 // Mistral (Grisha)
 const MISTRAL_API_KEY = process.env.MISTRAL_API_KEY || '';
 const MISTRAL_MODEL = process.env.MISTRAL_MODEL || 'mistral-small-latest';
+const MISTRAL_FALLBACK_MODEL = process.env.MISTRAL_FALLBACK_MODEL || 'mistral-large-latest';
 
 // Adaptive execution system - cycle-based MSP/tool targeting
 const sessionCycleState = new Map(); // sessionId -> { cycleCount, usedTools, usedMSPs, lastState }
@@ -435,11 +436,28 @@ function summarizeTaskSpec(ts, { maxChars = ORCH_MAX_TASKSPEC_SUMMARY_CHARS, max
   }
 }
 
-async function mistralChat(system, user, { temperature = 0, timeout = ORCH_GRISHA_TIMEOUT_MS } = {}) {
+async function mistralChat(system, user, { temperature = 0, timeout = ORCH_GRISHA_TIMEOUT_MS, model = MISTRAL_MODEL } = {}) {
   const url = 'https://api.mistral.ai/v1/chat/completions';
-  const payload = { model: MISTRAL_MODEL, messages: [ { role: 'system', content: system }, { role: 'user', content: user } ], temperature };
-  const { data } = await axios.post(url, payload, { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout });
-  return data?.choices?.[0]?.message?.content || '';
+  const makePayload = (m) => ({ model: m, messages: [ { role: 'system', content: system }, { role: 'user', content: user } ], temperature });
+  try {
+    const { data } = await axios.post(url, makePayload(model), { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout });
+    return data?.choices?.[0]?.message?.content || '';
+  } catch (e) {
+    const status = e?.response?.status;
+    const msg = e?.response?.data?.error?.message || e?.message || '';
+    const tokenLimit = status === 400 && /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
+    const retriable = status === 429 || (status >= 500 && status < 600) || tokenLimit;
+    const fbModel = MISTRAL_FALLBACK_MODEL && MISTRAL_FALLBACK_MODEL !== model ? MISTRAL_FALLBACK_MODEL : null;
+    if (retriable && fbModel) {
+      try {
+        const { data } = await axios.post(url, makePayload(fbModel), { headers: { Authorization: `Bearer ${MISTRAL_API_KEY}` }, timeout });
+        return data?.choices?.[0]?.message?.content || '';
+      } catch (e2) {
+        throw e2;
+      }
+    }
+    throw e;
+  }
 }
 
 async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATTEMPTS, temperature = 0, sessionId = null } = {}) {
@@ -487,7 +505,7 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
       }
     } catch (e) {
       lastErr = e;
-      const status = e?.response?.status;
+  const status = e?.response?.status;
       const msg = e?.response?.data?.error?.message || e?.message || '';
       const tooLong = status === 400 && /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
       if (tooLong) {
@@ -506,11 +524,13 @@ async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATT
         sys = capHead(systemStr, Math.min(ORCH_MAX_MISTRAL_SYSTEM_CHARS, systemTarget));
         
         console.log(`[CONTEXT_LIMIT] Reduced user: ${userStr.length} -> ${usr.length}, system: ${systemStr.length} -> ${sys.length}`);
-        continue;
+  continue;
       }
       if (status === 429 || (status >= 500 && status < 600)) {
         // експоненційний backoff із джиттером
         await sleep(backoffDelay(attempts));
+  // Try fallback model on next attempt by reducing system size and letting mistralChat fallback path handle model switch
+  sys = capHead(sys, Math.floor(ORCH_MAX_MISTRAL_SYSTEM_CHARS * 0.8));
       }
     }
   }
@@ -656,10 +676,15 @@ app.post('/chat/stream', async (req, res) => {
       intent = await classifyIntentSafe(message);
     }
     if (doNotExec || intent === 'chat') {
-  sseSend(res, { type: 'info', agent: 'system', content: 'Режим розмови: виконання не запускається.' });
-  sseSend(res, { type: 'complete', agent: 'system' });
-  __end();
-  return res.end();
+      // Віддаємо відповідь Атласа у чат і завершуємо стрім без запуску виконання
+      const reply = atlasOut.user_reply || politeFallbackReply(message);
+      if (reply && reply.trim()) {
+        sseSend(res, { type: 'agent_message', agent: 'Atlas', content: `[ATLAS] ${reply}` });
+      }
+      sseSend(res, { type: 'info', agent: 'system', content: 'Режим розмови: виконання не запускається.' });
+      sseSend(res, { type: 'complete', agent: 'system' });
+      __end();
+      return res.end();
     }
   } catch (_) { /* ігноруємо, продовжуємо пайплайн */ }
 
@@ -1018,7 +1043,7 @@ async function callAtlas(userMessage, sessionId, options = {}) {
       }
       
       return {
-        user_reply: userReply.trim() || fallbackResponse.substring(0, 200) + '...',
+  user_reply: (userReply && userReply.trim()) || politeFallbackReply(userMessage),
         task_spec: taskSpec,
         _attemptsUsed: maxAttempts,
         _fallbackUsed: 'local_api',
@@ -1055,7 +1080,7 @@ async function callAtlas(userMessage, sessionId, options = {}) {
   const userReply = cleanUserReply(userReplyRaw);
 
   return {
-    user_reply: userReply || 'Готово.',
+  user_reply: userReply || politeFallbackReply(userMessage),
     task_spec: taskSpec || {
       title: 'Задача', summary: userMessage, inputs: [userMessage], steps: [], constraints: [], success_criteria: [], tool_hints: {}
     },
@@ -1148,7 +1173,7 @@ async function callAtlasViaMistral(userMessage, sessionId, options = {}) {
     const userReply = cleanUserReply(userReplyRaw);
 
     return {
-      user_reply: userReply || 'Готово.',
+  user_reply: userReply || politeFallbackReply(userMessage),
       task_spec: taskSpec || {
         title: 'Задача', summary: userMessage, inputs: [userMessage], steps: [], constraints: [], success_criteria: [], tool_hints: {}
       },
@@ -1483,11 +1508,32 @@ async function grishaAnalyzeVerificationResults(taskSpec, execText, verification
 async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
   const secret = process.env.GOOSE_SECRET_KEY;
 
-  // Автовизначення режиму Goose: web (ws) чи goosed (/reply)
+  // База Goose
   const gooseBase = GOOSE_BASE_URL.replace(/\/$/, '');
+  // Визначення провайдера (через /config/read)
+  const gooseProvider = (await resolveGooseProvider() || '').toLowerCase();
+
+  // Префлайт: якщо провайдер github_copilot і відсутній токен, одразу повідомляємо в чат і завершуємо без спроб /reply чи /ws
+  if (gooseProvider === 'github_copilot') {
+    try {
+      const ok = await hasCopilotToken(gooseBase, secret);
+      if (!ok) {
+        sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Провайдер Tetiana = GitHub Copilot: не знайдено GITHUB_COPILOT_TOKEN у Goose (config/secrets). Додайте токен через Goose Configurator та перезапустіть стек. Запит до Tetiana пропущено без спроб /reply або /ws.' });
+        sseSend(res, { type: 'complete' });
+        return '';
+      }
+    } catch (e) {
+      console.warn('[Preflight][github_copilot] Token check failed:', e?.message || e);
+      // Навіть якщо перевірка впала, поводимось обережно: не викликаємо /reply або /ws, щоб відповідати вимозі користувача
+      sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Не вдалося перевірити наявність GITHUB_COPILOT_TOKEN у Goose. Будь ласка, перевірте налаштування в Goose Configurator. Запит до Tetiana пропущено без спроб /reply або /ws.' });
+      sseSend(res, { type: 'complete' });
+      return '';
+    }
+  }
+
+  // Автовизначення режиму Goose: web (ws) чи goosed (/reply)
   const isWebDetected = await isGooseWeb(gooseBase);
   // If provider is GitHub Copilot and the flag is enabled, force SSE to avoid WS tool/tool_calls sequencing issues
-  const gooseProvider = (await resolveGooseProvider() || '').toLowerCase();
   const providerForcesSse = ORCH_SSE_FOR_GITHUB_COPILOT && gooseProvider === 'github_copilot';
   const isWeb = (ORCH_FORCE_GOOSE_REPLY || providerForcesSse) ? false : isWebDetected;
 
@@ -1603,8 +1649,12 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
           return await sendViaSse(compressed);
         } catch (err) {
           if (err?.status === 404) {
-            console.log('[SSE_404_FALLBACK] /reply not available on Goose Web. Using direct local LLM for Tetiana...');
-            return await streamLocalTetianaDirect(compressed, res);
+            console.log('[SSE_404_NO_FALLBACK] /reply not available on Goose Web. Local fallback disabled; notifying chat...');
+            try {
+              sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Не вдалося підключитися до Tetiana через Goose: endpoint /reply недоступний (404) для провайдера GitHub Copilot. Імовірна причина — відсутній або некоректний GITHUB_COPILOT_TOKEN. Локальний фолбек вимкнено. Перевірте токен у Goose Configurator та перезапустіть стек.' });
+            } catch (_) {}
+            try { sseSend(res, { type: 'complete', agent: 'system' }); } catch (_) {}
+            return '';
           }
           throw err;
         }
@@ -1615,8 +1665,12 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
           return await sendViaSse();
         } catch (err) {
           if (err?.status === 404) {
-            console.log('[SSE_404_FALLBACK] /reply not available on Goose Web. Using direct local LLM for Tetiana...');
-            return await streamLocalTetianaDirect(messageText, res);
+            console.log('[SSE_404_NO_FALLBACK] /reply not available on Goose Web. Local fallback disabled; notifying chat...');
+            try {
+              sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Для Tetiana потрібен Goose /reply, але він недоступний (404) з провайдером GitHub Copilot. Локальний режим вимкнено. Будь ласка, задайте дійсний GITHUB_COPILOT_TOKEN у Goose Configurator і перезапустіть.' });
+            } catch (_) {}
+            try { sseSend(res, { type: 'complete', agent: 'system' }); } catch (_) {}
+            return '';
           }
           throw err;
         }
@@ -1626,8 +1680,12 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
           return await sendViaSse();
         } catch (err) {
           if (err?.status === 404) {
-            console.log('[SSE_404_FALLBACK] /reply not available on Goose Web. Using direct local LLM for Tetiana...');
-            return await streamLocalTetianaDirect(messageText, res);
+            console.log('[SSE_404_NO_FALLBACK] /reply not available on Goose Web. Local fallback disabled; notifying chat...');
+            try {
+              sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Goose Web повернув 404 для /reply. Фолбек на локальну Тетяну відключено. Перевірте доступність Goose і коректність GITHUB_COPILOT_TOKEN.' });
+            } catch (_) {}
+            try { sseSend(res, { type: 'complete', agent: 'system' }); } catch (_) {}
+            return '';
           }
           throw err;
         }
@@ -1642,16 +1700,24 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
       if (err?.status === 404) {
         if (providerForcesSse) {
           // For github_copilot we avoid WS to prevent tool/tool_calls 400; go straight to local fallback
-          console.log('[SSE_404_FALLBACK] /reply not available; provider=github_copilot -> using local Tetiana');
-          return await streamLocalTetianaDirect(messageText, res);
+          console.log('[SSE_404_NO_FALLBACK] /reply not available; provider=github_copilot. Local fallback disabled; notifying chat...');
+          try {
+            sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] /reply недоступний для провайдера GitHub Copilot (404). Локальний фолбек вимкнено. Задайте GITHUB_COPILOT_TOKEN у Goose та перезапустіть стек.' });
+          } catch (_) {}
+          try { sseSend(res, { type: 'complete', agent: 'system' }); } catch (_) {}
+          return '';
         } else {
           // If /reply is missing (common on Goose Web UI), try WebSocket /ws once before local fallback
           console.log('[SSE_404_FALLBACK] /reply 404 on Goose. Trying WebSocket /ws...');
           try {
             return await streamTetianaWs(gooseBase, payload, res, sessionId);
           } catch (wsErr) {
-            console.log('[WS_FALLBACK_FAIL] WebSocket path also failed. Falling back to local Tetiana:', wsErr?.message || wsErr);
-            return await streamLocalTetianaDirect(messageText, res);
+            console.log('[WS_FALLBACK_FAIL_NO_LOCAL] WebSocket path also failed. Local fallback disabled; notifying chat...', wsErr?.message || wsErr);
+            try {
+              sseSend(res, { type: 'agent_message', agent: 'Atlas', content: '[ATLAS] Не вдалося підключитися до Tetiana ні через /reply, ні через /ws. Локальний фолбек вимкнено. Перевірте роботу Goose та наявність валідного GITHUB_COPILOT_TOKEN.' });
+            } catch (_) {}
+            try { sseSend(res, { type: 'complete', agent: 'system' }); } catch (_) {}
+            return '';
           }
         }
       }
@@ -1663,7 +1729,7 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
 // Локальний fallback для Тетяни без Goose: використовує Mistral (якщо є ключ) або локальний OpenAI-сумісний API
 async function streamLocalTetianaDirect(messageText, res) {
   try {
-    sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Працюю в локальному режимі без Goose…' });
+    // sseSend(res, { type: 'info', agent: 'Tetiana', content: '[ТЕТЯНА] Працюю в локальному режимі без Goose…' });
     let full = '';
     if (MISTRAL_API_KEY) {
       const sys = 'Ти — Тетяна, практична виконавиця. Дай покрокову, прикладну відповідь з конкретикою.';
@@ -1785,6 +1851,95 @@ async function isGooseWeb(baseUrl) {
   return false;
 }
 
+// Перевірка наявності GITHUB_COPILOT_TOKEN у Goose через API конфігів/секретів
+let __copilotTokenCache = { base: '', ok: false, ts: 0 };
+async function hasCopilotToken(baseUrl, sharedSecret) {
+  const base = (baseUrl || GOOSE_BASE_URL).replace(/\/$/, '');
+  // Кеш 4 секунди на однакову базу
+  try {
+    const now = Date.now();
+    if (__copilotTokenCache.base === base && (now - __copilotTokenCache.ts) < 4000) {
+      return __copilotTokenCache.ok;
+    }
+  } catch {}
+
+  // Если это Goose Web, API /config/* недоступен — проверяем локальный кэш токена Copilot
+  try {
+    const web = await isGooseWeb(base);
+    if (web) {
+      // ~/.config/goose -> <repo>/goose/goose (симлинк создаётся стартовым скриптом)
+      const os = require('os');
+      const path = require('path');
+      const fs = require('fs');
+      const infoPath = path.join(os.homedir(), '.config', 'goose', 'githubcopilot', 'info.json');
+      if (fs.existsSync(infoPath)) {
+        try {
+          const raw = fs.readFileSync(infoPath, 'utf-8');
+          const json = JSON.parse(raw);
+          // Форматы: { expires_at: ISO8601, info: { expires_at: epoch? } }
+          let expTs = 0;
+          if (typeof json.expires_at === 'string') {
+            const t = Date.parse(json.expires_at);
+            if (!Number.isNaN(t)) expTs = t;
+          }
+          if (!expTs && json.info && typeof json.info.expires_at === 'number') {
+            // seconds epoch
+            expTs = json.info.expires_at * 1000;
+          }
+          // Считаем токен валидным, если есть файл и (либо нет явного срока, либо он в будущем на >30s)
+          const ok = !expTs || (Date.now() + 30000 < expTs);
+          __copilotTokenCache = { base, ok, ts: Date.now() };
+          if (ok) return true;
+        } catch (_) {
+          // файл есть, но не читается — считаем, что не ок
+          __copilotTokenCache = { base, ok: false, ts: Date.now() };
+          // продолжим проверку secrets.yaml ниже
+        }
+      }
+      // Дополнительно: проверим secrets.yaml для GITHUB_COPILOT_TOKEN (file-based secrets)
+      try {
+        const secretsPath = path.join(os.homedir(), '.config', 'goose', 'secrets.yaml');
+        if (fs.existsSync(secretsPath)) {
+          const text = fs.readFileSync(secretsPath, 'utf-8');
+          // грубая проверка: ключ присутствует и не равен null/пусто
+          const m = text.match(/(^|\n)\s*GITHUB_COPILOT_TOKEN\s*:\s*(.+)/);
+          if (m) {
+            const val = m[2].trim();
+            if (val && val.toLowerCase() !== 'null' && val !== '""' && val !== "''") {
+              __copilotTokenCache = { base, ok: true, ts: Date.now() };
+              return true;
+            }
+          }
+        }
+      } catch (_) {}
+      __copilotTokenCache = { base, ok: false, ts: Date.now() };
+      return false;
+    }
+  } catch {}
+
+  // Иначе: это goosed (сервер API). Пробуем /config/* с корректным заголовком
+  const headers = sharedSecret ? { 'X-Secret-Key': sharedSecret } : {};
+  try {
+    const url = `${base}/config/read`;
+    const { data } = await axios.post(url, { key: 'GITHUB_COPILOT_TOKEN', is_secret: true }, { headers, timeout: 3000 });
+    // Для секретов read возвращает true/false (без значения)
+    if (data === true || (data && data.value)) {
+      __copilotTokenCache = { base, ok: true, ts: Date.now() };
+      return true;
+    }
+  } catch (_) {}
+  try {
+    const url = `${base}/config/secrets`;
+    const { data } = await axios.post(url, { action: 'get', key: 'GITHUB_COPILOT_TOKEN' }, { headers, timeout: 3000 });
+    if (data && data.value) {
+      __copilotTokenCache = { base, ok: true, ts: Date.now() };
+      return true;
+    }
+  } catch (_) {}
+  __copilotTokenCache = { base, ok: false, ts: Date.now() };
+  return false;
+}
+
 // Стрім Тетяни через WebSocket інтерфейс Goose Web
 function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
   return new Promise((resolve, reject) => {
@@ -1860,6 +2015,28 @@ function cleanUserReply(text) {
   // прибрати зайві лапки навколо
   out = out.replace(/^"(.+)"$/s, '$1');
   return out.trim();
+}
+
+// Чемний запасний варіант відповіді, коли модель не дала явного тексту перед JSON
+function politeFallbackReply(userMessage = '') {
+  try {
+    const msg = String(userMessage || '').trim().toLowerCase();
+    // Прості евристики привітання / імʼя
+    if (/(^|\b)(привіт|вітаю|хай|здоров|hello|hi)(\b|[!,.?])/i.test(msg)) {
+      return 'Привіт! Я ATLAS. Чим допомогти?';
+    }
+    if (/(як(\s+ти\s+)?тебе\s+зват|як\s+зват|хто\s+ти|what\s+is\s+your\s+name|who\s+are\s+you)/i.test(msg)) {
+      return 'Мене звати ATLAS. Я тут, щоб допомогти.';
+    }
+    // Питання без явних ключових слів
+    if (msg.endsWith('?')) {
+      return 'Я тут. Коротко відповім і зорієнтую далі.';
+    }
+    // Загальний випадок
+    return 'Я тут і готовий допомогти. Розкажіть детальніше, що потрібно.';
+  } catch (_) {
+    return 'Я тут і готовий допомогти.';
+  }
 }
 
 // Автовідповідь Атласа на уточнення Тетяни

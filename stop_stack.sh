@@ -84,6 +84,10 @@ echo "🎤 Stopping Ukrainian TTS services..."
 stop_service "Ukrainian TTS Mock" "logs/tts_mock.pid"
 stop_service "Ukrainian TTS Real" "logs/tts_real.pid"
 
+# 4.6. Зупинка Local Fallback LLM (Port 3010)
+echo "🧰 Stopping Fallback LLM..."
+stop_service "Fallback LLM" "logs/fallback_llm.pid"
+
 # 5. Додаткова очистка процесів за іменем
 echo "🧹 Cleaning up remaining processes..."
 stop_by_name "Goose daemon" "goosed"
@@ -114,6 +118,7 @@ check_and_kill_port() {
 
 check_and_kill_port 3000 "Goose Web"
 check_and_kill_port 3001 "Ukrainian TTS"
+check_and_kill_port 3010 "Fallback LLM"
 check_and_kill_port 5001 "Python Frontend"  
 check_and_kill_port 5101 "Node.js Orchestrator"
 check_and_kill_port 5102 "Recovery Bridge"

@@ -1,0 +1,14 @@
+{
+  "name": "atlas-fallback-llm",
+  "version": "1.0.0",
+  "type": "module",
+  "private": true,
+  "description": "OpenAI-compatible local fallback server for ATLAS",
+  "scripts": {
+    "start": "node server.js"
+  },
+  "dependencies": {
+    "cors": "^2.8.5",
+    "express": "^4.19.2"
+  }
+}

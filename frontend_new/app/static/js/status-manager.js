@@ -5,7 +5,7 @@
 class AtlasStatusManager {
     constructor() {
         this.apiBase = window.location.origin;
-        this.refreshInterval = 5000; // 5 секунд
+        this.refreshInterval = 15000; // 15 секунд замість 5 - менше навантаження
         this.lastRefresh = 0;
         
         this.init();

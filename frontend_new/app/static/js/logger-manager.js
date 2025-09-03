@@ -7,8 +7,11 @@ class AtlasLogger {
         this.logs = [];
         this.maxLogs = 1000;
         this.apiBase = window.location.origin;
-        this.refreshInterval = 3000; // 3 секунди замість 2
+        this.refreshInterval = 10000; // 10 секунд замість 3 - менше спаму
+        this.fastInterval = 3000; // швидкий режим коли є активність
         this.lastRefresh = 0;
+        this.lastActivity = Date.now();
+        this.isActive = false;
         
         this.init();
     }
@@ -29,16 +32,42 @@ class AtlasLogger {
         // Початкове завантаження логів
         this.refreshLogs();
         
-        // Періодичне оновлення
+        // Адаптивне періодичне оновлення
         setInterval(() => {
-            this.refreshLogs();
-        }, this.refreshInterval);
+            // Використовуємо швидкий інтервал, якщо була нещодавня активність
+            const timeSinceActivity = Date.now() - this.lastActivity;
+            const shouldUseFastInterval = timeSinceActivity < 60000; // 1 хвилина
+            
+            const currentInterval = shouldUseFastInterval ? this.fastInterval : this.refreshInterval;
+            const timeSinceRefresh = Date.now() - this.lastRefresh;
+            
+            if (timeSinceRefresh >= currentInterval) {
+                this.refreshLogs();
+            }
+        }, 2000); // Перевіряємо кожні 2 секунди, але рефрешимо рідше
+        
+        // Трекінг активності користувача для оптимізації
+        document.addEventListener('mouseenter', () => {
+            this.lastActivity = Date.now();
+        });
+        document.addEventListener('click', () => {
+            this.lastActivity = Date.now();
+        });
     }
     
     async refreshLogs() {
         const now = Date.now();
-        if (now - this.lastRefresh < this.refreshInterval - 500) {
-            return; // Запобігаємо занадто частим запитам
+        const timeSinceActivity = now - this.lastActivity;
+        
+        // Пропускаємо оновлення, якщо немає активності більше 5 хвилин
+        if (timeSinceActivity > 300000) {
+            return;
+        }
+        
+        // Запобігаємо занадто частим запитам
+        const minInterval = timeSinceActivity < 60000 ? this.fastInterval - 500 : this.refreshInterval - 500;
+        if (now - this.lastRefresh < minInterval) {
+            return;
         }
         
         this.lastRefresh = now;

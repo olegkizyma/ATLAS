@@ -46,6 +46,7 @@ check_service_status "Goose Web Interface" "logs/goose.pid" "3000" "http://local
 check_service_status "Python Frontend" "logs/frontend.pid" "5001" "http://localhost:5001"
 check_service_status "Node.js Orchestrator" "logs/orchestrator.pid" "5101" "http://localhost:5101/health"
 check_service_status "Recovery Bridge" "logs/recovery_bridge.pid" "5102" ""
+check_service_status "Fallback LLM" "logs/fallback_llm.pid" "3010" "http://localhost:3010/v1/models"
 
 echo ""
 echo "🌐 Port Status:"
@@ -68,6 +69,7 @@ check_port_status "3000" "Goose Web Interface"
 check_port_status "5001" "Python Frontend"
 check_port_status "5101" "Node.js Orchestrator"
 check_port_status "5102" "Recovery Bridge"
+check_port_status "3010" "Fallback LLM"
 
 echo ""
 echo "📁 System Files:"
@@ -132,8 +134,15 @@ echo "🎯 System Summary:"
 # Підрахунок активних сервісів
 active_count=0
 total_services=4
+if [ -f "logs/fallback_llm.pid" ]; then
+    total_services=$((total_services + 1))
+fi
 
 for pidfile in logs/goose.pid logs/frontend.pid logs/orchestrator.pid logs/recovery_bridge.pid; do
+    # include fallback LLM if PID exists
+    if [ -f "logs/fallback_llm.pid" ]; then
+        :
+    fi
     if [ -f "$pidfile" ]; then
         pid=$(cat "$pidfile")
         if ps -p $pid > /dev/null 2>&1; then
@@ -141,6 +150,14 @@ for pidfile in logs/goose.pid logs/frontend.pid logs/orchestrator.pid logs/recov
         fi
     fi
 done
+
+# Count fallback LLM if running
+if [ -f "logs/fallback_llm.pid" ]; then
+    pid=$(cat logs/fallback_llm.pid)
+    if ps -p $pid > /dev/null 2>&1; then
+        active_count=$((active_count + 1))
+    fi
+fi
 
 if [ $active_count -eq $total_services ]; then
     echo "🟢 System Status: FULLY OPERATIONAL ($active_count/$total_services services)"

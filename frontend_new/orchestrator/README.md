@@ -15,6 +15,7 @@ SSE endpoint: `POST /chat/stream` with JSON `{ message, sessionId? }`.
 - GEMINI_MODEL=gemini-1.5-flash
 - MISTRAL_API_KEY=...
 - MISTRAL_MODEL=mistral-small-latest
+- MISTRAL_FALLBACK_MODEL=mistral-large-latest  # используется автоматически при 429/5xx/лимите токенов
  - ORCH_GRISHA_MAX_ATTEMPTS (default 20) — максимальна кількість спроб для Гріші
  - ORCH_MAX_REFINEMENT_CYCLES (default 20) — кількість циклів довиконання/верифікації після початкового запуску
 

@@ -145,16 +145,81 @@ check_port() {
     return 0
 }
 
+# Опційне звільнення порту (kill процесів на порту)
+free_port_if_requested() {
+    local port=$1
+    if [ "${FORCE_FREE_PORTS:-false}" = "true" ]; then
+        echo "🔧 Freeing port $port..."
+        if [ -x "scripts/kill_port.sh" ]; then
+            scripts/kill_port.sh "$port" >/dev/null 2>&1 || true
+        else
+            local pids
+            pids=$(lsof -ti:$port 2>/dev/null || true)
+            if [ -n "$pids" ]; then
+                kill $pids 2>/dev/null || true
+                sleep 1
+                pids=$(lsof -ti:$port 2>/dev/null || true)
+                if [ -n "$pids" ]; then
+                    kill -9 $pids 2>/dev/null || true
+                fi
+            fi
+        fi
+        if ! check_port "$port"; then
+            echo "❌ Port $port is still busy after forced free"
+            return 1
+        else
+            echo "✅ Port $port freed"
+        fi
+    fi
+    return 0
+}
+
 # Перевірка портів
 echo "🔍 Checking ports availability..."
 if lsof -ti:3000 > /dev/null 2>&1; then
-    echo "⚠️  Goose web interface port 3000 busy (Goose will be skipped)"
+    if [ "${FORCE_FREE_PORTS:-false}" = "true" ]; then
+        free_port_if_requested 3000 || true
+        if lsof -ti:3000 > /dev/null 2>&1; then
+            echo "⚠️  Goose web interface port 3000 busy (Goose will be skipped)"
+        else
+            echo "✅ Port 3000 freed for Goose"
+        fi
+    else
+        # Визначимо, чи це вже запущений Goose
+        goose_pids=$(lsof -ti:3000 2>/dev/null | tr '\n' ' ')
+        found_goose=""
+        for pid in $goose_pids; do
+            comm=$(ps -p "$pid" -o comm= 2>/dev/null || true)
+            if echo "$comm" | grep -qi "goose"; then
+                found_goose="$pid"
+                break
+            fi
+        done
+        if [ -n "$found_goose" ]; then
+            echo "ℹ️  Goose Web already running (PID: $found_goose)."
+            echo "$found_goose" > logs/goose.pid
+        else
+            echo "⚠️  Goose web interface port 3000 busy (Goose will be skipped). Set FORCE_FREE_PORTS=true to free automatically"
+        fi
+    fi
 else
     echo "✅ Port 3000 available for Goose"
 fi
-check_port 5001 || { echo "❌ Frontend port 5001 busy"; exit 1; }
-check_port 5101 || { echo "❌ Orchestrator port 5101 busy"; exit 1; }
-check_port 5102 || { echo "⚠️  Recovery bridge port 5102 busy (will attempt restart)"; }
+if lsof -ti:3010 > /dev/null 2>&1; then
+    # 3010 вважаємо зовнішнім постачальником AI; ніколи не звільняємо автоматично
+    echo "ℹ️  External Fallback API detected on port 3010 — will use it."
+else
+    echo "ℹ️  Port 3010 is free. Local fallback will start only if ENABLE_LOCAL_FALLBACK_LLM=true."
+fi
+if ! check_port 5001; then
+    if free_port_if_requested 5001; then :; else echo "❌ Frontend port 5001 busy"; exit 1; fi
+fi
+if ! check_port 5101; then
+    if free_port_if_requested 5101; then :; else echo "❌ Orchestrator port 5101 busy"; exit 1; fi
+fi
+if ! check_port 5102; then
+    if free_port_if_requested 5102; then :; else echo "⚠️  Recovery bridge port 5102 busy (will attempt restart)"; fi
+fi
 echo "✅ Port check completed"
 
 # 1.5. Запуск Ukrainian TTS (Mock або Реальний) на Port 3001
@@ -199,6 +264,9 @@ echo "🦆 Starting Goose Web Interface..."
 if lsof -ti:3000 > /dev/null 2>&1; then
     echo "⚠️  Port 3000 is busy. Skipping Goose startup."
 else
+    # Используем файловое хранилище секретов (secrets.yaml) вместо системного keychain по умолчанию
+    export GOOSE_DISABLE_KEYRING=${GOOSE_DISABLE_KEYRING:-1}
+    echo "🔐 Goose secrets storage: file (GOOSE_DISABLE_KEYRING=$GOOSE_DISABLE_KEYRING)"
     # Узгодити конфіги перед запуском Goose Web
     ensure_goose_config_link
                 goose_env_report
@@ -238,6 +306,27 @@ else
         )
 fi
 
+# 2.5 Локальний Fallback LLM (Port 3010) — Optional: запускаем только по флагу
+if [ "${ENABLE_LOCAL_FALLBACK_LLM:-false}" = "true" ]; then
+    echo "🧰 Starting Local Fallback LLM (port 3010)..."
+    if lsof -ti:3010 > /dev/null 2>&1; then
+        echo "ℹ️  Port 3010 already in use by external provider. Skipping local fallback startup."
+    else
+        (
+            cd fallback_llm
+            if [ ! -d "node_modules" ]; then
+                echo "📦 Installing Fallback LLM dependencies..."
+                npm install
+            fi
+            node server.js > ../logs/fallback_llm.log 2>&1 &
+            echo $! > ../logs/fallback_llm.pid
+            echo "✅ Fallback LLM started (PID: $(cat ../logs/fallback_llm.pid)) on http://127.0.0.1:3010"
+        )
+    fi
+else
+    echo "🧰 Local fallback LLM is disabled (ENABLE_LOCAL_FALLBACK_LLM=false)."
+fi
+
 # 3. Запуск Node.js Orchestrator (Port 5101)
 echo "🎭 Starting Node.js Orchestrator..."
 cd frontend_new/orchestrator
@@ -246,6 +335,13 @@ if [ ! -d "node_modules" ]; then
     echo "📦 Installing Node.js dependencies..."
     npm install
 fi
+# Совместимость с Goose Web: если Goose web запущен, отключаем форсированный SSE для github_copilot,
+# чтобы оркестратор использовал WebSocket (/ws) вместо /reply
+if [ -f "../../logs/goose.pid" ] && ps -p $(cat ../../logs/goose.pid) > /dev/null 2>&1; then
+    export ORCH_SSE_FOR_GITHUB_COPILOT=${ORCH_SSE_FOR_GITHUB_COPILOT:-false}
+    export ORCH_FORCE_GOOSE_REPLY=${ORCH_FORCE_GOOSE_REPLY:-false}
+fi
+export FALLBACK_API_BASE=${FALLBACK_API_BASE:-http://127.0.0.1:3010/api}
 node server.js > ../../logs/orchestrator.log 2>&1 &
 echo $! > ../../logs/orchestrator.pid
 echo "✅ Node.js orchestrator started (PID: $(cat ../../logs/orchestrator.pid))"
@@ -300,6 +396,7 @@ check_service() {
 
 check_service "Python Frontend" "http://localhost:5001" "logs/frontend.pid"
 check_service "Node.js Orchestrator" "http://localhost:5101/health" "logs/orchestrator.pid"
+check_service "Fallback API" "http://localhost:3010/api/models" "logs/fallback_llm.pid"
 
 # Check Goose only if it was started
 if [ -f "logs/goose.pid" ] && ps -p $(cat logs/goose.pid) > /dev/null 2>&1; then
@@ -322,6 +419,8 @@ echo ""
 echo "📊 Service Dashboard:"
 if [ -f "logs/goose.pid" ] && ps -p $(cat logs/goose.pid) > /dev/null 2>&1; then
     echo "   🌐 Web Interface:    http://localhost:3000"
+elif curl -s --max-time 2 http://localhost:3000 > /dev/null 2>&1; then
+    echo "   🌐 Web Interface:    http://localhost:3000 (external)"
 else
     echo "   🌐 Web Interface:    (not available - Goose not running)"
 fi
@@ -336,6 +435,9 @@ fi
 echo "   Frontend:        logs/frontend.log"
 echo "   Orchestrator:    logs/orchestrator.log"
 echo "   Recovery Bridge: logs/recovery_bridge.log"
+if [ -f "logs/fallback_llm.log" ]; then
+    echo "   Fallback LLM:   logs/fallback_llm.log"
+fi
 echo ""
 echo "🛠️  Management:"
 echo "   Stop system:  ./stop_stack.sh"
