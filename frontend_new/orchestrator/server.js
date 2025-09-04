@@ -1735,6 +1735,24 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
         }
       ]
     };
+
+    // Add Copilot-Vision-Request header if this is a GitHub Copilot request with potential visual content
+    if (gooseProvider === 'github_copilot') {
+      // Check if the message contains visual content indicators
+      const hasVisualContent = text.toLowerCase().includes('image') ||
+                              text.toLowerCase().includes('picture') ||
+                              text.toLowerCase().includes('photo') ||
+                              text.toLowerCase().includes('screenshot') ||
+                              text.toLowerCase().includes('diagram') ||
+                              text.includes('data:image') ||
+                              text.includes('http') && (text.includes('.png') || text.includes('.jpg') || text.includes('.jpeg') || text.includes('.gif'));
+
+      if (hasVisualContent) {
+        headers['Copilot-Vision-Request'] = 'true';
+        console.log('[Tetiana][SSE] Added Copilot-Vision-Request header for potential visual content');
+      }
+    }
+
     let response;
     try {
       response = await axios.post(url, ssePayload, { headers, responseType: 'stream', timeout: 0 });
@@ -2031,12 +2049,30 @@ function streamTetianaWs(baseUrl, chatPayload, res, sessionId) {
     };
 
     ws.on('open', () => {
+      const content = chatPayload.messages?.[0]?.content?.[0]?.text || '';
+
+      // Check if the message contains visual content indicators for GitHub Copilot
+      const hasVisualContent = content.toLowerCase().includes('image') ||
+                              content.toLowerCase().includes('picture') ||
+                              content.toLowerCase().includes('photo') ||
+                              content.toLowerCase().includes('screenshot') ||
+                              content.toLowerCase().includes('diagram') ||
+                              content.includes('data:image') ||
+                              content.includes('http') && (content.includes('.png') || content.includes('.jpg') || content.includes('.jpeg') || content.includes('.gif'));
+
       const payload = {
         type: 'message',
-        content: chatPayload.messages?.[0]?.content?.[0]?.text || '',
+        content: content,
         session_id: chatPayload.session_id,
         timestamp: Date.now()
       };
+
+      // Add vision request flag if visual content is detected
+      if (hasVisualContent) {
+        payload.vision_request = true;
+        console.log('[Tetiana][WS] Detected potential visual content, added vision_request flag');
+      }
+
       ws.send(JSON.stringify(payload));
     });
 
