@@ -59,15 +59,11 @@ class AtlasApp {
     
     initMinimalChat() {
         // Ініціалізуємо мінімалістичний чат
-        const chatToggle = document.getElementById('chat-toggle');
         const chatContent = document.getElementById('chat-content');
         
-        if (chatToggle && chatContent) {
-            chatToggle.addEventListener('click', () => {
-                const isVisible = chatContent.style.display !== 'none';
-                chatContent.style.display = isVisible ? 'none' : 'block';
-                chatToggle.textContent = isVisible ? '💬 Chat' : '❌ Close';
-            });
+        if (chatContent) {
+            // Чат завжди видимий
+            chatContent.style.display = 'block';
             
             this.log('Minimal chat initialized');
         }
