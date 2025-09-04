@@ -9,6 +9,7 @@ import axios from 'axios';
 import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
 import path from 'path';
+import os from 'os';
 
 const app = express();
 const PORT = process.env.ORCH_PORT || 5101;
@@ -181,6 +182,8 @@ app.post('/chat/stream', async (req, res) => {
         return res.status(400).json({ error: 'Message is required' });
     }
 
+    logMessage('info', `Incoming /chat/stream message (session=${sessionId || 'n/a'}): ${String(message).slice(0, 200)}`);
+
     const session = sessions.get(sessionId) || { 
         id: sessionId,
         history: [],
@@ -232,6 +235,11 @@ app.post('/chat/stream', async (req, res) => {
     // Process regular message through agent system
     try {
         const response = await processAgentCycle(message, session);
+        try {
+            // Summarize agents and providers for observability
+            const meta = (response || []).map(r => `${r.agent}:${r.provider || 'simulation'}${r.model ? '('+r.model+')' : ''}`).join(', ');
+            logMessage('info', `Processed message for session=${sessionId || 'n/a'} agents=[${meta}]`);
+        } catch {}
         
         res.json({
             success: true,
@@ -265,6 +273,8 @@ app.post('/chat', async (req, res) => {
             return res.status(400).json({ error: 'Message is required' });
         }
 
+    logMessage('info', `Incoming /chat message (session=${sessionId}): ${String(message).slice(0, 200)}`);
+
         // Ensure session exists
         const session = sessions.get(sessionId) || {
             id: sessionId,
@@ -276,6 +286,10 @@ app.post('/chat', async (req, res) => {
 
         // Reuse processing logic
         const response = await processAgentCycle(message, session);
+        try {
+            const meta = (response || []).map(r => `${r.agent}:${r.provider || 'simulation'}${r.model ? '('+r.model+')' : ''}`).join(', ');
+            logMessage('info', `Processed legacy /chat for session=${sessionId} agents=[${meta}]`);
+        } catch {}
 
         return res.json({
             success: true,
@@ -311,6 +325,15 @@ async function processAgentCycle(userMessage, session) {
     responses.push(atlasResponse);
     session.history.push(atlasResponse);
 
+    // If message looks actionable (OS/app/file commands) -> invoke Tetyana to execute
+    if (isActionableTask(userMessage)) {
+        const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\n\nВиконай кроки та коротко звітуй.`;
+        const tetyanaExec = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+        responses.push(tetyanaExec);
+        session.history.push(tetyanaExec);
+        return responses;
+    }
+
     // Phase 2: Grisha reviews plan (if discussion required)
     if (shouldTriggerDiscussion(atlasResponse.content)) {
         const grishaResponse = await generateAgentResponse('grisha', atlasResponse.content, session);
@@ -330,6 +353,17 @@ async function processAgentCycle(userMessage, session) {
     }
 
     return responses;
+}
+
+// Heuristics: detect actionable tasks that require an executor (Tetyana)
+function isActionableTask(text) {
+    const t = (text || '').toLowerCase();
+    const verbs = [
+        'відкрий', 'запусти', 'виконай', 'виконати', 'обчисли', 'порахуй', 'корінь', 'sqrt',
+        'збережи', 'зберегти', 'створи', 'створити', 'на пк', 'на робочому столі', 'на робочий стіл',
+        'відкрий калькулятор', 'калькулятор', 'редактор', 'текстовий файл', 'txt'
+    ];
+    return verbs.some(v => t.includes(v));
 }
 
 // OpenAI-compat failover helpers for Atlas/Grisha
@@ -361,7 +395,7 @@ async function tryOpenAICompatForAgent(agentName, prompt) {
 }
 
 // Real agent integration
-async function generateAgentResponse(agentName, inputMessage, session) {
+async function generateAgentResponse(agentName, inputMessage, session, options = {}) {
     const agent = AGENTS[agentName];
     const messageId = generateMessageId();
     
@@ -374,7 +408,7 @@ async function generateAgentResponse(agentName, inputMessage, session) {
     
     if (agentName === 'tetyana') {
         // Tetiana strictly uses Goose
-        const gooseText = await callGooseAgent(prompt, session.id);
+        const gooseText = await callGooseAgent(prompt, session.id, { enableTools: options.enableTools === true });
         content = gooseText || 'Завдання опрацьовано.';
         provider = 'goose';
         model = 'github_copilot';
@@ -405,17 +439,23 @@ async function generateAgentResponse(agentName, inputMessage, session) {
 }
 
 // Call Goose agent (Tetyana) via WebSocket
-async function callGooseAgent(message, sessionId) {
+async function callGooseAgent(message, sessionId, opts = {}) {
     const gooseBaseUrl = process.env.GOOSE_BASE_URL || 'http://localhost:3000';
     const secretKey = process.env.GOOSE_SECRET_KEY || 'test';
     
     try {
-        // Try WebSocket first (preferred for Goose Web)
+        // If tools are explicitly enabled, prefer SSE (it supports tool_choice)
+        if (opts?.enableTools) {
+            const sseToolsResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey, { enableTools: true });
+            if (sseToolsResult) return sseToolsResult;
+        }
+
+        // Otherwise try WebSocket first (preferred for regular chat)
         const result = await callGooseWebSocket(gooseBaseUrl, message, sessionId, secretKey);
         if (result) return result;
         
-        // Fallback to SSE /reply endpoint
-        const sseResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey);
+        // Fallback to SSE /reply endpoint (tools disabled)
+        const sseResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey, { enableTools: false });
         if (sseResult) return sseResult;
         
     // Final fallback -> signal failure so that upper layer can switch provider
@@ -500,7 +540,7 @@ async function callGooseWebSocket(baseUrl, message, sessionId, secretKey) {
 }
 
 // SSE integration with Goose (fallback)
-async function callGooseSSE(baseUrl, message, sessionId, secretKey) {
+async function callGooseSSE(baseUrl, message, sessionId, secretKey, options = { enableTools: false }) {
     try {
         const url = `${baseUrl}/reply`;
         const headers = {
@@ -509,14 +549,30 @@ async function callGooseSSE(baseUrl, message, sessionId, secretKey) {
             'X-Secret-Key': secretKey
         };
         
-        const payload = {
-            messages: [{
-                role: 'user',
+        // Build OpenAI-compatible messages; include a system instruction to allow tool usage when enabled
+        const messages = [];
+        if (options?.enableTools) {
+            messages.push({
+                role: 'system',
                 created: Math.floor(Date.now() / 1000),
-                content: [{ type: 'text', text: message }]
-            }],
+                content: [{ type: 'text', text: 'You are Tetiana, the executor. Use available tools to perform OS/app/file actions when needed. Prefer real execution over simulation. Keep responses concise.' }]
+            });
+        }
+        messages.push({
+            role: 'user',
+            created: Math.floor(Date.now() / 1000),
+            content: [{ type: 'text', text: message }]
+        });
+
+        // Heuristic: use Desktop as working dir if user explicitly asked to save on Desktop
+        const onDesktop = /робоч(ому|ий) стол|desktop/i.test(message || '');
+        const workingDir = onDesktop ? path.join(os.homedir(), 'Desktop') : process.cwd();
+
+        const payload = {
+            messages,
             session_id: sessionId,
-            session_working_dir: process.cwd()
+            session_working_dir: workingDir,
+            ...(options?.enableTools ? { tool_choice: 'auto' } : {})
         };
         
         const response = await axios.post(url, payload, {
@@ -545,6 +601,13 @@ async function callGooseSSE(baseUrl, message, sessionId, secretKey) {
                                         collected += content.text;
                                     }
                                 }
+                                // Detect tool call hints in message payloads (diagnostic only)
+                                if (obj.message?.tool_calls || obj.tool_calls) {
+                                    console.warn('Goose indicated tool_calls in stream; current orchestrator does not execute tools inline yet.');
+                                }
+                            } else if (obj.type === 'Error' && obj.error) {
+                                // Bubble error into logs for diagnostics
+                                console.error('Goose SSE error frame:', obj.error);
                             } else if (obj.text || obj.content) {
                                 collected += (obj.text || obj.content);
                             }
@@ -563,11 +626,26 @@ async function callGooseSSE(baseUrl, message, sessionId, secretKey) {
             });
             
             response.data.on('error', () => {
+                console.error('Goose SSE stream error:', err?.message || err);
                 resolve(collected.trim() || null);
             });
         });
         
     } catch (error) {
+        try {
+            if (axios.isAxiosError?.(error)) {
+                const status = error.response?.status;
+                const body = error.response?.data;
+                let bodyStr = '';
+                if (typeof body === 'string') bodyStr = body;
+                else if (body && typeof body === 'object') {
+                    try { bodyStr = JSON.stringify(body); } catch { bodyStr = '[non-serializable body]'; }
+                } else bodyStr = String(body || '');
+                console.error('Goose SSE request failed', status, bodyStr.slice(0, 2000));
+            } else {
+                console.error('Goose SSE request error', error?.message || String(error));
+            }
+        } catch {}
         return null;
     }
 }

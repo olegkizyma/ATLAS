@@ -12,6 +12,8 @@ class AtlasChatManager {
     this.frontendBase = (window.ATLAS_CFG && window.ATLAS_CFG.frontendBase) || window.location.origin;
         this.retryCount = 0;
         this.maxRetries = 3;
+    // Persist one session id for the whole page session
+    this.sessionId = `atlas_session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
         
         this.init();
     }
@@ -70,8 +72,8 @@ class AtlasChatManager {
                 const cleanMessage = message.replace(/@?(тетяна|tetyana),?\s*/gi, '').trim();
                 response = await this.sendToTetyana(cleanMessage);
             } else {
-                // Multi-agent conversation via orchestrator
-                response = await this.sendToOrchestrator(message);
+                // Multi-agent conversation via orchestrator (non-streaming JSON)
+                response = await this.callOrchestrator(message);
             }
             
             if (response && response.success) {
@@ -140,7 +142,7 @@ class AtlasChatManager {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({
                 message: message,
-                sessionId: this.generateSessionId(),
+                sessionId: this.sessionId,
                 userId: 'user'
             })
         });
