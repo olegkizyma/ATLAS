@@ -553,16 +553,29 @@ async function mistralChat(system, user, { temperature = 0, timeout = ORCH_GRISH
       // else continue to next model
     }
   }
-  // If Mistral candidates exhausted, try OpenRouter as last-resort (if enabled)
+  // If Mistral candidates exhausted, try local fallback API on port 3010
+  try {
+    if (process.env.DEBUG) console.warn('[Grisha] Mistral candidates exhausted. Switching to local API fallback...');
+    const messages = [
+      { role: 'system', content: system },
+      { role: 'user', content: user }
+    ];
+    return await callFallbackAPI(messages, FALLBACK_MODELS.grisha, { temperature, timeout });
+  } catch (e) {
+    lastErr = e;
+    if (process.env.DEBUG) console.warn('[Grisha] Local API fallback also failed:', e.message);
+  }
+  
+  // If local API also fails, try OpenRouter as final resort (if enabled)
   if (ORCH_ENABLE_OPENROUTER_FALLBACK && OPENROUTER_API_KEY) {
     try {
-      if (process.env.DEBUG) console.warn('[Grisha] Mistral candidates exhausted. Switching to OpenRouter cascade...');
+      if (process.env.DEBUG) console.warn('[Grisha] Local API failed. Trying OpenRouter as final resort...');
       return await openRouterChat(system, user, { temperature, timeout });
     } catch (e) {
       lastErr = e;
     }
   }
-  throw lastErr || new Error('Mistral/OpenRouter call failed for all candidate models');
+  throw lastErr || new Error('Mistral/Local API/OpenRouter call failed for all fallback options');
 }
 
 async function mistralJsonOnly(system, user, { maxAttempts = ORCH_GRISHA_MAX_ATTEMPTS, temperature = 0, sessionId = null } = {}) {
