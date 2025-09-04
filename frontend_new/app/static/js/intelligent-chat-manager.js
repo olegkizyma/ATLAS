@@ -190,7 +190,7 @@ class AtlasIntelligentChatManager {
             this.log('[VOICE] Warning: voice-toggle button not found');
         }
         
-        // Додаємо індикатор поточного агента
+        // Додаємо індикатор поточного агента (праворуч у верхньому куті)
         const agentIndicator = document.createElement('div');
         agentIndicator.id = 'current-agent';
         agentIndicator.className = 'agent-indicator';
@@ -199,6 +199,23 @@ class AtlasIntelligentChatManager {
         const chatContainer = this.chatContainer.parentElement;
         if (chatContainer) {
             chatContainer.insertBefore(agentIndicator, this.chatContainer);
+            // Поруч з індикатором агента монтуємо точки статусів
+            const statusDots = document.createElement('div');
+            statusDots.id = 'status-dots';
+            statusDots.className = 'status-dots';
+            statusDots.innerHTML = `
+                <span class="status-dot" id="dot-frontend" data-tooltip="Frontend: initializing" title="Frontend: initializing"></span>
+                <span class="status-dot" id="dot-orchestrator" data-tooltip="Orchestrator: connecting" title="Orchestrator: connecting"></span>
+                <span class="status-dot" id="dot-recovery" data-tooltip="Recovery: connecting" title="Recovery: connecting"></span>
+                <span class="status-dot" id="dot-tts" data-tooltip="TTS: checking" title="TTS: checking"></span>
+            `;
+            agentIndicator.parentElement.insertBefore(statusDots, agentIndicator);
+            // Попросимо статус-менеджер негайно оновити стан точок
+            try {
+                if (window.atlasStatus && typeof window.atlasStatus.updateStatus === 'function') {
+                    window.atlasStatus.updateStatus();
+                }
+            } catch (_) {}
         }
     }
     

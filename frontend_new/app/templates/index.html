@@ -31,23 +31,13 @@
 
     <!-- Main Container -->
     <div class="container">
-        <!-- Header removed -->
+    <!-- Status dots will be mounted next to the right-side logo (agent-indicator) dynamically -->
 
         <!-- Main Content -->
         <div class="main-content">
             <!-- Left Panel - Logs Stream (expanded to full width) -->
             <div class="logs-panel full-width">
                 <div id="logs-container" class="logs-container">
-                    <div class="log-item system">
-                        <span class="timestamp">[{{ current_time }}]</span>
-                        <span class="level">INFO</span>
-                        <span class="message">ATLAS Frontend v2.0 initialized</span>
-                    </div>
-                    <div class="log-item system">
-                        <span class="timestamp">[{{ current_time }}]</span>
-                        <span class="level">INFO</span>
-                        <span class="message">Waiting for Atlas Core connection...</span>
-                    </div>
                 </div>
             </div>
 
@@ -55,15 +45,7 @@
             <div class="minimal-chat-panel">
                 <div class="chat-content" id="chat-content">
                     <div id="chat-container" class="chat-container">
-                        <div class="message system">
-                            <div class="message-header">
-                                <span class="sender">ATLAS</span>
-                                <span class="timestamp">{{ current_time }}</span>
-                            </div>
-                            <div class="message-content">
-                                Система ініціалізована. Очікую підключення до Atlas Core...
-                            </div>
-                        </div>
+                        <!-- Початкові системні повідомлення видалено на користь точок-індикаторів -->
                     </div>
                     <div class="input-container">
                         <input
@@ -90,22 +72,6 @@
             </div>
         </div>
 
-    </div>
-
-    <!-- Status Panel -->
-    <div id="statusPanel" class="status-panel">
-        <div class="status-item" id="frontend-status">
-            <span>Frontend: </span><span id="frontend-status-text">Initializing...</span>
-        </div>
-        <div class="status-item" id="orchestrator-status">
-            <span>Orchestrator: </span><span id="orchestrator-status-text">Connecting...</span>
-        </div>
-        <div class="status-item" id="recovery-status">
-            <span>Recovery: </span><span id="recovery-status-text">Connecting...</span>
-        </div>
-        <div class="status-item" id="tts-status">
-            <span>TTS: </span><span id="tts-status-text">Checking...</span>
-        </div>
     </div>
 
     <!-- Loading Overlay -->

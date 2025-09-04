@@ -12,6 +12,7 @@ class AtlasLogger {
         this.lastRefresh = 0;
         this.lastActivity = Date.now();
         this.isActive = false;
+        this.lastLogTimestamp = null; // Трекінг останнього лога для оптимізації
         
         this.init();
     }
@@ -86,25 +87,39 @@ class AtlasLogger {
     }
     
     displayLogs(newLogs) {
-        // Очищуємо контейнер
-        this.logsContainer.innerHTML = '';
+        // Не очищуємо контейнер! Логи повинні накопичуватися
         
-        // Показуємо останні логи (не більше maxLogs) - від нових до старих
-        const logsToShow = newLogs.slice(-this.maxLogs).reverse();
+        // Фільтруємо тільки нові логи (новіші за останній відомий timestamp)
+        let logsToAdd = newLogs;
+        if (this.lastLogTimestamp) {
+            logsToAdd = newLogs.filter(log => {
+                const logTime = new Date(log.timestamp).getTime();
+                const lastTime = new Date(this.lastLogTimestamp).getTime();
+                return logTime > lastTime;
+            });
+        }
         
-        logsToShow.forEach(log => {
-            const logElement = document.createElement('div');
-            logElement.className = `log-line ${log.level || 'info'}`;
-            
+        // Додаємо тільки нові логи
+        logsToAdd.forEach(log => {
             const timestamp = log.timestamp || new Date().toTimeString().split(' ')[0];
             const source = log.source ? `[${log.source}]` : '';
             const message = log.message || '';
             
+            const logElement = document.createElement('div');
+            logElement.className = `log-line ${log.level || 'info'}`;
             logElement.textContent = `${timestamp} ${source} ${message}`;
-            this.logsContainer.appendChild(logElement);
+            
+            // Додаємо новий лог зверху (як титри)
+            this.logsContainer.insertBefore(logElement, this.logsContainer.firstChild);
+            
+            // Оновлюємо останній timestamp
+            this.lastLogTimestamp = log.timestamp;
         });
         
-        // Залишаємо скрол зверху (не скролимо вниз)
+        // Обмежуємо кількість логів на екрані (видаляємо старі знизу)
+        while (this.logsContainer.children.length > this.maxLogs) {
+            this.logsContainer.removeChild(this.logsContainer.lastChild);
+        }
     }
     
     addLog(message, level = 'info', source = 'frontend') {

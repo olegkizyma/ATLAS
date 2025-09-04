@@ -5,25 +5,19 @@
 class AtlasStatusManager {
     constructor() {
         this.apiBase = window.location.origin;
-        this.refreshInterval = 15000; // 15 секунд замість 5 - менше навантаження
+    this.refreshInterval = 5000; // частіше, щоб статуси були «живими»
         this.lastRefresh = 0;
         
         this.init();
     }
     
     init() {
-        this.statusPanel = document.getElementById('statusPanel');
-        this.processStatus = document.getElementById('processStatus');
-        this.serviceStatus = document.getElementById('serviceStatus');
-        this.networkStatus = document.getElementById('networkStatus');
-        this.resourceStatus = document.getElementById('resourceStatus');
+    // Точки-індикатори біля бейджа ATLAS
+    this.bindDots();
         
-        if (!this.statusPanel) {
-            // Status panel not found - running in minimal interface mode
-            this.log('Running in minimal interface mode (no status panel)');
-            return;
-        }
-        
+        // Кліки по точках показують підказки
+    this.attachDotListeners();
+
         this.startStatusMonitoring();
         this.log('Atlas Status Manager initialized');
     }
@@ -47,87 +41,107 @@ class AtlasStatusManager {
         this.lastRefresh = now;
         
         try {
+            // Якщо точки ще не ініціалізовані (створюються пізніше праворуч) — пробуємо прив'язатися знову
+            if (!this.dotFrontend || !this.dotOrchestrator || !this.dotRecovery || !this.dotTts) {
+                this.bindDots();
+                this.attachDotListeners();
+            }
             const response = await fetch(`${this.apiBase}/api/status`);
             if (!response.ok) return;
             
             const status = await response.json();
-            this.renderStatus(status);
+            this.renderDots(status);
             
         } catch (error) {
-            this.renderStatus({
-                error: 'Connection failed',
-                timestamp: new Date().toISOString()
-            });
+            this.renderDots(null);
         }
     }
-    
-    renderStatus(status) {
-        try {
-            // Процеси
-            if (status.processes && this.processStatus) {
-                const processHTML = Object.entries(status.processes).map(([type, info]) => {
-                    const count = info.count || 0;
-                    const statusClass = count > 0 ? 'online' : 'warning';
-                    return `<div class="status-item ${statusClass}">${type}: ${count}</div>`;
-                }).join('');
-                this.processStatus.innerHTML = processHTML;
+
+    renderDots(status) {
+        const setDot = (el, state, tooltip) => {
+            if (!el) return;
+            el.classList.remove('online', 'offline', 'warning');
+            el.classList.add(state);
+            if (tooltip) {
+                el.setAttribute('data-tooltip', tooltip);
+                el.setAttribute('title', tooltip);
             }
-            
-            // Сервіси
-            if (status.services && this.serviceStatus) {
-                const serviceHTML = Object.entries(status.services).map(([name, serviceStatus]) => {
-                    let statusClass = 'warning';
-                    const statusValue = typeof serviceStatus === 'object' ? serviceStatus.status : serviceStatus;
-                    
-                    if (statusValue === 'running' || statusValue === 'online' || statusValue === 'operational') {
-                        statusClass = 'online';
-                    } else if (statusValue === 'offline' || statusValue === 'error') {
-                        statusClass = 'error';
-                    }
-                    
-                    return `<div class="status-item ${statusClass}">${name}: ${statusValue}</div>`;
-                }).join('');
-                this.serviceStatus.innerHTML = serviceHTML;
-            }
-            
-            // Мережа
-            if (status.network && this.networkStatus) {
-                const connCount = status.network.connections?.count || 0;
-                const statusClass = connCount > 0 ? 'online' : 'warning';
-                this.networkStatus.innerHTML = `<div class="status-item ${statusClass}">Connections: ${connCount}</div>`;
-            }
-            
-            // Ресурси
-            if (this.resourceStatus) {
-                let resourceHTML = '';
-                
-                if (status.resources) {
-                    if (status.resources.cpu?.usage_line) {
-                        const cpuInfo = status.resources.cpu.usage_line.substring(0, 30) + '...';
-                        resourceHTML += `<div class="status-item online">CPU: ${cpuInfo}</div>`;
-                    }
-                    
-                    if (status.resources.disk?.usage_percent) {
-                        const diskUsage = status.resources.disk.usage_percent;
-                        const usageNum = parseInt(diskUsage);
-                        const statusClass = usageNum > 90 ? 'error' : usageNum > 70 ? 'warning' : 'online';
-                        resourceHTML += `<div class="status-item ${statusClass}">Disk: ${diskUsage}</div>`;
-                    }
-                }
-                
-                // Atlas Core статус
-                if (status.services?.atlas_core_available) {
-                    resourceHTML += `<div class="status-item online">🧠 Atlas Core: Ready</div>`;
-                } else {
-                    resourceHTML += `<div class="status-item warning">🧠 Atlas Core: Unavailable</div>`;
-                }
-                
-                this.resourceStatus.innerHTML = resourceHTML;
-            }
-            
-        } catch (error) {
-            this.log(`Status rendering error: ${error.message}`, 'error');
+        };
+
+        if (!status || !status.processes) {
+            setDot(this.dotFrontend, 'warning', 'Frontend: unknown');
+            setDot(this.dotOrchestrator, 'warning', 'Orchestrator: unknown');
+            setDot(this.dotRecovery, 'warning', 'Recovery: unknown');
+            setDot(this.dotTts, 'warning', 'TTS: unknown');
+            return;
         }
+
+        const p = status.processes;
+        const mapState = (val) => {
+            if (!val) return 'warning';
+            const s = typeof val === 'string' ? val : val.status;
+            if (s === 'running' || s === 'online' || (val.count && val.count > 0)) return 'online';
+            if (s === 'error' || s === 'stopped' || s === 'offline') return 'offline';
+            return 'warning';
+        };
+
+        setDot(this.dotFrontend, mapState(p.frontend), `Frontend: ${p.frontend?.status || 'unknown'}`);
+        setDot(this.dotOrchestrator, mapState(p.orchestrator), `Orchestrator: ${p.orchestrator?.status || 'unknown'}`);
+        setDot(this.dotRecovery, mapState(p.recovery), `Recovery: ${p.recovery?.status || 'unknown'}`);
+        setDot(this.dotTts, mapState(p.tts), `TTS: ${p.tts?.status || 'unknown'}`);
+    }
+
+    bindDots() {
+        this.dotFrontend = document.getElementById('dot-frontend');
+        this.dotOrchestrator = document.getElementById('dot-orchestrator');
+        this.dotRecovery = document.getElementById('dot-recovery');
+        this.dotTts = document.getElementById('dot-tts');
+    }
+
+    attachDotListeners() {
+        [
+            [this.dotFrontend, 'Frontend'],
+            [this.dotOrchestrator, 'Orchestrator'],
+            [this.dotRecovery, 'Recovery'],
+            [this.dotTts, 'TTS']
+        ].forEach(([el, name]) => {
+            if (!el || el._hasListener) return;
+            el.addEventListener('click', () => {
+                const tip = el.getAttribute('data-tooltip') || `${name}`;
+                this.showTooltip(el, tip);
+            });
+            el._hasListener = true;
+        });
+    }
+
+    showTooltip(el, text) {
+        if (!el) return;
+        let tipEl = el.querySelector('.dot-tooltip');
+        if (!tipEl) {
+            tipEl = document.createElement('div');
+            tipEl.className = 'dot-tooltip';
+            Object.assign(tipEl.style, {
+                position: 'absolute',
+                left: '50%',
+                transform: 'translateX(-50%)',
+                top: '18px',
+                background: 'rgba(0,0,0,0.85)',
+                color: '#9cffc7',
+                border: '1px solid rgba(0,255,127,0.3)',
+                padding: '3px 6px',
+                fontSize: '10px',
+                borderRadius: '4px',
+                whiteSpace: 'nowrap',
+                zIndex: '1200'
+            });
+            el.appendChild(tipEl);
+        }
+        tipEl.textContent = text;
+        tipEl.style.opacity = '1';
+        clearTimeout(el._tipTimer);
+        el._tipTimer = setTimeout(() => {
+            tipEl.style.opacity = '0';
+        }, 1500);
     }
     
     log(message, level = 'info') {

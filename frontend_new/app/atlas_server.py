@@ -108,17 +108,38 @@ def get_logs():
             if log_path.exists():
                 try:
                     with open(log_path, 'r') as f:
-                        lines = f.readlines()[-limit:]
+                        lines = f.readlines()[-limit*2:]  # Читаємо більше рядків для фільтрації
                         for line in lines:
-                            if line.strip():
-                                logs.append({
-                                    'timestamp': datetime.now().isoformat(),
-                                    'source': log_path.name,
-                                    'message': line.strip()
-                                })
+                            line = line.strip()
+                            if line and len(line) > 10:  # Пропускаємо дуже короткі рядки
+                                # Витягуємо timestamp з логу (формат: 2025-09-04 20:19:54,360)
+                                import re
+                                timestamp_match = re.match(r'^(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3})', line)
+                                if timestamp_match:
+                                    timestamp = timestamp_match.group(1)
+                                    # Витягуємо рівень логування [INFO], [ERROR], тощо
+                                    level_match = re.search(r'\[(\w+)\]', line)
+                                    level = level_match.group(1).lower() if level_match else 'info'
+                                    
+                                    logs.append({
+                                        'timestamp': timestamp,
+                                        'source': log_path.name.replace('.log', ''),
+                                        'level': level,
+                                        'message': line
+                                    })
+                                else:
+                                    # Якщо не можемо парсити timestamp, створюємо простий лог
+                                    logs.append({
+                                        'timestamp': datetime.now().strftime('%Y-%m-%d %H:%M:%S,%f')[:-3],
+                                        'source': log_path.name.replace('.log', ''),
+                                        'level': 'info',
+                                        'message': line
+                                    })
                 except Exception as e:
                     logger.warning(f"Failed to read {log_file}: {e}")
         
+        # Сортуємо логи по часу (нові останні) і повертаємо тільки останні
+        logs.sort(key=lambda x: x['timestamp'])
         return jsonify({'logs': logs[-limit:]})
     except Exception as e:
         logger.error(f"Error getting logs: {e}")
