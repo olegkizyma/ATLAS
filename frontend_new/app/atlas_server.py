@@ -64,7 +64,7 @@ AGENT_VOICES = {
         'color': '#00ffff'
     },
     'grisha': {
-        'voice': 'robot',
+    'voice': 'mykyta',
         'signature': '[ГРИША]',
         'color': '#ffff00'
     }
@@ -130,6 +130,7 @@ def voice_health():
     try:
         tts_status = check_tts_health()
         return jsonify({
+            'success': True,
             'status': tts_status,
             'timestamp': datetime.now().isoformat(),
             'tts_url': TTS_SERVER_URL,
@@ -137,7 +138,7 @@ def voice_health():
         })
     except Exception as e:
         logger.error(f"Error checking voice health: {e}")
-        return jsonify({'status': 'error', 'available': False}), 500
+        return jsonify({'success': False, 'status': 'error', 'available': False}), 500
 
 @app.route('/api/agents')
 def get_agents():
@@ -257,6 +258,10 @@ def synthesize_voice():
         data = request.get_json()
         text = data.get('text', '')
         agent = data.get('agent', 'atlas')
+        req_voice = data.get('voice')
+        req_fx = data.get('fx')
+        req_rate = data.get('rate')  # 1.0 по умолчанию
+        req_speed = data.get('speed')  # совместимость, приоритетнее, если задано
         
         if not text.strip():
             return jsonify({'error': 'Text is required'}), 400
@@ -264,47 +269,46 @@ def synthesize_voice():
         if agent not in AGENT_VOICES:
             return jsonify({'error': f'Unknown agent: {agent}'}), 400
             
-        voice_name = AGENT_VOICES[agent]['voice']
+        # Базовые значения по агенту
+        agent_defaults = AGENT_VOICES.get(agent, {})
+        voice_name = req_voice or agent_defaults.get('voice', 'dmytro')
+        fx = req_fx
+        if fx is None:
+            # Попробуем получить из /api/voice/agents маппинга — по умолчанию none
+            fx = 'none'
+        # Преобразуем rate -> speed (простое соответствие)
+        speed = float(req_speed if req_speed is not None else (req_rate if req_rate is not None else 1.0))
         
         # Try Ukrainian TTS server first
         if requests:
             try:
-                # Ukrainian TTS server expects /tts and returns JSON by default.
-                # Ask it to return an audio WAV file directly.
+                tts_payload = {
+                    'text': text,
+                    'voice': voice_name,
+                    'fx': fx,
+                    'speed': speed,
+                    'agent': agent,
+                    'return_audio': True
+                }
                 tts_response = requests.post(
                     f'{TTS_SERVER_URL}/tts',
-                    json={
-                        'text': text,
-                        'voice': voice_name,
-                        'agent': agent,
-                        'return_audio': True
-                    },
-                    timeout=15
+                    json=tts_payload,
+                    timeout=20
                 )
                 
                 if tts_response.status_code == 200:
-                    # If server returned a file, forward it as audio/wav
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
                         temp_file.write(tts_response.content)
                         temp_path = temp_file.name
-                    
-                    return send_file(temp_path, 
-                                   mimetype='audio/wav',
-                                   as_attachment=False,
-                                   download_name=f'{agent}_{int(datetime.now().timestamp())}.wav')
-                
+                    return send_file(temp_path, mimetype='audio/wav', as_attachment=False,
+                                     download_name=f'{agent}_{int(datetime.now().timestamp())}.wav')
+                else:
+                    logger.warning(f"TTS server HTTP {tts_response.status_code}: {tts_response.text[:200]}")
             except Exception as e:
-                logger.warning(f"TTS server unavailable, falling back to browser TTS: {e}")
+                logger.warning(f"TTS server unavailable: {e}")
         
-        # Fallback: return success for Web Speech API to handle
-        return jsonify({
-            'success': True,
-            'fallback': True,
-            'message': 'Using browser TTS',
-            'text': text,
-            'agent': agent,
-            'voice': voice_name
-        })
+        # Не используем браузерный Web Speech: сигнализируем об ошибке TTS
+        return jsonify({'error': 'TTS server unavailable or failed'}), 502
         
     except Exception as e:
         logger.error(f"TTS synthesis error: {e}")
@@ -397,6 +401,35 @@ def system_status():
         },
         'agents': AGENT_VOICES
     })
+
+@app.route('/api/voice/agents')
+def voice_agents():
+    """Return voice mapping for agents and available voices with uk-UA locale"""
+    try:
+        voices_list = []
+        if requests:
+            try:
+                r = requests.get(f"{TTS_SERVER_URL}/voices", timeout=5)
+                if r.status_code == 200:
+                    payload = r.json()
+                    voices_list = payload.get('voices', [])
+            except Exception as e:
+                logger.warning(f"Failed to fetch voices: {e}")
+        agents = {
+            'atlas': { **AGENT_VOICES.get('atlas', {}), 'lang': 'uk-UA', 'fx': 'none', 'rate': 1.0, 'pitch': 1.0 },
+            'tetyana': { **AGENT_VOICES.get('tetyana', {}), 'lang': 'uk-UA', 'fx': 'none', 'rate': 1.0, 'pitch': 1.05 },
+            # Для українського TTS використовуємо голос 'mykyta' та вимикаємо спец-ефекти
+            'grisha': { **AGENT_VOICES.get('grisha', {}), 'lang': 'uk-UA', 'fx': 'none', 'rate': 1.1, 'pitch': 0.9 }
+        }
+        return jsonify({
+            'success': True,
+            'agents': agents,
+            'availableVoices': voices_list,
+            'locale': 'uk-UA'
+        })
+    except Exception as e:
+        logger.error(f"Error building voice agents: {e}")
+        return jsonify({'success': False, 'error': 'Failed to build agents'}), 500
 
 def check_orchestrator_health():
     """Check if orchestrator is responding"""

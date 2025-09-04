@@ -89,8 +89,8 @@ class AtlasLogger {
         // Очищуємо контейнер
         this.logsContainer.innerHTML = '';
         
-        // Показуємо останні логи (не більше maxLogs)
-        const logsToShow = newLogs.slice(-this.maxLogs);
+        // Показуємо останні логи (не більше maxLogs) - від нових до старих
+        const logsToShow = newLogs.slice(-this.maxLogs).reverse();
         
         logsToShow.forEach(log => {
             const logElement = document.createElement('div');
@@ -104,8 +104,7 @@ class AtlasLogger {
             this.logsContainer.appendChild(logElement);
         });
         
-        // Автоскрол до низу
-        this.logsContainer.scrollTop = this.logsContainer.scrollHeight;
+        // Залишаємо скрол зверху (не скролимо вниз)
     }
     
     addLog(message, level = 'info', source = 'frontend') {
@@ -123,17 +122,19 @@ class AtlasLogger {
             this.logs = this.logs.slice(-this.maxLogs);
         }
         
-        // Додаємо до інтерфейсу
+        // Додаємо до інтерфейсу (зверху)
         const logElement = document.createElement('div');
         logElement.className = `log-line ${level}`;
         logElement.textContent = `${logEntry.timestamp} [${source}] ${message}`;
         
-        this.logsContainer.appendChild(logElement);
-        this.logsContainer.scrollTop = this.logsContainer.scrollHeight;
+        // Вставляємо новий лог зверху (як перший елемент)
+        this.logsContainer.insertBefore(logElement, this.logsContainer.firstChild);
         
-        // Видаляємо старі елементи DOM
+        // Залишаємо скрол зверху (не міняємо scrollTop)
+        
+        // Видаляємо старі елементи DOM (знизу)
         while (this.logsContainer.children.length > this.maxLogs) {
-            this.logsContainer.removeChild(this.logsContainer.firstChild);
+            this.logsContainer.removeChild(this.logsContainer.lastChild);
         }
     }
     

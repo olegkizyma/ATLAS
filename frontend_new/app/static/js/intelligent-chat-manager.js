@@ -37,15 +37,18 @@ class AtlasIntelligentChatManager {
                 grisha: { 
                     signature: '[ГРИША]', 
                     color: '#ffff00', 
-                    voice: 'robot',
+            voice: 'mykyta',
                     pitch: 0.9,
                     rate: 1.1,
                     priority: 3 
                 }
             },
             currentAudio: null,
-            fallbackVoices: ['dmytro', 'oleksa', 'robot'], // Загальний список фолбеків (Тетяна їх не використовує)
+        // Загальний список фолбеків (тільки валідні голоси українського TTS)
+        fallbackVoices: ['dmytro', 'oleksa', 'mykyta', 'tetiana'],
             maxRetries: 2,
+        // Глобальний прапорець дозволу Web Speech API як фолбеку (за замовчуванням вимкнено)
+        allowWebSpeechFallback: false,
             // TTS synchronization system
             agentMessages: new Map(), // Store accumulated messages per agent  
             ttsQueue: [], // Queue for TTS processing
@@ -83,7 +86,13 @@ class AtlasIntelligentChatManager {
             dispatchEvents: true,
             // Хуки керування кроками виконання (за потреби заміни цими методами зовні)
             onTTSStart: () => {},
-            onTTSEnd: () => {}
+            onTTSEnd: () => {},
+            // Строга синхронізація агентів: кожен агент чекає завершення попереднього
+            strictAgentOrder: true,
+            // Максимальний час очікування завершення TTS перед форсуванням (мс)
+            maxWaitTime: 30000,
+            // Прапорець для відстеження стану синхронізації
+            isWaitingForTTS: false
         };
         
         this.init();
@@ -124,7 +133,8 @@ class AtlasIntelligentChatManager {
             const response = await fetch(`${this.frontendBase}/api/voice/health`);
             if (response.ok) {
                 const data = await response.json();
-                this.voiceSystem.enabled = data.success;
+                // Раніше очікувалось data.success; API повертає available/status
+                this.voiceSystem.enabled = (data && (data.success === true || data.available === true || String(data.status || '').toLowerCase() === 'running'));
                 this.log(`[VOICE] Voice system ${this.voiceSystem.enabled ? 'enabled' : 'disabled'}`);
                 
                 if (this.voiceSystem.enabled) {
@@ -215,13 +225,24 @@ class AtlasIntelligentChatManager {
     
     async sendMessage() {
         const message = this.chatInput.value.trim();
-        if (!message || this.isStreaming) {
+        if (!message || this.isStreaming || this.ttsSync.isWaitingForTTS) {
+            this.log('[CHAT] Message blocked: streaming or waiting for TTS');
             return;
         }
         
         // За потреби — чекаємо завершення поточного озвучування перед надсиланням нового повідомлення
         if (this.ttsSync.blockNextMessageUntilTTSComplete) {
-            await this.waitForTTSIdle(15000); // м'який таймаут 15с, щоб не блокувати назавжди
+            this.ttsSync.isWaitingForTTS = true;
+            this.setInputState(false);
+            this.log('[CHAT] Waiting for TTS to complete before sending message...');
+            
+            try {
+                await this.waitForTTSIdle(this.ttsSync.maxWaitTime);
+            } catch (error) {
+                this.log(`[CHAT] TTS wait error: ${error.message}`);
+            } finally {
+                this.ttsSync.isWaitingForTTS = false;
+            }
         }
         
         this.addMessage(message, 'user');
@@ -236,6 +257,10 @@ class AtlasIntelligentChatManager {
             this.log(`[ERROR] Failed to send message: ${error.message}`);
             this.addMessage(`❌ Помилка відправки: ${error.message}`, 'error');
         } finally {
+            // Додаткова перевірка: чекаємо завершення всіх TTS перед розблокуванням
+            if (this.ttsSync.strictAgentOrder) {
+                await this.waitForTTSIdle(5000);
+            }
             this.setInputState(true);
         }
     }
@@ -244,20 +269,49 @@ class AtlasIntelligentChatManager {
     async waitForTTSIdle(timeoutMs = 20000) {
         try {
             const start = Date.now();
+            this.log(`[TTS] Waiting for TTS idle (timeout: ${timeoutMs}ms)`);
+            
             // Швидкий вихід, якщо нічого не відтворюється
-            if (!this.voiceSystem.currentAudio && this.voiceSystem.ttsQueue.length === 0) return;
+            if (!this.voiceSystem.currentAudio && 
+                this.voiceSystem.ttsQueue.length === 0 && 
+                !this.voiceSystem.isProcessingTTS) {
+                this.log('[TTS] Already idle, returning immediately');
+                return;
+            }
             
             await new Promise(resolve => {
                 const check = () => {
-                    const idle = (!this.voiceSystem.currentAudio || this.voiceSystem.currentAudio.paused || this.voiceSystem.currentAudio.ended)
-                                  && this.voiceSystem.ttsQueue.length === 0;
-                    if (idle) return resolve();
-                    if (Date.now() - start > timeoutMs) return resolve();
+                    const isCurrentAudioIdle = !this.voiceSystem.currentAudio || 
+                                               this.voiceSystem.currentAudio.paused || 
+                                               this.voiceSystem.currentAudio.ended;
+                    const isQueueEmpty = this.voiceSystem.ttsQueue.length === 0;
+                    const isNotProcessing = !this.voiceSystem.isProcessingTTS;
+                    
+                    const idle = isCurrentAudioIdle && isQueueEmpty && isNotProcessing;
+                    
+                    if (idle) {
+                        this.log('[TTS] TTS is now idle');
+                        return resolve();
+                    }
+                    
+                    if (Date.now() - start > timeoutMs) {
+                        this.log(`[TTS] TTS wait timeout after ${timeoutMs}ms`);
+                        return resolve();
+                    }
+                    
                     setTimeout(check, 200);
                 };
                 check();
             });
-        } catch (_) { /* no-op */ }
+            
+            // Додаткова пауза для стабільності
+            if (this.ttsSync.strictAgentOrder) {
+                await new Promise(resolve => setTimeout(resolve, 300));
+            }
+            
+        } catch (error) {
+            this.log(`[TTS] Wait for idle error: ${error.message}`);
+        }
     }
     
     async handleIntelligentResponse(data) {
@@ -589,27 +643,57 @@ class AtlasIntelligentChatManager {
         }
 
         this.voiceSystem.isProcessingTTS = true;
+        this.log(`[TTS] Starting TTS queue processing (${this.voiceSystem.ttsQueue.length} items)`);
 
         try {
             while (this.voiceSystem.ttsQueue.length > 0) {
                 const ttsItem = this.voiceSystem.ttsQueue.shift();
+                this.log(`[TTS] Processing queue item for ${ttsItem.agent}: "${ttsItem.text.substring(0, 50)}..."`);
                 
-                // Wait for current TTS to finish
-                if (this.voiceSystem.currentAudio && !this.voiceSystem.currentAudio.paused) {
+                // Wait for current TTS to finish if strict ordering is enabled
+                if (this.ttsSync.strictAgentOrder && this.voiceSystem.currentAudio && !this.voiceSystem.currentAudio.paused) {
+                    this.log('[TTS] Waiting for current audio to finish (strict ordering)');
                     await new Promise(resolve => {
-                        this.voiceSystem.currentAudio.onended = resolve;
+                        const checkFinished = () => {
+                            if (!this.voiceSystem.currentAudio || 
+                                this.voiceSystem.currentAudio.paused || 
+                                this.voiceSystem.currentAudio.ended) {
+                                resolve();
+                            } else {
+                                setTimeout(checkFinished, 100);
+                            }
+                        };
+                        
+                        // Set up onended handler as backup
+                        if (this.voiceSystem.currentAudio) {
+                            this.voiceSystem.currentAudio.onended = resolve;
+                        }
+                        
                         // Timeout after 30 seconds
                         setTimeout(resolve, 30000);
+                        
+                        checkFinished();
                     });
                 }
 
-                // Synthesize the text
+                // Synthesize the text with agent-specific settings
                 await this.synthesizeAndPlay(ttsItem.text, ttsItem.agent);
+                
+                // Add delay between agents for natural flow
+                if (this.ttsSync.strictAgentOrder && this.voiceSystem.ttsQueue.length > 0) {
+                    await new Promise(resolve => setTimeout(resolve, 500));
+                }
             }
         } catch (error) {
-            this.log(`[VOICE] TTS queue processing error: ${error.message}`);
+            this.log(`[TTS] TTS queue processing error: ${error.message}`);
         } finally {
             this.voiceSystem.isProcessingTTS = false;
+            this.log('[TTS] TTS queue processing completed');
+            
+            // Notify that TTS processing is done
+            if (this.ttsSync.dispatchEvents) {
+                window.dispatchEvent(new CustomEvent('atlas-tts-queue-complete'));
+            }
         }
     }
 
@@ -636,6 +720,10 @@ class AtlasIntelligentChatManager {
             
             this.log(`[VOICE] Synthesizing ${agent} voice with ${voice} (attempt ${retryCount + 1})`);
             
+            // Таймаут через AbortController (браузерна fetch не підтримує timeout опцію)
+            const controller = new AbortController();
+            const t = setTimeout(() => controller.abort(), 15000);
+            
             // Синтезуємо голос з налаштуваннями агента
             const response = await fetch(`${this.frontendBase}/api/voice/synthesize`, {
                 method: 'POST',
@@ -649,56 +737,59 @@ class AtlasIntelligentChatManager {
                     pitch: agentConfig.pitch || 1.0,
                     rate: agentConfig.rate || 1.0
                 }),
-                timeout: 15000 // 15 second timeout for TTS
+                signal: controller.signal
             });
+            clearTimeout(t);
             
             if (!response.ok) {
-                // If specific voice fails, try fallback (крім Тетяни)
-                if (!agentConfig.noFallback && retryCount < this.voiceSystem.maxRetries) {
+                // Дозволяємо ретраї для всіх агентів; фолбек-голос лише якщо дозволено
+                if (retryCount < this.voiceSystem.maxRetries) {
+                    this.log(`[VOICE] TTS HTTP ${response.status}. Retrying...`);
+                    await this.delay(500 * (retryCount + 1));
+                    return await this.synthesizeAndPlay(text, agent, retryCount + 1);
+                }
+                if (!agentConfig.noFallback) {
                     const fallbackVoice = this.voiceSystem.fallbackVoices[retryCount % this.voiceSystem.fallbackVoices.length];
-                    this.log(`[VOICE] Voice synthesis failed, trying fallback: ${fallbackVoice}`);
-                    
+                    this.log(`[VOICE] Voice synthesis failed, trying fallback voice: ${fallbackVoice}`);
+                    const controller2 = new AbortController();
+                    const t2 = setTimeout(() => controller2.abort(), 15000);
                     const fallbackResponse = await fetch(`${this.frontendBase}/api/voice/synthesize`, {
                         method: 'POST',
-                        headers: {
-                            'Content-Type': 'application/json'
-                        },
-                        body: JSON.stringify({
-                            text: speechText,
-                            agent: agent,
-                            voice: fallbackVoice,
-                            pitch: 1.0,
-                            rate: 1.0
-                        }),
-                        timeout: 15000
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: speechText, agent, voice: fallbackVoice, pitch: 1.0, rate: 1.0 }),
+                        signal: controller2.signal
                     });
-                    
-                    if (!fallbackResponse.ok) {
-                        throw new Error(`Fallback TTS failed: ${fallbackResponse.status}`);
-                    }
-                    
+                    clearTimeout(t2);
+                    if (!fallbackResponse.ok) throw new Error(`Fallback TTS failed: ${fallbackResponse.status}`);
                     const audioBlob = await fallbackResponse.blob();
-                    return await this.playAudioBlob(audioBlob, `${agent} (fallback: ${fallbackVoice})`);
-                } else {
-                    throw new Error(`TTS synthesis failed: ${response.status}`);
+                    return await this.playAudioBlob(audioBlob, `${agent} (fallback: ${fallbackVoice})`, { agent, text: speechText });
                 }
+                throw new Error(`TTS synthesis failed: ${response.status}`);
             }
             
             const audioBlob = await response.blob();
+            console.log(`[ATLAS-TTS] Received audio blob for ${agent}: size=${audioBlob.size}, type=${audioBlob.type}`);
+            
+            if (audioBlob.size === 0) {
+                console.error(`[ATLAS-TTS] Empty audio blob received for ${agent}`);
+                throw new Error('Empty audio blob received');
+            }
+            
             await this.playAudioBlob(audioBlob, `${agent} (${voice})`, { agent, text: speechText });
             
         } catch (error) {
             const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
-            if (!agentConfig.noFallback && retryCount < this.voiceSystem.maxRetries) {
+            // Ретраї незалежно від noFallback, але без зміни голосу
+            if (retryCount < this.voiceSystem.maxRetries && (error.name === 'AbortError' || /network|fetch|Failed to fetch|NetworkError/i.test(error.message))) {
                 this.log(`[VOICE] Synthesis error, retrying: ${error.message}`);
-                await this.delay(1000 * (retryCount + 1)); // Progressive delay
+                await this.delay(800 * (retryCount + 1));
                 return await this.synthesizeAndPlay(text, agent, retryCount + 1);
+            }
+            // Фолбек у Web Speech вимкнено за замовчуванням (можна ввімкнути через allowWebSpeechFallback)
+            if (this.voiceSystem.allowWebSpeechFallback && !agentConfig.noFallback) {
+                await this.fallbackToWebSpeech(text, agent);
             } else {
-                this.log(`[VOICE] Voice synthesis failed after retries: ${error.message}`);
-                // Без фолбеку для Тетяни: не використовуємо Web Speech
-                if (!agentConfig.noFallback) {
-                    await this.fallbackToWebSpeech(text, agent);
-                }
+                this.log(`[VOICE] Voice synthesis failed without fallback: ${error.message}`);
             }
         }
     }
@@ -706,13 +797,18 @@ class AtlasIntelligentChatManager {
     async playAudioBlob(audioBlob, description, meta = {}) {
         return new Promise((resolve, reject) => {
             try {
+                console.log(`[ATLAS-TTS] Playing audio blob: ${description}, size=${audioBlob.size}, type=${audioBlob.type}`);
                 const audioUrl = URL.createObjectURL(audioBlob);
+                console.log(`[ATLAS-TTS] Created audio URL: ${audioUrl}`);
                 const audio = new Audio(audioUrl);
+                audio.preload = 'auto';
+                audio.playsInline = true;
+                audio.muted = true; // стартуем в mute для обхода автоплея
                 this.voiceSystem.currentAudio = audio;
                 const agent = meta.agent || 'atlas';
                 const text = meta.text || '';
                 
-                // Підсвічуємо останнє повідомлення агента як «озвучується»
+                // Підсвічування
                 let speakingEl = null;
                 try {
                     const messages = this.chatContainer.querySelectorAll(`.message.assistant.agent-${agent}`);
@@ -722,54 +818,104 @@ class AtlasIntelligentChatManager {
                     }
                 } catch (_) {}
                 
-                audio.onended = () => {
+                const cleanup = () => {
                     URL.revokeObjectURL(audioUrl);
                     this.voiceSystem.currentAudio = null;
+                    if (speakingEl) speakingEl.classList.remove('speaking');
+                };
+
+                const tryUnmute = () => {
+                    // Снимаем mute спустя мгновение после старта, когда браузер уже разрешил воспроизведение
+                    setTimeout(() => {
+                        try { audio.muted = false; } catch (_) {}
+                    }, 150);
+                };
+
+                audio.onended = () => {
+                    cleanup();
                     this.voiceSystem.lastAgentComplete = Date.now();
                     this.log(`[VOICE] Finished playing ${description}`);
-
-                    // Знімаємо підсвічування
-                    if (speakingEl) speakingEl.classList.remove('speaking');
-
-                    // Подія завершення TTS
+                    
                     try {
                         if (this.ttsSync.dispatchEvents) {
                             window.dispatchEvent(new CustomEvent('atlas-tts-ended', { detail: { agent, text } }));
                         }
                         this.ttsSync.onTTSEnd();
                     } catch (_) {}
-
-                    // Розблокування інпуту, якщо був заблокований через TTS
+                    
+                    // Check if input should be unlocked after TTS completes
                     this.checkAndUnlockInput();
+                    
+                    // Process next TTS in queue if available
+                    if (this.voiceSystem.ttsQueue.length > 0 && !this.voiceSystem.isProcessingTTS) {
+                        setTimeout(() => this.processTTSQueue(), 100);
+                    }
+                    
                     resolve();
                 };
                 
                 audio.onerror = (error) => {
+                    console.error(`[ATLAS-TTS] Audio error for ${description}:`, error);
+                    console.error(`[ATLAS-TTS] Audio error details:`, {
+                        src: audio.src,
+                        readyState: audio.readyState,
+                        networkState: audio.networkState,
+                        error: audio.error
+                    });
                     this.log(`[VOICE] Audio playback error: ${error}`);
-                    URL.revokeObjectURL(audioUrl);
-                    this.voiceSystem.currentAudio = null;
-                    if (speakingEl) speakingEl.classList.remove('speaking');
+                    cleanup();
                     reject(error);
                 };
                 
                 audio.oncanplay = () => {
+                    console.log(`[ATLAS-TTS] Audio can play: ${description}, duration=${audio.duration?.toFixed(1) || 'unknown'}s`);
                     this.log(`[VOICE] Starting playback of ${description} (duration: ${audio.duration?.toFixed(1) || 'unknown'}s)`);
                 };
                 
+                audio.onplaying = () => {
+                    console.log(`[ATLAS-TTS] Audio is playing: ${description}`);
+                    // Как только пошло воспроизведение — пробуем снять mute
+                    tryUnmute();
+                };
+                
                 audio.play().then(() => {
-                    this.log(`[VOICE] Playing ${description}`);
-                    // Подія старту TTS
+                    this.log(`[VOICE] Playing ${description} (muted autoplay)`);
                     try {
                         if (this.ttsSync.dispatchEvents) {
                             window.dispatchEvent(new CustomEvent('atlas-tts-started', { detail: { agent, text } }));
                         }
                         this.ttsSync.onTTSStart();
                     } catch (_) {}
-                    // Блокуємо ввід, щоб синхронізувати «наступне повідомлення» з озвучуванням
                     if (this.ttsSync.blockNextMessageUntilTTSComplete) {
                         this.setInputState(false);
                     }
-                }).catch(reject);
+                }).catch(err => {
+                    // Блокування автоплею — баннер для клика
+                    if (err && (err.name === 'NotAllowedError' || /play\(\) failed because the user didn't interact/i.test(err.message))) {
+                        let banner = document.getElementById('atlas-audio-unlock');
+                        if (!banner) {
+                            banner = document.createElement('div');
+                            banner.id = 'atlas-audio-unlock';
+                            document.body.appendChild(banner);
+                            (function(b){
+                                b.style.position='fixed'; b.style.left='50%'; b.style.bottom='16px'; b.style.transform='translateX(-50%)';
+                                b.style.background='rgba(0,0,0,0.85)'; b.style.color='#fff'; b.style.padding='10px 14px';
+                                b.style.borderRadius='8px'; b.style.fontFamily='system-ui,sans-serif'; b.style.fontSize='14px';
+                                b.style.zIndex='9999'; b.style.cursor='pointer'; b.textContent='Клікніть, щоб увімкнути звук';
+                            })(banner);
+                        }
+                        const tryPlay = () => {
+                            audio.muted = false;
+                            audio.play().then(() => {
+                                this.log('[VOICE] Audio unlocked by user gesture');
+                                banner.remove();
+                            }).catch(e => this.log(`[VOICE] Still blocked: ${e?.message || e}`));
+                        };
+                        banner.onclick = tryPlay;
+                    } else {
+                        reject(err);
+                    }
+                });
                 
             } catch (error) {
                 reject(error);
@@ -791,12 +937,13 @@ class AtlasIntelligentChatManager {
             // Configure voice parameters based on agent
             utterance.pitch = agentConfig.pitch || 1.0;
             utterance.rate = agentConfig.rate || 1.0;
-            utterance.volume = 0.8;
+            utterance.volume = 0.9;
+            utterance.lang = 'uk-UA';
             
             // Try to find a suitable voice
             const voices = speechSynthesis.getVoices();
-            const ukrainianVoice = voices.find(v => v.lang.includes('uk') || v.name.includes('Ukrainian'));
-            const englishVoice = voices.find(v => v.lang.includes('en'));
+            const ukrainianVoice = voices.find(v => (v.lang || '').toLowerCase().includes('uk') || (v.name || '').toLowerCase().includes('ukrainian'));
+            const englishVoice = voices.find(v => (v.lang || '').toLowerCase().includes('en'));
             
             if (ukrainianVoice) {
                 utterance.voice = ukrainianVoice;
@@ -805,7 +952,7 @@ class AtlasIntelligentChatManager {
             }
             
             utterance.onstart = () => {
-                this.log(`[VOICE] Playing ${agent} with Web Speech API`);
+                this.log(`[VOICE] Playing ${agent} with Web Speech API (${utterance.voice?.name || 'default'}, ${utterance.lang})`);
             };
             
             utterance.onerror = (error) => {

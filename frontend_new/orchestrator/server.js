@@ -60,7 +60,7 @@ const AGENTS = {
         role: 'validator',
         signature: '[ГРИША]', 
         color: '#ffff00',
-        voice: 'robot',
+    voice: 'mykyta',
         priority: 3
     }
 };
