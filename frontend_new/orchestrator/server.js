@@ -20,6 +20,23 @@ app.use(cors({
 }));
 app.use(express.json({ limit: '10mb' }));
 
+// OpenAI-compatible fallback API base (used for Atlas/Grisha only)
+const FALLBACK_API_BASE = (process.env.FALLBACK_API_BASE || 'http://127.0.0.1:3010/v1').replace(/\/$/, '');
+
+async function callOpenAICompatChat(baseUrl, model, userMessage) {
+    const url = `${baseUrl}/chat/completions`;
+    const payload = {
+        model,
+        messages: [ { role: 'user', content: userMessage } ],
+        stream: false
+    };
+    const headers = { 'Content-Type': 'application/json' };
+    const resp = await axios.post(url, payload, { headers, timeout: 20000 });
+    if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
+    const text = resp.data?.choices?.[0]?.message?.content;
+    return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+}
+
 // Agent configurations
 const AGENTS = {
     atlas: {
@@ -118,6 +135,45 @@ app.get('/agents', (req, res) => {
 });
 
 // Main chat processing endpoint
+// Direct Tetyana endpoint
+app.post('/agent/tetyana', async (req, res) => {
+    try {
+        const { message, sessionId = 'default' } = req.body;
+        if (!message?.trim()) {
+            return res.status(400).json({ error: 'Message is required' });
+        }
+
+        logMessage('info', `Direct Tetyana request: ${message.substring(0, 100)}...`);
+
+        // Tetiana strictly uses Goose
+        const gooseContent = await callGooseAgent(message, sessionId);
+        if (!gooseContent) {
+            return res.status(502).json({ error: 'Goose is unavailable for Tetiana' });
+        }
+
+        const msg = {
+            role: 'assistant',
+            content: `[ТЕТЯНА] ${gooseContent}`,
+            agent: 'tetyana',
+            messageId: generateMessageId(),
+            timestamp: Date.now(),
+            voice: 'tetiana',
+            color: '#00ffff',
+            provider: 'goose',
+            model: 'github_copilot'
+        };
+
+        return res.json({
+            success: true,
+            response: [msg],
+            session: { id: sessionId, currentAgent: 'tetyana' }
+        });
+    } catch (error) {
+        logMessage('error', `Tetyana endpoint error: ${error.message}`);
+        return res.status(500).json({ error: 'Internal server error', details: error.message });
+    }
+});
+
 app.post('/chat/stream', async (req, res) => {
     const { message, sessionId, userId } = req.body;
     
@@ -196,6 +252,49 @@ app.post('/chat/stream', async (req, res) => {
     }
 });
 
+// Compatibility endpoint: support legacy POST /chat
+// Normalizes payload and forwards to the same processing as /chat/stream
+app.post('/chat', async (req, res) => {
+    try {
+        // Normalize fields from various clients
+        const message = req.body?.message;
+        const sessionId = req.body?.sessionId || req.body?.session_id || 'default';
+        const userId = req.body?.userId || req.body?.user_id || 'legacy-client';
+
+        if (!message) {
+            return res.status(400).json({ error: 'Message is required' });
+        }
+
+        // Ensure session exists
+        const session = sessions.get(sessionId) || {
+            id: sessionId,
+            history: [],
+            currentAgent: 'atlas',
+            lastInteraction: Date.now()
+        };
+        sessions.set(sessionId, session);
+
+        // Reuse processing logic
+        const response = await processAgentCycle(message, session);
+
+        return res.json({
+            success: true,
+            response: response,
+            session: {
+                id: sessionId,
+                currentAgent: session.currentAgent,
+                requiresUserCommand: dialogueManager.requiresUserCommand()
+            }
+        });
+    } catch (error) {
+        logMessage('error', `Legacy /chat failed: ${error.message}`);
+        return res.status(500).json({
+            error: 'Processing failed',
+            details: error.message
+        });
+    }
+});
+
 // Agent processing cycle
 async function processAgentCycle(userMessage, session) {
     const responses = [];
@@ -233,7 +332,35 @@ async function processAgentCycle(userMessage, session) {
     return responses;
 }
 
-// Generate agent response based on role and context
+// OpenAI-compat failover helpers for Atlas/Grisha
+const AGENT_MODEL_PLAN = {
+    atlas: [
+        'Meta-Llama-3.1-8B-Instruct',
+        'microsoft/Phi-3.5-mini-instruct',
+        'gpt-4o-mini'
+    ],
+    grisha: [
+        'microsoft/Phi-3.5-mini-instruct',
+        'Mistral-Nemo',
+        'gpt-4o-mini'
+    ]
+};
+
+async function tryOpenAICompatForAgent(agentName, prompt) {
+    if (!FALLBACK_API_BASE) return null;
+    const models = AGENT_MODEL_PLAN[agentName] || [];
+    for (const model of models) {
+        try {
+            const text = await callOpenAICompatChat(FALLBACK_API_BASE, model, prompt);
+            if (text) return { text, provider: 'fallback_openai', model };
+        } catch (_) {
+            // try next model
+        }
+    }
+    return null;
+}
+
+// Real agent integration
 async function generateAgentResponse(agentName, inputMessage, session) {
     const agent = AGENTS[agentName];
     const messageId = generateMessageId();
@@ -241,8 +368,28 @@ async function generateAgentResponse(agentName, inputMessage, session) {
     // Create role-based prompt
     let prompt = createAgentPrompt(agentName, inputMessage, session);
     
-    // Simulate agent thinking (replace with actual LLM call)
-    const content = await simulateAgentThinking(agentName, prompt);
+    let content;
+    let provider = undefined;
+    let model = undefined;
+    
+    if (agentName === 'tetyana') {
+        // Tetiana strictly uses Goose
+        const gooseText = await callGooseAgent(prompt, session.id);
+        content = gooseText || 'Завдання опрацьовано.';
+        provider = 'goose';
+        model = 'github_copilot';
+    } else {
+        // Try OpenAI-compatible failover for Atlas/Grisha first
+        const tried = await tryOpenAICompatForAgent(agentName, prompt);
+        if (tried && tried.text) {
+            content = tried.text;
+            provider = tried.provider;
+            model = tried.model;
+        } else {
+            // Fallback to local simulation
+            content = await simulateAgentThinking(agentName, prompt);
+        }
+    }
     
     return {
         role: 'assistant',
@@ -251,9 +398,181 @@ async function generateAgentResponse(agentName, inputMessage, session) {
         messageId: messageId,
         timestamp: Date.now(),
         voice: agent.voice,
-        color: agent.color
+        color: agent.color,
+        provider,
+        model
     };
 }
+
+// Call Goose agent (Tetyana) via WebSocket
+async function callGooseAgent(message, sessionId) {
+    const gooseBaseUrl = process.env.GOOSE_BASE_URL || 'http://localhost:3000';
+    const secretKey = process.env.GOOSE_SECRET_KEY || 'test';
+    
+    try {
+        // Try WebSocket first (preferred for Goose Web)
+        const result = await callGooseWebSocket(gooseBaseUrl, message, sessionId, secretKey);
+        if (result) return result;
+        
+        // Fallback to SSE /reply endpoint
+        const sseResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey);
+        if (sseResult) return sseResult;
+        
+    // Final fallback -> signal failure so that upper layer can switch provider
+    return null;
+        
+    } catch (error) {
+    console.error('Goose integration error:', error);
+    // Signal failure
+    return null;
+    }
+}
+
+// WebSocket integration with Goose
+async function callGooseWebSocket(baseUrl, message, sessionId, secretKey) {
+    return new Promise((resolve) => {
+        const wsUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
+        
+        let collected = '';
+        let timeout;
+        
+        try {
+            const ws = new WebSocket(wsUrl);
+            
+            timeout = setTimeout(() => {
+                ws.close();
+                resolve(null); // Will try SSE fallback
+            }, 15000);
+            
+            ws.on('open', () => {
+                const payload = {
+                    type: 'message',
+                    content: message,
+                    session_id: sessionId,
+                    timestamp: Date.now()
+                };
+                ws.send(JSON.stringify(payload));
+            });
+            
+            ws.on('message', (data) => {
+                try {
+                    const obj = JSON.parse(data.toString());
+                    const type = obj.type;
+                    
+                    if (type === 'response') {
+                        const content = obj.content;
+                        if (content) {
+                            collected += String(content);
+                        }
+                    } else if (type === 'complete' || type === 'cancelled') {
+                        clearTimeout(timeout);
+                        ws.close();
+                        resolve(collected.trim() || "Завдання виконано.");
+                    } else if (type === 'error') {
+                        clearTimeout(timeout);
+                        ws.close();
+                        resolve(null); // Will try SSE fallback
+                    }
+                } catch (e) {
+                    // Ignore non-JSON frames
+                }
+            });
+            
+            ws.on('error', () => {
+                clearTimeout(timeout);
+                resolve(null); // Will try SSE fallback
+            });
+            
+            ws.on('close', () => {
+                clearTimeout(timeout);
+                if (collected.trim()) {
+                    resolve(collected.trim());
+                } else {
+                    resolve(null); // Will try SSE fallback
+                }
+            });
+            
+        } catch (error) {
+            if (timeout) clearTimeout(timeout);
+            resolve(null); // Will try SSE fallback
+        }
+    });
+}
+
+// SSE integration with Goose (fallback)
+async function callGooseSSE(baseUrl, message, sessionId, secretKey) {
+    try {
+        const url = `${baseUrl}/reply`;
+        const headers = {
+            'Accept': 'text/event-stream',
+            'Content-Type': 'application/json',
+            'X-Secret-Key': secretKey
+        };
+        
+        const payload = {
+            messages: [{
+                role: 'user',
+                created: Math.floor(Date.now() / 1000),
+                content: [{ type: 'text', text: message }]
+            }],
+            session_id: sessionId,
+            session_working_dir: process.cwd()
+        };
+        
+        const response = await axios.post(url, payload, {
+            headers,
+            timeout: 20000,
+            responseType: 'stream'
+        });
+        
+        if (response.status !== 200) {
+            return null;
+        }
+        
+        return new Promise((resolve) => {
+            let collected = '';
+            
+            response.data.on('data', (chunk) => {
+                const lines = chunk.toString().split('\n');
+                for (const line of lines) {
+                    if (line.startsWith('data:')) {
+                        const dataStr = line.slice(5).trim();
+                        try {
+                            const obj = JSON.parse(dataStr);
+                            if (obj.type === 'Message' && obj.message?.content) {
+                                for (const content of obj.message.content) {
+                                    if (content.type === 'text' && content.text) {
+                                        collected += content.text;
+                                    }
+                                }
+                            } else if (obj.text || obj.content) {
+                                collected += (obj.text || obj.content);
+                            }
+                        } catch (e) {
+                            // Not JSON, might be plain text
+                            if (dataStr && !dataStr.startsWith('[')) {
+                                collected += dataStr;
+                            }
+                        }
+                    }
+                }
+            });
+            
+            response.data.on('end', () => {
+                resolve(collected.trim() || "Завдання опрацьовано.");
+            });
+            
+            response.data.on('error', () => {
+                resolve(collected.trim() || null);
+            });
+        });
+        
+    } catch (error) {
+        return null;
+    }
+}
+
+// Simulate agent thinking (for Atlas and Grisha)
 
 // Create prompts based on agent roles
 function createAgentPrompt(agentName, message, session) {
@@ -289,9 +608,9 @@ Respond as Tetyana would - practical, detail-oriented, execution-focused.`;
     }
 }
 
-// Simulate agent thinking (replace with actual LLM integration)
+// Simulate agent thinking (for Atlas and Grisha)
 async function simulateAgentThinking(agentName, prompt) {
-    // This is a placeholder - integrate with actual LLM service
+    // This is a placeholder for Atlas and Grisha - Tetyana uses real Goose integration
     const responses = {
         atlas: [
             "Аналізую завдання. Створюю покроковий план виконання з урахуванням можливих ризиків.",
@@ -302,11 +621,6 @@ async function simulateAgentThinking(agentName, prompt) {
             "Перевіряю план на безпеку та відповідність стандартам. Аналізую потенційні ризики.",
             "Оцінюю якість запропонованого рішення. Шукаю слабкі місця та недоліки.",
             "Контролюю дотримання процедур. Вимагаю додаткових гарантій безпеки."
-        ],
-        tetyana: [
-            "Аналізую практичну реалізацію. Готуюся до виконання конкретних кроків.",
-            "Перевіряю доступність ресурсів. Розробляю деталізований план дій.",
-            "Готую звіт про готовність до виконання. Визначаю необхідні інструменти."
         ]
     };
 

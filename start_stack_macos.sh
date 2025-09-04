@@ -346,7 +346,7 @@ if [ -f "../../logs/goose.pid" ] && ps -p $(cat ../../logs/goose.pid) > /dev/nul
     export ORCH_SSE_FOR_GITHUB_COPILOT=${ORCH_SSE_FOR_GITHUB_COPILOT:-false}
     export ORCH_FORCE_GOOSE_REPLY=${ORCH_FORCE_GOOSE_REPLY:-false}
 fi
-export FALLBACK_API_BASE=${FALLBACK_API_BASE:-http://127.0.0.1:3010/api}
+export FALLBACK_API_BASE=${FALLBACK_API_BASE:-http://127.0.0.1:3010/v1}
 node server.js > ../../logs/orchestrator.log 2>&1 &
 echo $! > ../../logs/orchestrator.pid
 echo "✅ Node.js orchestrator started (PID: $(cat ../../logs/orchestrator.pid))"
@@ -401,7 +401,7 @@ check_service() {
 
 check_service "Python Frontend" "http://localhost:5001" "logs/frontend.pid"
 check_service "Node.js Orchestrator" "http://localhost:5101/health" "logs/orchestrator.pid"
-check_service "Fallback API" "http://localhost:3010/api/models" "logs/fallback_llm.pid"
+check_service "Fallback API" "http://localhost:3010/v1/models" "logs/fallback_llm.pid"
 
 # Check Goose only if it was started
 if [ -f "logs/goose.pid" ] && ps -p $(cat logs/goose.pid) > /dev/null 2>&1; then

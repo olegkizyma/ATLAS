@@ -21,6 +21,7 @@ except ImportError:
 import tempfile
 import subprocess
 from pathlib import Path
+from goose_client import GooseClient
 
 # Setup logging
 logging.basicConfig(
@@ -40,6 +41,9 @@ app = Flask(__name__,
            static_folder=str(STATIC_DIR))
 if CORS:
     CORS(app)
+
+# Initialize Goose client
+goose_client = GooseClient(base_url="http://localhost:3000", secret_key="test")
 
 # Configuration
 FRONTEND_PORT = int(os.environ.get('FRONTEND_PORT', 5001))
@@ -84,10 +88,120 @@ def health():
         }
     })
 
+@app.route('/logs')
+def get_logs():
+    """Get system logs"""
+    try:
+        limit = int(request.args.get('limit', 100))
+        
+        # Read frontend logs
+        logs = []
+        log_files = [
+            '../logs/frontend.log',
+            '../logs/orchestrator.log', 
+            '../logs/recovery_bridge.log'
+        ]
+        
+        for log_file in log_files:
+            log_path = CURRENT_DIR.parent / log_file.replace('../', '')
+            if log_path.exists():
+                try:
+                    with open(log_path, 'r') as f:
+                        lines = f.readlines()[-limit:]
+                        for line in lines:
+                            if line.strip():
+                                logs.append({
+                                    'timestamp': datetime.now().isoformat(),
+                                    'source': log_path.name,
+                                    'message': line.strip()
+                                })
+                except Exception as e:
+                    logger.warning(f"Failed to read {log_file}: {e}")
+        
+        return jsonify({'logs': logs[-limit:]})
+    except Exception as e:
+        logger.error(f"Error getting logs: {e}")
+        return jsonify({'error': 'Failed to get logs', 'logs': []}), 500
+
+@app.route('/api/voice/health')
+def voice_health():
+    """Check voice/TTS health status"""
+    try:
+        tts_status = check_tts_health()
+        return jsonify({
+            'status': tts_status,
+            'timestamp': datetime.now().isoformat(),
+            'tts_url': TTS_SERVER_URL,
+            'available': tts_status == 'running'
+        })
+    except Exception as e:
+        logger.error(f"Error checking voice health: {e}")
+        return jsonify({'status': 'error', 'available': False}), 500
+
 @app.route('/api/agents')
 def get_agents():
     """Get agent configuration"""
     return jsonify(AGENT_VOICES)
+
+@app.route('/api/agents/tetyana', methods=['POST'])
+def chat_with_tetyana():
+    """Direct chat with Tetyana via Goose"""
+    try:
+        data = request.get_json()
+        message = data.get('message', '')
+        session_id = data.get('sessionId', 'atlas_session')
+        
+        if not message.strip():
+            return jsonify({'error': 'Message cannot be empty'}), 400
+        
+        # Send message to Goose (Tetyana)
+        result = goose_client.send_reply(session_id, message)
+        
+        if result.get('success'):
+            response_text = result.get('response', '')
+            return jsonify({
+                'success': True,
+                'response': [{
+                    'role': 'assistant',
+                    'content': f'[ТЕТЯНА] {response_text}',
+                    'agent': 'tetyana',
+                    'voice': 'tetiana',
+                    'color': '#00ffff',
+                    'timestamp': datetime.now().isoformat()
+                }],
+                'session': {
+                    'id': session_id,
+                    'currentAgent': 'tetyana'
+                }
+            })
+        else:
+            error_msg = result.get('error', 'Unknown error')
+            logger.error(f"Goose client error: {error_msg}")
+            return jsonify({
+                'success': False,
+                'error': f'Tetyana is unavailable: {error_msg}',
+                'fallback_response': [{
+                    'role': 'assistant',
+                    'content': '[ATLAS] Тетяна тимчасово недоступна. Перевірте з\'єднання з Goose.',
+                    'agent': 'atlas',
+                    'voice': 'dmytro',
+                    'color': '#00ff00'
+                }]
+            }), 503
+            
+    except Exception as e:
+        logger.error(f"Tetyana chat error: {e}")
+        return jsonify({
+            'success': False,
+            'error': 'Internal error',
+            'fallback_response': [{
+                'role': 'assistant', 
+                'content': '[ATLAS] Помилка зв\'язку з Тетяною. Спробуйте пізніше.',
+                'agent': 'atlas',
+                'voice': 'dmytro',
+                'color': '#00ff00'
+            }]
+        }), 500
 
 @app.route('/api/chat', methods=['POST'])
 def chat():

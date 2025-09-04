@@ -12,6 +12,7 @@ check_service_status() {
     local pidfile=$2
     local port=$3
     local url=$4
+    local proto=${5:-http}  # http | ws
     
     printf "%-25s" "$name:"
     
@@ -22,7 +23,11 @@ check_service_status() {
             if [ -n "$url" ] && curl -s --max-time 3 "$url" > /dev/null 2>&1; then
                 echo "🟢 ONLINE  (PID: $pid, Port: $port)"
             elif [ -n "$port" ] && lsof -ti:$port > /dev/null 2>&1; then
-                echo "🟡 RUNNING (PID: $pid, Port: $port) - Not responding"
+                if [ "$proto" = "ws" ]; then
+                    echo "🟡 RUNNING (PID: $pid, Port: $port) - WebSocket"
+                else
+                    echo "🟡 RUNNING (PID: $pid, Port: $port) - Not responding"
+                fi
             else
                 echo "🔴 FAILED  (PID: $pid) - Port not bound"
             fi
@@ -42,11 +47,11 @@ check_service_status() {
 
 # Перевірка основних сервісів
 echo "📊 Core Services:"
-check_service_status "Goose Web Interface" "logs/goose.pid" "3000" "http://localhost:3000"
-check_service_status "Python Frontend" "logs/frontend.pid" "5001" "http://localhost:5001"
-check_service_status "Node.js Orchestrator" "logs/orchestrator.pid" "5101" "http://localhost:5101/health"
-check_service_status "Recovery Bridge" "logs/recovery_bridge.pid" "5102" ""
-check_service_status "Fallback LLM" "logs/fallback_llm.pid" "3010" "http://localhost:3010/v1/models"
+check_service_status "Goose Web Interface" "logs/goose.pid" "3000" "http://localhost:3000" "http"
+check_service_status "Python Frontend" "logs/frontend.pid" "5001" "http://localhost:5001" "http"
+check_service_status "Node.js Orchestrator" "logs/orchestrator.pid" "5101" "http://localhost:5101/health" "http"
+check_service_status "Recovery Bridge" "logs/recovery_bridge.pid" "5102" "" "ws"
+check_service_status "Fallback LLM" "logs/fallback_llm.pid" "3010" "http://localhost:3010/v1/models" "http"
 
 echo ""
 echo "🌐 Port Status:"

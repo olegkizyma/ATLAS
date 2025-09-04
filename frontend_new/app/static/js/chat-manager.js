@@ -50,39 +50,106 @@ class AtlasChatManager {
     
     async sendMessage() {
         const message = this.chatInput.value.trim();
-        if (!message) return;
+        if (!message || this.isStreaming) return;
         
-        if (this.isStreaming || this.isStreamPending) {
-            this.log('Message blocked: stream in progress', 'warning');
-            return;
-        }
+        // Check if user wants to talk directly to Tetyana
+        const directToTetyana = message.toLowerCase().includes('@тетяна') || 
+                              message.toLowerCase().includes('@tetyana') ||
+                              message.toLowerCase().startsWith('тетяна,') ||
+                              message.toLowerCase().startsWith('tetyana,');
+        
+        this.lockInput('Надсилаю...');
+        this.displayUserMessage(message);
+        this.chatInput.value = '';
         
         try {
-            // Блокуємо інтерфейс
-            this.setInputState(true, 'Надсилання...');
-            this.isStreamPending = true;
+            let response;
             
-            // Додаємо повідомлення користувача
-            this.addMessage('user', message);
-            this.chatInput.value = '';
+            if (directToTetyana) {
+                // Direct communication with Tetyana via Goose
+                const cleanMessage = message.replace(/@?(тетяна|tetyana),?\s*/gi, '').trim();
+                response = await this.sendToTetyana(cleanMessage);
+            } else {
+                // Multi-agent conversation via orchestrator
+                response = await this.sendToOrchestrator(message);
+            }
             
-            // Стрім безпосередньо до Node-оркестратора
-            await this.streamFromOrchestrator(message);
+            if (response && response.success) {
+                this.displayAgentResponses(response.response || []);
+                this.retryCount = 0;
+            } else {
+                this.displayError(response?.error || 'Помилка відповіді сервера');
+            }
+        } catch (error) {
+            this.log('Send message error:', error);
+            this.handleError(error, message);
+        } finally {
+            this.unlockInput();
+        }
+    }
+    
+    async sendToTetyana(message) {
+        this.log(`Sending message directly to Tetyana: ${message.substring(0, 50)}...`);
+        
+        try {
+            // Try orchestrator's direct Tetyana endpoint first
+            const response = await fetch(`${this.orchestratorBase}/agent/tetyana`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    sessionId: this.generateSessionId()
+                })
+            });
+            
+            if (response.ok) {
+                return await response.json();
+            }
+            
+            // Fallback to frontend's Tetyana endpoint
+            const frontendResponse = await fetch(`${this.frontendBase}/api/agents/tetyana`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    message: message,
+                    sessionId: this.generateSessionId()
+                })
+            });
+            
+            if (frontendResponse.ok) {
+                return await frontendResponse.json();
+            }
+            
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
             
         } catch (error) {
-            this.log(`Send error: ${error.message}`, 'error');
-            this.addMessage('system', `Помилка: ${error.message}`);
-        } finally {
-            // ГАРАНТОВАНЕ РОЗБЛОКУВАННЯ
-            this.setInputState(false);
-            this.isStreaming = false;
-            this.isStreamPending = false;
-            
-            // Додатковий захист через 100мс
-            setTimeout(() => {
-                this.setInputState(false);
-            }, 100);
+            this.log('Tetyana communication error:', error);
+            throw error;
         }
+    }
+    
+    generateSessionId() {
+        return `atlas_session_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+    }
+    
+    async callOrchestrator(message) {
+        this.log(`Sending message to orchestrator: ${message.substring(0, 50)}...`);
+        
+        const response = await fetch(`${this.orchestratorBase}/chat/stream`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+                message: message,
+                sessionId: this.generateSessionId(),
+                userId: 'user'
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+        
+        return await response.json();
     }
     
     async streamFromOrchestrator(message, retryAttempt = 0) {
