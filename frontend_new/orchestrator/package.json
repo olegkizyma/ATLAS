@@ -1,0 +1,21 @@
+{
+  "name": "atlas-orchestrator",
+  "version": "1.0.0",
+  "description": "ATLAS 3-Agent System Orchestrator with TTS Integration",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --inspect server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "dotenv": "^16.3.1",
+    "axios": "^1.4.0",
+    "ws": "^8.13.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  }
+}

@@ -53,6 +53,27 @@ class AtlasIntelligentChatManager {
             lastAgentComplete: null, // Track when agent finishes speaking
             firstTtsDone: false // Guard to avoid double TTS on very first response
         };
+
+        // STT (Speech-to-Text) system for user interruptions
+        this.speechSystem = {
+            enabled: false,
+            recognition: null,
+            isListening: false,
+            isEnabled: false,
+            continuous: true,
+            interimResults: true,
+            language: 'uk-UA', // Ukrainian as primary
+            fallbackLanguage: 'en-US',
+            confidenceThreshold: 0.7,
+            // Interruption detection
+            interruptionKeywords: [
+                'стоп', 'stop', 'чекай', 'wait', 'припини', 'pause',
+                'наказую', 'command', 'я наказую', 'слухайте', 'тихо'
+            ],
+            commandKeywords: [
+                'наказую', 'command', 'я наказую', 'слухай мене', 'виконуй'
+            ]
+        };
         
         // Поведінка синхронізації TTS з наступними повідомленнями та кроками виконання
         this.ttsSync = {
@@ -81,7 +102,8 @@ class AtlasIntelligentChatManager {
         this.setupEventListeners();
         this.setupTTSEventBridges();
         await this.initVoiceSystem();
-        this.log('[CHAT] Intelligent Atlas Chat Manager with Voice System initialized');
+        await this.initSpeechSystem();
+        this.log('[CHAT] Intelligent Atlas Chat Manager with Voice and Speech Systems initialized');
     }
 
     setupTTSEventBridges() {
@@ -1018,6 +1040,314 @@ class AtlasIntelligentChatManager {
         
         if (window.atlasLogger) {
             window.atlasLogger.log(message);
+        }
+    }
+
+    // ========== STT (Speech-to-Text) System ==========
+
+    async initSpeechSystem() {
+        try {
+            // Check if Web Speech API is available
+            if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+                this.log('[STT] Web Speech API not available');
+                return;
+            }
+
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            this.speechSystem.recognition = new SpeechRecognition();
+            
+            // Configure recognition
+            this.speechSystem.recognition.continuous = this.speechSystem.continuous;
+            this.speechSystem.recognition.interimResults = this.speechSystem.interimResults;
+            this.speechSystem.recognition.lang = this.speechSystem.language;
+            
+            // Set up event handlers
+            this.setupSpeechEventHandlers();
+            
+            // Add speech controls to UI
+            this.addSpeechControls();
+            
+            this.speechSystem.enabled = true;
+            this.log('[STT] Speech recognition system initialized');
+            
+        } catch (error) {
+            this.log(`[STT] Failed to initialize speech system: ${error.message}`);
+            this.speechSystem.enabled = false;
+        }
+    }
+
+    setupSpeechEventHandlers() {
+        const recognition = this.speechSystem.recognition;
+        if (!recognition) return;
+
+        recognition.onstart = () => {
+            this.speechSystem.isListening = true;
+            this.updateSpeechButton();
+            this.log('[STT] Speech recognition started');
+        };
+
+        recognition.onend = () => {
+            this.speechSystem.isListening = false;
+            this.updateSpeechButton();
+            this.log('[STT] Speech recognition ended');
+            
+            // Auto-restart if still enabled
+            if (this.speechSystem.isEnabled && !this.speechSystem.isListening) {
+                setTimeout(() => this.startSpeechRecognition(), 1000);
+            }
+        };
+
+        recognition.onerror = (event) => {
+            this.log(`[STT] Speech recognition error: ${event.error}`);
+            this.speechSystem.isListening = false;
+            this.updateSpeechButton();
+        };
+
+        recognition.onresult = (event) => {
+            this.handleSpeechResult(event);
+        };
+    }
+
+    async handleSpeechResult(event) {
+        for (let i = event.resultIndex; i < event.results.length; i++) {
+            const result = event.results[i];
+            const transcript = result[0].transcript.trim();
+            const confidence = result[0].confidence || 0;
+            
+            this.log(`[STT] Recognized: "${transcript}" (confidence: ${confidence.toFixed(2)})`);
+            
+            if (result.isFinal && confidence > this.speechSystem.confidenceThreshold) {
+                await this.processSpeechInput(transcript, confidence);
+            } else if (!result.isFinal) {
+                // Show interim results for feedback
+                this.showInterimSpeech(transcript);
+            }
+        }
+    }
+
+    async processSpeechInput(transcript, confidence) {
+        const lowerTranscript = transcript.toLowerCase();
+        
+        // Check for interruption keywords
+        const isInterruption = this.speechSystem.interruptionKeywords.some(
+            keyword => lowerTranscript.includes(keyword)
+        );
+        
+        // Check for command authority keywords
+        const isCommand = this.speechSystem.commandKeywords.some(
+            keyword => lowerTranscript.includes(keyword)
+        );
+
+        if (isInterruption || isCommand) {
+            this.log(`[STT] ${isCommand ? 'Command' : 'Interruption'} detected: "${transcript}"`);
+            
+            // Stop current TTS if playing
+            if (this.voiceSystem.currentAudio && !this.voiceSystem.currentAudio.paused) {
+                this.voiceSystem.currentAudio.pause();
+                this.log('[STT] Stopped current TTS due to interruption');
+            }
+            
+            // Clear TTS queue
+            this.voiceSystem.ttsQueue = [];
+            this.voiceSystem.isProcessingTTS = false;
+            
+            // Send interruption to backend
+            try {
+                const response = await fetch(`${this.frontendBase}/api/voice/interrupt`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        transcript: transcript,
+                        confidence: confidence,
+                        sessionId: this.getSessionId(),
+                        type: isCommand ? 'command' : 'interruption'
+                    })
+                });
+                
+                if (response.ok) {
+                    const data = await response.json();
+                    this.log(`[STT] Interruption processed: ${data.action}`);
+                    
+                    if (data.response && data.response.success) {
+                        // Handle response from agents
+                        this.handleInterruptionResponse(data.response);
+                    }
+                }
+                
+            } catch (error) {
+                this.log(`[STT] Failed to process interruption: ${error.message}`);
+            }
+            
+            // Add visual feedback for interruption
+            this.addInterruptionMessage(transcript, isCommand ? 'command' : 'interruption');
+        }
+    }
+
+    handleInterruptionResponse(response) {
+        // Handle different types of responses from the agent system
+        if (response.shouldPause) {
+            this.log('[STT] System paused by user command');
+            this.setInputState(true);
+        }
+        
+        if (response.shouldContinue) {
+            this.log('[STT] System continuing after user intervention');
+        }
+        
+        if (response.response && Array.isArray(response.response)) {
+            // Process agent responses
+            response.response.forEach(agentResponse => {
+                if (agentResponse.content) {
+                    this.addVoiceMessage(agentResponse.content, 
+                                       agentResponse.agent || 'atlas',
+                                       agentResponse.signature);
+                }
+            });
+        }
+    }
+
+    addInterruptionMessage(transcript, type) {
+        const messageDiv = document.createElement('div');
+        messageDiv.className = `message user interruption ${type}`;
+        
+        const iconDiv = document.createElement('div');
+        iconDiv.className = 'interruption-icon';
+        iconDiv.innerHTML = type === 'command' ? '👑' : '✋';
+        iconDiv.style.marginRight = '10px';
+        iconDiv.style.fontSize = '18px';
+        
+        const textDiv = document.createElement('div');
+        textDiv.className = 'message-text';
+        textDiv.innerHTML = `<strong>${type === 'command' ? 'КОМАНДА' : 'ПЕРЕБИВАННЯ'}:</strong> ${transcript}`;
+        textDiv.style.color = type === 'command' ? '#ffd700' : '#ff6b6b';
+        
+        messageDiv.appendChild(iconDiv);
+        messageDiv.appendChild(textDiv);
+        this.chatContainer.appendChild(messageDiv);
+        this.scrollToBottom();
+    }
+
+    showInterimSpeech(transcript) {
+        let interimDiv = document.getElementById('interim-speech');
+        
+        if (!interimDiv) {
+            interimDiv = document.createElement('div');
+            interimDiv.id = 'interim-speech';
+            interimDiv.className = 'interim-speech';
+            interimDiv.style.cssText = `
+                position: fixed;
+                bottom: 80px;
+                left: 20px;
+                right: 20px;
+                background: rgba(0, 255, 0, 0.1);
+                border: 1px solid #00ff00;
+                padding: 10px;
+                border-radius: 5px;
+                font-family: monospace;
+                color: #00ff00;
+                z-index: 1000;
+                font-size: 14px;
+                backdrop-filter: blur(5px);
+            `;
+            document.body.appendChild(interimDiv);
+        }
+        
+        interimDiv.innerHTML = `<strong>Слухаю:</strong> ${transcript}`;
+        
+        // Clear interim display after 2 seconds of no updates
+        clearTimeout(this.interimTimeout);
+        this.interimTimeout = setTimeout(() => {
+            if (interimDiv && interimDiv.parentNode) {
+                interimDiv.parentNode.removeChild(interimDiv);
+            }
+        }, 2000);
+    }
+
+    addSpeechControls() {
+        // Add speech toggle button
+        const speechButton = document.createElement('button');
+        speechButton.id = 'speech-toggle';
+        speechButton.className = 'speech-control-btn';
+        speechButton.innerHTML = '🎤';
+        speechButton.title = 'Toggle speech recognition (STT)';
+        speechButton.onclick = () => this.toggleSpeechRecognition();
+        speechButton.style.cssText = `
+            margin-left: 5px;
+            padding: 8px 12px;
+            background: rgba(0, 255, 0, 0.1);
+            border: 1px solid #00ff00;
+            border-radius: 4px;
+            color: #00ff00;
+            cursor: pointer;
+            font-size: 16px;
+        `;
+        
+        // Add next to voice controls
+        const voiceButton = document.getElementById('voice-toggle');
+        if (voiceButton && voiceButton.parentElement) {
+            voiceButton.parentElement.appendChild(speechButton);
+        } else {
+            // If no voice button, add to input container
+            const inputContainer = this.chatInput.parentElement;
+            if (inputContainer) {
+                inputContainer.appendChild(speechButton);
+            }
+        }
+    }
+
+    toggleSpeechRecognition() {
+        if (!this.speechSystem.enabled) {
+            this.log('[STT] Speech system not available');
+            return;
+        }
+        
+        if (this.speechSystem.isEnabled) {
+            this.stopSpeechRecognition();
+        } else {
+            this.startSpeechRecognition();
+        }
+    }
+
+    startSpeechRecognition() {
+        if (!this.speechSystem.enabled || !this.speechSystem.recognition) {
+            return;
+        }
+        
+        try {
+            this.speechSystem.isEnabled = true;
+            this.speechSystem.recognition.start();
+            this.log('[STT] Speech recognition started - listening for interruptions');
+            this.updateSpeechButton();
+        } catch (error) {
+            this.log(`[STT] Failed to start speech recognition: ${error.message}`);
+        }
+    }
+
+    stopSpeechRecognition() {
+        if (this.speechSystem.recognition) {
+            this.speechSystem.isEnabled = false;
+            this.speechSystem.recognition.stop();
+            this.log('[STT] Speech recognition stopped');
+            this.updateSpeechButton();
+        }
+    }
+
+    updateSpeechButton() {
+        const speechButton = document.getElementById('speech-toggle');
+        if (speechButton) {
+            if (this.speechSystem.isListening) {
+                speechButton.innerHTML = '🔴🎤'; // Red dot indicates active listening
+                speechButton.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
+                speechButton.title = 'Listening... (Click to stop)';
+            } else if (this.speechSystem.isEnabled) {
+                speechButton.innerHTML = '🟢🎤'; // Green dot indicates ready
+                speechButton.style.backgroundColor = 'rgba(0, 255, 0, 0.2)';
+                speechButton.title = 'Speech recognition enabled (Click to disable)';
+            } else {
+                speechButton.innerHTML = '🎤';
+                speechButton.style.backgroundColor = 'rgba(0, 255, 0, 0.1)';
+                speechButton.title = 'Speech recognition disabled (Click to enable)';
+            }
         }
     }
 }
