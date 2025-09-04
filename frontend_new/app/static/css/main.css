@@ -291,6 +291,8 @@ model-viewer::part(default-progress-bar) {
     overflow-x: hidden;
     margin-bottom: 8px;
     padding-right: 8px;
+}
+
 .chat-history::-webkit-scrollbar {
     width: 6px;
 }
@@ -300,7 +302,6 @@ model-viewer::part(default-progress-bar) {
 .chat-history::-webkit-scrollbar-thumb {
     background: rgba(0, 255, 65, 0.3);
     border-radius: 2px;
-}
 }
 
 .chat-history::-webkit-scrollbar {
@@ -745,16 +746,18 @@ model-viewer::part(default-progress-bar) {
     border-radius: 0;
     backdrop-filter: none;
     overflow: hidden;
-    display: flex;
+    display: flex; /* змінюємо на flex */
     flex-direction: column;
     padding-bottom: 80px;
     pointer-events: auto; /* гарантируем взаимодействие */
     touch-action: pan-y;   /* разрешаем вертикальные жесты */
+    min-height: 0; /* позволяем сжиматься */
 }
 
 .chat-container {
     flex: 1;
     overflow-y: auto;
+    overflow-x: hidden;
     padding: 8px;
     background: transparent;
     display: flex;
@@ -764,6 +767,8 @@ model-viewer::part(default-progress-bar) {
     touch-action: pan-y;  /* вертикальная прокрутка */
     -webkit-overflow-scrolling: touch; /* плавный скролл на WebKit */
     overscroll-behavior: contain; /* не прокидывать скролл за пределы */
+    max-height: 500px; /* устанавливаем фиксированную максимальную высоту */
+    min-height: 0; /* позволяем сжиматься */
 }
 
 .chat-container::-webkit-scrollbar {
@@ -1154,12 +1159,27 @@ model-viewer::part(default-progress-bar) {
     right: calc(var(--chat-width) + var(--chat-gap)); /* синхрон с шириной чата */
     background: transparent;
     pointer-events: auto;
+    overflow: hidden; /* не позволяем дочерним элементам наезжать на чат */
+    z-index: 1; /* сам панель логов ниже чата */
 }
 #logs-container-desktop {
-    height: 100%; width: 200%;
+    height: 100%; width: 100%; /* 100% чтобы не перекрывать область чата */
     overflow-y: auto; overflow-x: hidden;
     padding: 10px 12px 10px 10px;
 }
 @media (max-width: 768px) {
     .logs-panel.desktop { display: none; }
 }
+
+/* Loading overlay: по умолчанию скрыт, чтобы не перекрывать чат */
+.loading-overlay {
+    position: fixed;
+    inset: 0;
+    display: none; /* скрыто до явного включения */
+    align-items: center;
+    justify-content: center;
+    background: rgba(0,0,0,0.75);
+    z-index: 2000;
+    pointer-events: none; /* даже если покажется — не блокировать скролл */
+}
+.loading-overlay .loading-content { pointer-events: none; }
