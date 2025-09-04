@@ -5,7 +5,7 @@
 class AtlasStatusManager {
     constructor() {
         this.apiBase = window.location.origin;
-    this.refreshInterval = 5000; // частіше, щоб статуси були «живими»
+    this.refreshInterval = 8000; // 8 секунд замість 5 - менше навантаження
         this.lastRefresh = 0;
         
         this.init();
@@ -46,14 +46,28 @@ class AtlasStatusManager {
                 this.bindDots();
                 this.attachDotListeners();
             }
-            const response = await fetch(`${this.apiBase}/api/status`);
+            
+            // Додаємо timeout для запитів
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд timeout
+            
+            const response = await fetch(`${this.apiBase}/api/status`, {
+                signal: controller.signal,
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+            clearTimeout(timeoutId);
+            
             if (!response.ok) return;
             
             const status = await response.json();
             this.renderDots(status);
             
         } catch (error) {
+            // Тихо обробляємо помилки та показуємо невизначений статус
             this.renderDots(null);
+            // console.warn('[STATUS] Skipping status update:', error.name);
         }
     }
 

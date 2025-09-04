@@ -7,8 +7,8 @@ class AtlasLogger {
         this.logs = [];
         this.maxLogs = 1000;
         this.apiBase = window.location.origin;
-        this.refreshInterval = 10000; // 10 секунд замість 3 - менше спаму
-        this.fastInterval = 3000; // швидкий режим коли є активність
+        this.refreshInterval = 15000; // 15 секунд замість 10 - менше навантаження
+        this.fastInterval = 5000; // 5 секунд замість 3 - менше спаму
         this.lastRefresh = 0;
         this.lastActivity = Date.now();
         this.isActive = false;
@@ -107,7 +107,18 @@ class AtlasLogger {
         this.lastRefresh = now;
         
         try {
-            const response = await fetch(`${this.apiBase}/logs?limit=100`);
+            // Додаємо timeout для запитів
+            const controller = new AbortController();
+            const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд timeout
+            
+            const response = await fetch(`${this.apiBase}/logs?limit=100`, {
+                signal: controller.signal,
+                headers: {
+                    'Cache-Control': 'no-cache'
+                }
+            });
+            clearTimeout(timeoutId);
+            
             if (!response.ok) return;
             
             const data = await response.json();
@@ -115,7 +126,8 @@ class AtlasLogger {
                 this.displayLogs(data.logs);
             }
         } catch (error) {
-            // Тихо ігноруємо помилки логів, щоб не спамити
+            // Тихо ігноруємо помилки логів, щоб не спамити консоль
+            // console.warn('[LOGGER] Skipping logs update:', error.name);
         }
     }
     

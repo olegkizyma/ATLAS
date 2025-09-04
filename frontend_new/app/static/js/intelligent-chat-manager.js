@@ -46,7 +46,7 @@ class AtlasIntelligentChatManager {
             currentAudio: null,
         // Загальний список фолбеків (тільки валідні голоси українського TTS)
         fallbackVoices: ['dmytro', 'oleksa', 'mykyta', 'tetiana'],
-            maxRetries: 2,
+            maxRetries: 4, // Збільшуємо з 2 до 4 спроб
         // Глобальний прапорець дозволу Web Speech API як фолбеку (за замовчуванням вимкнено)
         allowWebSpeechFallback: false,
             // TTS synchronization system
@@ -714,6 +714,24 @@ class AtlasIntelligentChatManager {
 
     async synthesizeAndPlay(text, agent, retryCount = 0) {
         try {
+            // Перевіряємо доступність TTS сервісу перед запитом
+            if (retryCount === 0) {
+                try {
+                    const healthController = new AbortController();
+                    const healthTimeout = setTimeout(() => healthController.abort(), 5000);
+                    const healthResponse = await fetch(`${this.frontendBase}/api/voice/health`, { 
+                        method: 'GET',
+                        signal: healthController.signal
+                    });
+                    clearTimeout(healthTimeout);
+                    if (!healthResponse.ok) {
+                        this.log(`[VOICE] TTS service unhealthy (${healthResponse.status}), but trying anyway...`);
+                    }
+                } catch (healthError) {
+                    this.log(`[VOICE] TTS health check failed: ${healthError.message}, but trying anyway...`);
+                }
+            }
+            
             // Зупиняємо поточне відтворення
             if (this.voiceSystem.currentAudio) {
                 this.voiceSystem.currentAudio.pause();
@@ -735,9 +753,10 @@ class AtlasIntelligentChatManager {
             
             this.log(`[VOICE] Synthesizing ${agent} voice with ${voice} (attempt ${retryCount + 1})`);
             
-            // Таймаут через AbortController (браузерна fetch не підтримує timeout опцію)
+            // Збільшуємо таймаут з 15 до 30 секунд для довгих текстів
             const controller = new AbortController();
-            const t = setTimeout(() => controller.abort(), 15000);
+            const timeout = Math.max(30000, speechText.length * 50); // Мінімум 30с, +50мс за символ
+            const t = setTimeout(() => controller.abort(), timeout);
             
             // Синтезуємо голос з налаштуваннями агента
             const response = await fetch(`${this.frontendBase}/api/voice/synthesize`, {
@@ -757,9 +776,13 @@ class AtlasIntelligentChatManager {
             clearTimeout(t);
             
             if (!response.ok) {
+                // Покращена обробка помилок з детальним логуванням
+                const errorDetails = `HTTP ${response.status} ${response.statusText}`;
+                this.log(`[VOICE] TTS failed: ${errorDetails} (attempt ${retryCount + 1}/${this.voiceSystem.maxRetries + 1})`);
+                
                 // Дозволяємо ретраї для всіх агентів; фолбек-голос лише якщо дозволено
                 if (retryCount < this.voiceSystem.maxRetries) {
-                    this.log(`[VOICE] TTS HTTP ${response.status}. Retrying...`);
+                    this.log(`[VOICE] Retrying TTS in ${500 * (retryCount + 1)}ms...`);
                     await this.delay(500 * (retryCount + 1));
                     return await this.synthesizeAndPlay(text, agent, retryCount + 1);
                 }
@@ -767,7 +790,8 @@ class AtlasIntelligentChatManager {
                     const fallbackVoice = this.voiceSystem.fallbackVoices[retryCount % this.voiceSystem.fallbackVoices.length];
                     this.log(`[VOICE] Voice synthesis failed, trying fallback voice: ${fallbackVoice}`);
                     const controller2 = new AbortController();
-                    const t2 = setTimeout(() => controller2.abort(), 15000);
+                    const timeout2 = Math.max(30000, speechText.length * 50); // Такий же таймаут для fallback
+                    const t2 = setTimeout(() => controller2.abort(), timeout2);
                     const fallbackResponse = await fetch(`${this.frontendBase}/api/voice/synthesize`, {
                         method: 'POST',
                         headers: { 'Content-Type': 'application/json' },
@@ -794,10 +818,24 @@ class AtlasIntelligentChatManager {
             
         } catch (error) {
             const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
+            
+            // Покращена обробка різних типів помилок
+            let errorType = 'unknown';
+            if (error.name === 'AbortError') {
+                errorType = 'timeout';
+            } else if (/network|fetch|Failed to fetch|NetworkError/i.test(error.message)) {
+                errorType = 'network';
+            } else if (error.message.includes('502')) {
+                errorType = 'server_error';
+            }
+            
+            this.log(`[VOICE] TTS ${errorType} error (attempt ${retryCount + 1}/${this.voiceSystem.maxRetries + 1}): ${error.message}`);
+            
             // Ретраї незалежно від noFallback, але без зміни голосу
-            if (retryCount < this.voiceSystem.maxRetries && (error.name === 'AbortError' || /network|fetch|Failed to fetch|NetworkError/i.test(error.message))) {
-                this.log(`[VOICE] Synthesis error, retrying: ${error.message}`);
-                await this.delay(800 * (retryCount + 1));
+            if (retryCount < this.voiceSystem.maxRetries && ['timeout', 'network', 'server_error'].includes(errorType)) {
+                const delayMs = Math.min(1000 * (retryCount + 1), 5000); // Прогресивна затримка: 1с, 2с, 3с, 4с
+                this.log(`[VOICE] Retrying TTS in ${delayMs}ms...`);
+                await this.delay(delayMs);
                 return await this.synthesizeAndPlay(text, agent, retryCount + 1);
             }
             // Фолбек у Web Speech вимкнено за замовчуванням (можна ввімкнути через allowWebSpeechFallback)
@@ -1006,7 +1044,7 @@ class AtlasIntelligentChatManager {
     messageDiv.appendChild(labelDiv);
     messageDiv.appendChild(textDiv);
     this.chatContainer.appendChild(messageDiv);
-    this.scrollToBottomIfNeeded(type === 'user');
+    this.scrollToBottomIfNeeded(false); // agent messages always scroll to bottom
         
         // Додаємо до списку повідомлень
         this.messages.push({
@@ -1047,11 +1085,36 @@ class AtlasIntelligentChatManager {
     }
     
     formatMessage(text) {
-        // Прибираємо службовий лейбл на початку (напр. [ATLAS] або ATLAS:)
-        const stripped = (text || '').replace(/^\s*\[(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\]\s*/i, '')
-                                      .replace(/^\s*(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\s*:\s*/i, '');
-        // Далі звичайне форматування переносів
-        return stripped.replace(/\n/g, '<br>');
+        let processed = text || '';
+        
+        // 1. Прибираємо дублювання агентів на початку
+        processed = processed.replace(/^\s*\[(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\]\s*/i, '')
+                            .replace(/^\s*(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\s*:\s*/i, '');
+        
+        // 2. Прибираємо дублювання агентів після переносу рядка 
+        processed = processed.replace(/\n\s*\[(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\]\s*/gi, '\n')
+                            .replace(/\n\s*(?:ATLAS|АТЛАС|ТЕТЯНА|TETYANA|ГРИША|GRISHA)\s*:\s*/gi, '\n');
+        
+        // 3. Прибираємо всі решітки з заголовків (####, ###, ##, #)
+        processed = processed.replace(/^####\s+(.+)$/gm, '**$1**')  // #### текст -> **текст**
+                            .replace(/^###\s+(.+)$/gm, '**$1**')   // ### текст -> **текст**
+                            .replace(/^##\s+(.+)$/gm, '**$1**')    // ## текст -> **текст**
+                            .replace(/^#\s+(.+)$/gm, '**$1**');    // # текст -> **текст**
+        
+        // 4. Прибираємо зайві решітки, що залишились посеред тексту
+        processed = processed.replace(/####\s*/g, '')  // прибираємо #### посеред тексту
+                            .replace(/###\s*/g, '')   // прибираємо ### посеред тексту
+                            .replace(/##\s*/g, '')    // прибираємо ## посеред тексту
+                            .replace(/#\s+/g, '');    // прибираємо # + пробіл посеред тексту
+        
+        // 5. Робимо компактніше: зменшуємо кількість порожніх рядків
+        processed = processed.replace(/\n\s*\n\s*\n/g, '\n\n') // 3+ порожніх -> 2
+                            .replace(/^\s*\n+/, '')              // прибираємо порожні рядки на початку
+                            .replace(/\n+\s*$/, '');             // прибираємо порожні рядки в кінці
+        
+        // 6. Форматування для HTML
+        return processed.replace(/\n/g, '<br>')
+                       .replace(/\*\*(.*?)\*\*/g, '<strong>$1</strong>'); // **текст** -> <strong>текст</strong>
     }
     
     toggleVoice() {
