@@ -18,15 +18,48 @@ class AtlasLogger {
     }
     
     init() {
-        this.logsContainer = document.getElementById('logs-container');
+        // Выбираем контейнер логов в зависимости от вьюпорта (десктоп/мобайл)
+        this.logsContainer = this.selectLogsContainerByViewport();
         
         if (!this.logsContainer) {
             console.error('Logs container not found');
             return;
         }
         
+        // Переключение контейнера при изменении размера экрана (между десктопом и мобилкой)
+        const onViewportChange = () => {
+            const next = this.selectLogsContainerByViewport();
+            if (next && next !== this.logsContainer) {
+                // Переносим уже отрисованные логи в новый контейнер, сохраняя порядок
+                try {
+                    const fragment = document.createDocumentFragment();
+                    while (this.logsContainer.firstChild) {
+                        fragment.appendChild(this.logsContainer.firstChild);
+                    }
+                    next.appendChild(fragment);
+                } catch (_) { /* no-op */ }
+                this.logsContainer = next;
+                // Форсим обновление, чтобы подтянуть свежие логи в новый контейнер
+                this.refreshLogs();
+            }
+        };
+        window.addEventListener('resize', onViewportChange);
+        window.addEventListener('orientationchange', onViewportChange);
+        // Небольшая задержка на случай поздней инициализации вкладок мобильного UI
+        setTimeout(onViewportChange, 500);
+
         this.startLogStream();
         this.log('Atlas Logger initialized');
+    }
+
+    selectLogsContainerByViewport() {
+        const isMobile = window.matchMedia('(max-width: 768px)').matches;
+        const mobile = document.getElementById('logs-container');
+        const desktop = document.getElementById('logs-container-desktop');
+        if (isMobile) {
+            return mobile || desktop || null;
+        }
+        return desktop || mobile || null;
     }
     
     startLogStream() {
@@ -88,37 +121,37 @@ class AtlasLogger {
     
     displayLogs(newLogs) {
         // Не очищуємо контейнер! Логи повинні накопичуватися
-        
-        // Фільтруємо тільки нові логи (новіші за останній відомий timestamp)
-        let logsToAdd = newLogs;
-        if (this.lastLogTimestamp) {
-            logsToAdd = newLogs.filter(log => {
-                const logTime = new Date(log.timestamp).getTime();
-                const lastTime = new Date(this.lastLogTimestamp).getTime();
-                return logTime > lastTime;
-            });
-        }
-        
-        // Додаємо тільки нові логи
-        logsToAdd.forEach(log => {
-            const timestamp = log.timestamp || new Date().toTimeString().split(' ')[0];
+        // Нормализуем и сортируем по времени по возрастанию, чтобы порядок был корректным
+        const normalizeTime = (t) => new Date(t || Date.now()).getTime();
+        const sorted = [...newLogs].sort((a, b) => normalizeTime(a.timestamp) - normalizeTime(b.timestamp));
+
+        let appended = 0;
+        for (const log of sorted) {
+            const logTime = normalizeTime(log.timestamp);
+            const lastTime = this.lastLogTimestamp ? normalizeTime(this.lastLogTimestamp) : -Infinity;
+            if (logTime <= lastTime) continue; // пропускаем уже показанные
+
+            const tsStr = log.timestamp || new Date().toTimeString().split(' ')[0];
             const source = log.source ? `[${log.source}]` : '';
             const message = log.message || '';
-            
-            const logElement = document.createElement('div');
-            logElement.className = `log-line ${log.level || 'info'}`;
-            logElement.textContent = `${timestamp} ${source} ${message}`;
-            
-            // Додаємо новий лог зверху (як титри)
-            this.logsContainer.insertBefore(logElement, this.logsContainer.firstChild);
-            
-            // Оновлюємо останній timestamp
-            this.lastLogTimestamp = log.timestamp;
-        });
-        
-        // Обмежуємо кількість логів на екрані (видаляємо старі знизу)
+
+            const el = document.createElement('div');
+            el.className = `log-line ${log.level || 'info'}`;
+            el.textContent = `${tsStr} ${source} ${message}`;
+
+            // Добавляем вниз (хронологически), чтобы порядок сохранялся
+            this.logsContainer.appendChild(el);
+            this.lastLogTimestamp = log.timestamp || new Date().toISOString();
+            appended++;
+        }
+
+        // Если переполнились, удаляем лишнее сверху
         while (this.logsContainer.children.length > this.maxLogs) {
-            this.logsContainer.removeChild(this.logsContainer.lastChild);
+            this.logsContainer.removeChild(this.logsContainer.firstChild);
+        }
+
+        if (appended > 0) {
+            this.lastActivity = Date.now();
         }
     }
     

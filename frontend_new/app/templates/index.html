@@ -35,38 +35,48 @@
 
         <!-- Main Content -->
         <div class="main-content">
-            <!-- Left Panel - Logs Stream (expanded to full width) -->
-            <div class="logs-panel full-width">
-                <div id="logs-container" class="logs-container">
-                </div>
+            <!-- Desktop Logs Panel (hidden on mobile) -->
+            <div class="logs-panel desktop">
+                <div id="logs-container-desktop" class="logs-container"></div>
             </div>
 
             <!-- Minimal Chat Panel -->
             <div class="minimal-chat-panel">
                 <div class="chat-content" id="chat-content">
-                    <div id="chat-container" class="chat-container">
-                        <!-- Початкові системні повідомлення видалено на користь точок-індикаторів -->
+                    <div class="chat-tabs">
+                        <button id="tab-chat" class="tab active">Chat</button>
+                        <button id="tab-logs" class="tab">Logs</button>
                     </div>
-                    <div class="input-container">
-                        <input
-                            type="text"
-                            id="message-input"
-                            placeholder="Введіть повідомлення..."
-                            autocomplete="off"
-                            maxlength="1000"
-                        >
-                        <div class="button-row">
-                            <button id="send-button" class="btn btn-primary">
-                                <span class="btn-text">Send</span>
-                                <span class="btn-shortcut">↵</span>
-                            </button>
-                            <button id="microphone-btn" class="btn btn-secondary">
-                                <span class="btn-text">🎤</span>
-                            </button>
-                            <button id="voice-toggle" class="btn btn-secondary">
-                                <span class="btn-text">🔊</span>
-                            </button>
+
+                    <div id="chat-view" class="view active">
+                        <div id="chat-container" class="chat-container">
+                            <!-- Початкові системні повідомлення видалено на користь точок-індикаторів -->
                         </div>
+                        <div class="input-container">
+                            <input
+                                type="text"
+                                id="message-input"
+                                placeholder="Введіть повідомлення..."
+                                autocomplete="off"
+                                maxlength="1000"
+                            >
+                            <div class="button-row">
+                                <button id="send-button" class="btn btn-primary">
+                                    <span class="btn-text">Send</span>
+                                    <span class="btn-shortcut">↵</span>
+                                </button>
+                                <button id="microphone-btn" class="btn btn-secondary">
+                                    <span class="btn-text">🎤</span>
+                                </button>
+                                <button id="voice-toggle" class="btn btn-secondary">
+                                    <span class="btn-text">🔊</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="logs-view" class="view" style="display:none;">
+                        <div id="logs-container" class="logs-container"></div>
                     </div>
                 </div>
             </div>

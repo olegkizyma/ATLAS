@@ -71,6 +71,37 @@ class AtlasApp {
             chatContent.style.display = 'block';
             
             this.log('Minimal chat initialized');
+
+            // Табы Chat/Logs
+            const tabChat = document.getElementById('tab-chat');
+            const tabLogs = document.getElementById('tab-logs');
+            const chatView = document.getElementById('chat-view');
+            const logsView = document.getElementById('logs-view');
+            if (tabChat && tabLogs && chatView && logsView) {
+                const activate = (name) => {
+                    if (name === 'chat') {
+                        tabChat.classList.add('active');
+                        tabLogs.classList.remove('active');
+                        chatView.style.display = 'flex';
+                        chatView.classList.add('active');
+                        logsView.style.display = 'none';
+                        logsView.classList.remove('active');
+                    } else {
+                        tabLogs.classList.add('active');
+                        tabChat.classList.remove('active');
+                        logsView.style.display = 'flex';
+                        logsView.classList.add('active');
+                        chatView.style.display = 'none';
+                        chatView.classList.remove('active');
+                    }
+                };
+                tabChat.onclick = () => activate('chat');
+                tabLogs.onclick = () => {
+                    activate('logs');
+                    // Форсируем обновление логов при открытии вкладки
+                    try { this.managers.logger && this.managers.logger.refreshLogs(); } catch (_) {}
+                };
+            }
         }
     }
     

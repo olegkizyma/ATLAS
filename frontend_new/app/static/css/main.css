@@ -291,6 +291,16 @@ model-viewer::part(default-progress-bar) {
     overflow-x: hidden;
     margin-bottom: 8px;
     padding-right: 8px;
+.chat-history::-webkit-scrollbar {
+    width: 6px;
+}
+.chat-history::-webkit-scrollbar-track {
+    background: rgba(0, 255, 65, 0.1);
+}
+.chat-history::-webkit-scrollbar-thumb {
+    background: rgba(0, 255, 65, 0.3);
+    border-radius: 2px;
+}
 }
 
 .chat-history::-webkit-scrollbar {
@@ -401,7 +411,7 @@ model-viewer::part(default-progress-bar) {
     background: rgba(0, 0, 0, 0.6);
     border-top: 1px solid rgba(0, 255, 65, 0.3);
     display: flex;
-    align-items: center;
+    -ms-overflow-style: auto;
     justify-content: center;
     pointer-events: auto;
 }
@@ -524,8 +534,7 @@ model-viewer::part(default-progress-bar) {
 }
 
 .logs-container::-webkit-scrollbar {
-    width: 0;
-    height: 0;
+    width: 6px;
 }
 
 .log-line {
@@ -564,8 +573,8 @@ model-viewer::part(default-progress-bar) {
     background: var(--bg-panel);
     border-radius: var(--border-radius);
     margin-bottom: 8px;
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: thin; /* Firefox */
+    -ms-overflow-style: auto; /* IE and Edge */
 }
 
 .chat-input-container {
@@ -739,6 +748,8 @@ model-viewer::part(default-progress-bar) {
     display: flex;
     flex-direction: column;
     padding-bottom: 80px;
+    pointer-events: auto; /* гарантируем взаимодействие */
+    touch-action: pan-y;   /* разрешаем вертикальные жесты */
 }
 
 .chat-container {
@@ -749,28 +760,32 @@ model-viewer::part(default-progress-bar) {
     display: flex;
     flex-direction: column;
     gap: 6px;
+    pointer-events: auto; /* принимаем колесо/тач */
+    touch-action: pan-y;  /* вертикальная прокрутка */
+    -webkit-overflow-scrolling: touch; /* плавный скролл на WebKit */
+    overscroll-behavior: contain; /* не прокидывать скролл за пределы */
 }
 
 .chat-container::-webkit-scrollbar {
-    width: 0;
-    height: 0;
+    width: 6px;
 }
 
 .chat-container::-webkit-scrollbar-track {
-    background: transparent;
+    background: rgba(0, 255, 127, 0.05);
 }
 
 .chat-container::-webkit-scrollbar-thumb {
-    background: transparent;
+    background: rgba(0, 255, 127, 0.3);
+    border-radius: 3px;
 }
 
 .chat-container::-webkit-scrollbar-thumb:hover {
-    background: transparent;
+    background: rgba(0, 255, 127, 0.45);
 }
 
 .chat-container {
-    scrollbar-width: none; /* Firefox */
-    -ms-overflow-style: none; /* IE and Edge */
+    scrollbar-width: thin; /* Firefox */
+    scrollbar-color: rgba(0, 255, 127, 0.3) rgba(0, 255, 127, 0.05);
 }
 
 .input-container {
@@ -1088,4 +1103,56 @@ model-viewer::part(default-progress-bar) {
         padding: 4px 6px !important;
         font-size: 12px !important;
     }
+}
+
+/* === CHAT LAYOUT REFINEMENTS === */
+.minimal-chat-panel {
+    width: 380px; /* расширили на десктопе */
+}
+
+.chat-content {
+    width: 380px;
+}
+
+.chat-tabs { display: none; gap: 6px; padding: 6px 4px 4px; }
+.tab {
+    flex: 1;
+    background: rgba(0, 20, 10, 0.6);
+    color: #00ff7f;
+    border: 1px solid rgba(0, 255, 127, 0.3);
+    border-radius: 4px;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-family: 'Courier New', monospace;
+    font-size: 11px;
+}
+.tab.active { background: rgba(0, 255, 127, 0.2); border-color: #00ff7f; }
+.view { flex: 1; display: none; flex-direction: column; }
+.view.active { display: flex; }
+
+@media (max-width: 768px) {
+    .minimal-chat-panel {
+        left: 0; right: 0; top: 0; bottom: 0;
+        width: 100vw; /* чат на всю ширину */
+    }
+    .chat-content { width: 100%; }
+    .chat-tabs { display: flex; }
+}
+
+/* Desktop layout: logs left, chat right */
+.main-content { position: relative; min-height: 100vh; }
+.logs-panel.desktop {
+    position: absolute;
+    left: 0; top: 0; bottom: 0;
+    right: 400px; /* почти вплотную к чату на десктопе */
+    background: transparent;
+    pointer-events: auto;
+}
+#logs-container-desktop {
+    height: 100%; width: 100%;
+    overflow-y: auto; overflow-x: hidden;
+    padding: 10px 12px 10px 10px;
+}
+@media (max-width: 768px) {
+    .logs-panel.desktop { display: none; }
 }

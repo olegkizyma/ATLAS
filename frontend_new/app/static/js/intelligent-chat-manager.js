@@ -110,7 +110,8 @@ class AtlasIntelligentChatManager {
         }
         
         this.setupEventListeners();
-        this.setupTTSEventBridges();
+    this.setupAutoScroll();
+    this.setupTTSEventBridges();
         await this.initVoiceSystem();
         await this.initSpeechSystem();
         this.log('[CHAT] Intelligent Atlas Chat Manager with Voice and Speech Systems initialized');
@@ -495,7 +496,7 @@ class AtlasIntelligentChatManager {
     appendToMessage(messageTextElement, delta) {
         if (!messageTextElement) return;
         messageTextElement.innerHTML += this.formatMessage(delta);
-        this.scrollToBottom();
+    this.scrollToBottomIfNeeded();
     }
 
     async processVoiceResponse(responseText) {
@@ -1000,12 +1001,12 @@ class AtlasIntelligentChatManager {
         const textDiv = document.createElement('div');
         textDiv.className = 'message-text';
         textDiv.innerHTML = this.formatMessage(text);
-        textDiv.style.borderLeft = `3px solid ${color}`;
+    // Убираем инлайн-линию: вертикальная линия уже рисуется через CSS ::before
         
     messageDiv.appendChild(labelDiv);
     messageDiv.appendChild(textDiv);
-        this.chatContainer.appendChild(messageDiv);
-        this.scrollToBottom();
+    this.chatContainer.appendChild(messageDiv);
+    this.scrollToBottomIfNeeded(type === 'user');
         
         // Додаємо до списку повідомлень
         this.messages.push({
@@ -1026,8 +1027,8 @@ class AtlasIntelligentChatManager {
         textDiv.innerHTML = this.formatMessage(text);
         
         messageDiv.appendChild(textDiv);
-        this.chatContainer.appendChild(messageDiv);
-        this.scrollToBottom();
+    this.chatContainer.appendChild(messageDiv);
+    this.scrollToBottomIfNeeded();
         
         this.messages.push({
             text: text,
@@ -1103,6 +1104,40 @@ class AtlasIntelligentChatManager {
     scrollToBottom() {
         if (this.chatContainer) {
             this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+        }
+    }
+
+    setupAutoScroll() {
+        if (!this.chatContainer) return;
+        this.autoScrollEnabled = true;
+        const container = this.chatContainer;
+        const recompute = () => {
+            const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            // Автоскролл включен ТОЛЬКО когда реально у самого низа (<=5px)
+            this.autoScrollEnabled = distanceToBottom <= 5;
+        };
+        // первинна ініціалізація
+        setTimeout(recompute, 0);
+        container.addEventListener('scroll', recompute);
+        window.addEventListener('resize', recompute);
+
+        // При явном взаимодействии пользователя — отключаем автоскролл до возврата к низу
+        const disableOnUserIntent = () => {
+            const distanceToBottom = container.scrollHeight - container.scrollTop - container.clientHeight;
+            if (distanceToBottom > 0) this.autoScrollEnabled = false;
+        };
+        container.addEventListener('wheel', disableOnUserIntent, { passive: true });
+        container.addEventListener('touchstart', disableOnUserIntent, { passive: true });
+    }
+
+    scrollToBottomIfNeeded(force = false) {
+        if (!this.chatContainer) return;
+        if (force || this.autoScrollEnabled) {
+            try {
+                this.chatContainer.scrollTo({ top: this.chatContainer.scrollHeight, behavior: 'smooth' });
+            } catch (_) {
+                this.chatContainer.scrollTop = this.chatContainer.scrollHeight;
+            }
         }
     }
     
@@ -1355,8 +1390,8 @@ class AtlasIntelligentChatManager {
         
         messageDiv.appendChild(iconDiv);
         messageDiv.appendChild(textDiv);
-        this.chatContainer.appendChild(messageDiv);
-        this.scrollToBottom();
+    this.chatContainer.appendChild(messageDiv);
+    this.scrollToBottomIfNeeded(true);
     }
 
     showInterimSpeech(transcript) {
