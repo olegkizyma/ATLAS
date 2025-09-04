@@ -6,8 +6,13 @@
 
 set -e
 
+# За замовчуванням: реальний TTS і MPS на macOS (Apple Silicon)
+: "${REAL_TTS_MODE:=true}"
+: "${TTS_DEVICE:=mps}"
+
 echo "🍎 ATLAS macOS-Compatible Multi-Agent System"
 echo "🚀 Starting ATLAS Stack..."
+echo "🎤 TTS Mode: ${REAL_TTS_MODE} (Device: ${TTS_DEVICE})"
 
 # 1. Налаштування Python Environment
 echo "🐍 Setting up Python environment..."
@@ -223,7 +228,7 @@ fi
 echo "✅ Port check completed"
 
 # 1.5. Запуск Ukrainian TTS (Mock або Реальний) на Port 3001
-if [ "${REAL_TTS_MODE:-false}" = "true" ]; then
+if [ "${REAL_TTS_MODE:-true}" = "true" ]; then
     echo "🎤 Starting REAL Ukrainian TTS (ukrainian-tts) on port 3001..."
     if lsof -ti:3001 > /dev/null 2>&1; then
         echo "⚠️  Port 3001 is busy. Skipping real TTS startup."
