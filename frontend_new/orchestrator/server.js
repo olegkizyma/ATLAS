@@ -2152,14 +2152,37 @@ let __copilotTokenCache = { ok: null, ts: 0, reason: '', source: '' };
 
 function getGooseConfigDir() {
   const xdg = process.env.XDG_CONFIG_HOME || path.join(os.homedir(), '.config');
-  // у наших скриптах XDG_CONFIG_HOME=/.../ATLAS/goose, тож конфіги лежать у <XDG>/goose
+  // Support both layouts:
+  // 1) XDG/goose (when XDG_CONFIG_HOME points to ~/.config or repo/goose)
+  // 2) repo-local goose/.config/goose (common in this repo)
+  const candidates = [];
+  // If XDG already ends with '.config', prefer <XDG>/goose
+  if (/\.config\/?$/.test(xdg)) {
+    candidates.push(path.join(xdg, 'goose'));
+  }
+  // If XDG points to repo/goose, our older scripts expected <XDG>/goose
+  candidates.push(path.join(xdg, 'goose'));
+  // Repo-local fallback: <repo>/goose/.config/goose
+  try {
+    const repoRoot = process.cwd();
+    candidates.push(path.join(repoRoot, 'goose', '.config', 'goose'));
+  } catch {}
+
+  for (const dir of candidates) {
+    try { if (fs.existsSync(dir)) return dir; } catch {}
+  }
+  // Fallback to <XDG>/goose
   return path.join(xdg, 'goose');
 }
 
 function readCopilotInfoJson() {
   try {
-    const p = path.join(getGooseConfigDir(), 'githubcopilot', 'info.json');
-    if (!fs.existsSync(p)) return { ok: false, reason: 'info.json not found' };
+    const primary = path.join(getGooseConfigDir(), 'githubcopilot', 'info.json');
+    const alt = (() => {
+      try { const repoRoot = process.cwd(); return path.join(repoRoot, 'goose', '.config', 'goose', 'githubcopilot', 'info.json'); } catch { return null; }
+    })();
+    const p = fs.existsSync(primary) ? primary : (alt && fs.existsSync(alt) ? alt : null);
+    if (!p) return { ok: false, reason: 'info.json not found' };
     const raw = fs.readFileSync(p, 'utf-8');
     const j = JSON.parse(raw);
 
@@ -2188,8 +2211,12 @@ function readCopilotInfoJson() {
 
 function readCopilotTokenFromSecretsYaml() {
   try {
-    const p = path.join(getGooseConfigDir(), 'secrets.yaml');
-    if (!fs.existsSync(p)) return { ok: false, reason: 'secrets.yaml not found' };
+    const primary = path.join(getGooseConfigDir(), 'secrets.yaml');
+    const alt = (() => {
+      try { const repoRoot = process.cwd(); return path.join(repoRoot, 'goose', '.config', 'goose', 'secrets.yaml'); } catch { return null; }
+    })();
+    const p = fs.existsSync(primary) ? primary : (alt && fs.existsSync(alt) ? alt : null);
+    if (!p) return { ok: false, reason: 'secrets.yaml not found' };
     const raw = fs.readFileSync(p, 'utf-8');
     // простий парсер YAML-рядка ключа (без зовнішніх залежностей)
     const m = raw.match(/^\s*GITHUB_COPILOT_TOKEN\s*:\s*(.+)\s*$/m);
