@@ -74,6 +74,11 @@ mcp_tts_ukrainian/tts_venv/
 mcp_tts_ukrainian/data/
 mcp_tts_ukrainian/*.wav
 mcp_tts_ukrainian/test_audio.wav
-mcp_tts_ukrainian/demo_*.wav# Local secrets should never be committed
+mcp_tts_ukrainian/demo_*.wav
+
+# Local secrets should never be committed
 /goose/goose/secrets.yaml
 /goose/goose/githubcopilot/info.json
+
+# Playwright files
+.playwright-mcp

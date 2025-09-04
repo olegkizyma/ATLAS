@@ -695,7 +695,8 @@ model-viewer::part(default-progress-bar) {
     position: fixed;
     bottom: 20px;
     right: 20px;
-    width: 280px;
+    top: 20px;
+    width: 320px;
     z-index: 1000;
     display: flex;
     flex-direction: column;
@@ -722,10 +723,10 @@ model-viewer::part(default-progress-bar) {
 
 .chat-content {
     position: absolute;
-    bottom: 35px;
+    bottom: 5px;
     right: 0;
-    width: 280px;
-    max-height: 380px;
+    top: 0;
+    width: 320px;
     background: transparent;
     border: none;
     border-radius: 0;
@@ -733,6 +734,7 @@ model-viewer::part(default-progress-bar) {
     overflow: hidden;
     display: flex;
     flex-direction: column;
+    padding-bottom: 80px;
 }
 
 .chat-container {
@@ -743,7 +745,6 @@ model-viewer::part(default-progress-bar) {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    max-height: 300px;
 }
 
 .chat-container::-webkit-scrollbar {
@@ -764,13 +765,17 @@ model-viewer::part(default-progress-bar) {
 }
 
 .input-container {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
     display: flex;
     flex-direction: column;
-    padding: 8px;
+    padding: 1px;
     gap: 6px;
     border-top: none;
-    background: transparent;
-    backdrop-filter: none;
+    background: rgba(0, 0, 0, 0.7);
+    backdrop-filter: blur(5px);
 }
 
 .input-container input {
@@ -792,8 +797,8 @@ model-viewer::part(default-progress-bar) {
 }
 
 .input-container button {
-    background: rgba(0, 255, 127, 0.8);
-    color: #000;
+    background: rgba(0, 20, 10, 0.6);
+    color: #00ff7f;
     border: none;
     border-radius: 4px;
     padding: 8px 12px;
@@ -802,22 +807,99 @@ model-viewer::part(default-progress-bar) {
     font-weight: bold;
     transition: all 0.3s ease;
     min-width: 60px;
+    font-family: 'Courier New', monospace;
 }
 
 .input-container button:hover {
-    background: #00ff7f;
-    transform: translateY(-1px);
-    box-shadow: 0 2px 6px rgba(0, 255, 127, 0.4);
+    background: rgba(0, 20, 10, 0.8);
+    box-shadow: 0 0 6px rgba(0, 255, 127, 0.3);
 }
 
 .input-container button:active {
     transform: translateY(0);
 }
 
+.input-container button:disabled {
+    background: rgba(64, 64, 64, 0.3);
+    color: #666666;
+    cursor: not-allowed;
+}
+
 .button-row {
     display: flex;
     gap: 6px;
     justify-content: space-between;
+}
+
+/* Button Styles */
+.btn {
+    flex: 1;
+    background: rgba(0, 20, 10, 0.6);
+    color: #00ff7f;
+    border: none;
+    border-radius: 4px;
+    padding: 6px 8px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: bold;
+    transition: all 0.3s ease;
+    font-family: 'Courier New', monospace;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 32px;
+}
+
+.btn:hover {
+    background: rgba(0, 20, 10, 0.8);
+    box-shadow: 0 0 6px rgba(0, 255, 127, 0.3);
+}
+
+.btn:active {
+    transform: translateY(1px);
+}
+
+.btn:disabled {
+    background: rgba(64, 64, 64, 0.3);
+    color: #666666;
+    cursor: not-allowed;
+}
+
+.btn-primary {
+    background: rgba(0, 255, 127, 0.2);
+}
+
+.btn-primary:hover:not(:disabled) {
+    background: rgba(0, 255, 127, 0.3);
+}
+
+.btn-secondary {
+    background: rgba(0, 20, 10, 0.6);
+}
+
+.btn-secondary:hover:not(:disabled) {
+    background: rgba(0, 20, 10, 0.8);
+}
+
+.btn-text {
+    display: inline-block;
+}
+
+.btn-shortcut {
+    font-size: 10px;
+    opacity: 0.7;
+    margin-left: 4px;
+}
+
+.btn.listening {
+    animation: pulse 1.5s ease-in-out infinite;
+    box-shadow: 0 0 10px rgba(255, 0, 0, 0.5);
+}
+
+@keyframes pulse {
+    0% { opacity: 1; }
+    50% { opacity: 0.7; }
+    100% { opacity: 1; }
 }
 
 /* === INTELLIGENT VOICE SYSTEM STYLES === */

@@ -63,11 +63,12 @@ class AtlasIntelligentChatManager {
             recognition: null,
             isListening: false,
             isEnabled: false,
+            permissionDenied: false,
             continuous: true,
             interimResults: true,
             language: 'uk-UA', // Ukrainian as primary
             fallbackLanguage: 'en-US',
-            confidenceThreshold: 0.7,
+            confidenceThreshold: 0.5, // Знижено з 0.7 до 0.5 для кращого розпізнання
             // Interruption detection
             interruptionKeywords: [
                 'стоп', 'stop', 'чекай', 'wait', 'припини', 'pause',
@@ -179,18 +180,14 @@ class AtlasIntelligentChatManager {
     }
     
     addVoiceControls() {
-        // Додаємо кнопку управління голосом біля чату
-        const voiceButton = document.createElement('button');
-        voiceButton.id = 'voice-toggle';
-        voiceButton.className = 'voice-control-btn';
-        voiceButton.innerHTML = '🔊';
-        voiceButton.title = 'Toggle voice responses';
-        voiceButton.onclick = () => this.toggleVoice();
-        
-        // Знаходимо місце для кнопки
-        const chatControls = this.chatButton.parentElement;
-        if (chatControls) {
-            chatControls.appendChild(voiceButton);
+        // Використовуємо існуючу кнопку voice-toggle замість створення нової
+        const existingVoiceButton = document.getElementById('voice-toggle');
+        if (existingVoiceButton) {
+            existingVoiceButton.onclick = () => this.toggleVoice();
+            existingVoiceButton.title = 'Увімкнути/Вимкнути озвучування';
+            this.log('[VOICE] Voice controls initialized with existing button');
+        } else {
+            this.log('[VOICE] Warning: voice-toggle button not found');
         }
         
         // Додаємо індикатор поточного агента
@@ -1158,8 +1155,8 @@ class AtlasIntelligentChatManager {
             this.updateSpeechButton();
             this.log('[STT] Speech recognition ended');
             
-            // Auto-restart if still enabled
-            if (this.speechSystem.isEnabled && !this.speechSystem.isListening) {
+            // Only auto-restart if enabled AND no permission error
+            if (this.speechSystem.isEnabled && !this.speechSystem.isListening && !this.speechSystem.permissionDenied) {
                 setTimeout(() => this.startSpeechRecognition(), 1000);
             }
         };
@@ -1167,6 +1164,14 @@ class AtlasIntelligentChatManager {
         recognition.onerror = (event) => {
             this.log(`[STT] Speech recognition error: ${event.error}`);
             this.speechSystem.isListening = false;
+            
+            // If permission denied, disable auto-restart
+            if (event.error === 'not-allowed') {
+                this.speechSystem.permissionDenied = true;
+                this.speechSystem.isEnabled = false;
+                this.log('[STT] Microphone permission denied. STT disabled.');
+            }
+            
             this.updateSpeechButton();
         };
 
@@ -1183,11 +1188,13 @@ class AtlasIntelligentChatManager {
             
             this.log(`[STT] Recognized: "${transcript}" (confidence: ${confidence.toFixed(2)})`);
             
+            // Show interim speech display for all recognition results
+            this.showInterimSpeech(transcript);
+            
             if (result.isFinal && confidence > this.speechSystem.confidenceThreshold) {
                 await this.processSpeechInput(transcript, confidence);
-            } else if (!result.isFinal) {
-                // Show interim results for feedback
-                this.showInterimSpeech(transcript);
+                // Hide interim display after processing final result
+                this.hideInterimSpeech();
             }
         }
     }
@@ -1247,6 +1254,25 @@ class AtlasIntelligentChatManager {
             
             // Add visual feedback for interruption
             this.addInterruptionMessage(transcript, isCommand ? 'command' : 'interruption');
+        } else {
+            // Normal speech input - send to chat
+            this.log(`[STT] Speech input: "${transcript}" (confidence: ${confidence.toFixed(2)})`);
+            await this.sendSpeechToChat(transcript, confidence);
+        }
+    }
+
+    async sendSpeechToChat(transcript, confidence) {
+        // Fill the chat input with recognized text
+        const chatInput = document.getElementById('chat-input');
+        if (chatInput) {
+            chatInput.value = transcript;
+            this.log(`[STT] Text filled in chat input: "${transcript}"`);
+            
+            // Trigger send automatically
+            await this.sendMessage();
+            this.log(`[STT] Message sent to chat automatically`);
+        } else {
+            this.log(`[STT] Chat input not found, cannot send speech text`);
         }
     }
 
@@ -1303,62 +1329,79 @@ class AtlasIntelligentChatManager {
             interimDiv.className = 'interim-speech';
             interimDiv.style.cssText = `
                 position: fixed;
-                bottom: 80px;
-                left: 20px;
-                right: 20px;
-                background: rgba(0, 255, 0, 0.1);
-                border: 1px solid #00ff00;
-                padding: 10px;
-                border-radius: 5px;
-                font-family: monospace;
-                color: #00ff00;
-                z-index: 1000;
-                font-size: 14px;
-                backdrop-filter: blur(5px);
+                top: 50%;
+                left: 50%;
+                transform: translate(-50%, -50%);
+                background: rgba(0, 0, 0, 0.9);
+                border: 2px solid #00ff7f;
+                padding: 30px 40px;
+                border-radius: 10px;
+                font-family: 'Courier New', monospace;
+                color: #00ff7f;
+                z-index: 10000;
+                font-size: 24px;
+                text-align: center;
+                min-width: 50%;
+                max-width: 80%;
+                backdrop-filter: blur(10px);
+                box-shadow: 0 0 20px rgba(0, 255, 127, 0.3);
+                text-shadow: 0 0 5px rgba(0, 255, 127, 0.5);
+                animation: pulse-border 2s infinite;
             `;
+            
+            // Add CSS animation for border pulsing
+            if (!document.getElementById('stt-animation-style')) {
+                const style = document.createElement('style');
+                style.id = 'stt-animation-style';
+                style.textContent = `
+                    @keyframes pulse-border {
+                        0%, 100% { border-color: #00ff7f; }
+                        50% { border-color: #00ff41; }
+                    }
+                `;
+                document.head.appendChild(style);
+            }
+            
             document.body.appendChild(interimDiv);
         }
         
-        interimDiv.innerHTML = `<strong>Слухаю:</strong> ${transcript}`;
+        interimDiv.innerHTML = `
+            <div style="font-size: 16px; margin-bottom: 10px; opacity: 0.8;">🎤 ПРОСЛУХОВУЄМО</div>
+            <div style="font-weight: bold;">${transcript}</div>
+            <div style="font-size: 12px; margin-top: 10px; opacity: 0.6;">Продовжуйте говорити або зачекайте для відправки...</div>
+        `;
         
-        // Clear interim display after 2 seconds of no updates
+        // Clear interim display after 3 seconds of no updates
         clearTimeout(this.interimTimeout);
         this.interimTimeout = setTimeout(() => {
             if (interimDiv && interimDiv.parentNode) {
                 interimDiv.parentNode.removeChild(interimDiv);
             }
-        }, 2000);
+        }, 3000);
+    }
+
+    hideInterimSpeech() {
+        const interimDiv = document.getElementById('interim-speech');
+        if (interimDiv && interimDiv.parentNode) {
+            interimDiv.parentNode.removeChild(interimDiv);
+            this.log('[STT] Interim speech display hidden');
+        }
+        // Clear any pending timeout
+        if (this.interimTimeout) {
+            clearTimeout(this.interimTimeout);
+            this.interimTimeout = null;
+        }
     }
 
     addSpeechControls() {
-        // Add speech toggle button
-        const speechButton = document.createElement('button');
-        speechButton.id = 'speech-toggle';
-        speechButton.className = 'speech-control-btn';
-        speechButton.innerHTML = '🎤';
-        speechButton.title = 'Toggle speech recognition (STT)';
-        speechButton.onclick = () => this.toggleSpeechRecognition();
-        speechButton.style.cssText = `
-            margin-left: 5px;
-            padding: 8px 12px;
-            background: rgba(0, 255, 0, 0.1);
-            border: 1px solid #00ff00;
-            border-radius: 4px;
-            color: #00ff00;
-            cursor: pointer;
-            font-size: 16px;
-        `;
-        
-        // Add next to voice controls
-        const voiceButton = document.getElementById('voice-toggle');
-        if (voiceButton && voiceButton.parentElement) {
-            voiceButton.parentElement.appendChild(speechButton);
+        // Use existing microphone button instead of creating new one
+        const microphoneBtn = document.getElementById('microphone-btn');
+        if (microphoneBtn) {
+            microphoneBtn.onclick = () => this.toggleSpeechRecognition();
+            microphoneBtn.title = 'Речевий ввід (натисніть для запуску/зупинки STT)';
+            this.log('[STT] Speech controls initialized with existing microphone button');
         } else {
-            // If no voice button, add to input container
-            const inputContainer = this.chatInput.parentElement;
-            if (inputContainer) {
-                inputContainer.appendChild(speechButton);
-            }
+            this.log('[STT] Warning: microphone button not found');
         }
     }
 
@@ -1400,20 +1443,25 @@ class AtlasIntelligentChatManager {
     }
 
     updateSpeechButton() {
-        const speechButton = document.getElementById('speech-toggle');
-        if (speechButton) {
+        const microphoneBtn = document.getElementById('microphone-btn');
+        const micBtnText = microphoneBtn?.querySelector('.btn-text');
+        
+        if (microphoneBtn && micBtnText) {
             if (this.speechSystem.isListening) {
-                speechButton.innerHTML = '🔴🎤'; // Red dot indicates active listening
-                speechButton.style.backgroundColor = 'rgba(255, 0, 0, 0.2)';
-                speechButton.title = 'Listening... (Click to stop)';
+                micBtnText.textContent = '🔴 Слухаю'; // Red dot indicates active listening
+                microphoneBtn.style.background = 'rgba(255, 0, 0, 0.4)';
+                microphoneBtn.title = 'Прослуховуємо... (натисніть для зупинки)';
+                microphoneBtn.classList.add('listening');
             } else if (this.speechSystem.isEnabled) {
-                speechButton.innerHTML = '🟢🎤'; // Green dot indicates ready
-                speechButton.style.backgroundColor = 'rgba(0, 255, 0, 0.2)';
-                speechButton.title = 'Speech recognition enabled (Click to disable)';
+                micBtnText.textContent = '🟢 Мікрофон'; // Green dot indicates ready
+                microphoneBtn.style.background = 'rgba(0, 255, 0, 0.4)';
+                microphoneBtn.title = 'Речевий ввід готовий (натисніть для вимкнення)';
+                microphoneBtn.classList.remove('listening');
             } else {
-                speechButton.innerHTML = '🎤';
-                speechButton.style.backgroundColor = 'rgba(0, 255, 0, 0.1)';
-                speechButton.title = 'Speech recognition disabled (Click to enable)';
+                micBtnText.textContent = '🎤 Мікрофон';
+                microphoneBtn.style.background = 'rgba(0, 20, 10, 0.6)';
+                microphoneBtn.title = 'Речевий ввід вимкнений (натисніть для ввімкнення)';
+                microphoneBtn.classList.remove('listening');
             }
         }
     }
