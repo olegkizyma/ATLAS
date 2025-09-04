@@ -1793,10 +1793,13 @@ async function streamTetianaMessage(messageText, sessionId, res, options = {}) {
       // Потік через WebSocket /ws з авто-відповідями Атласа на уточнення
       return await streamTetianaWs(gooseBase, payload, res, sessionId);
     } catch (e) {
-      const msg = e?.message || '';
+      const rawMsg = e?.message || '';
+      // Normalize whitespace/newlines so errors split across lines are detectable
+      const msg = String(rawMsg).replace(/\s+/g, ' ');
       const tooLong = /model_max_prompt_tokens_exceeded|prompt token count/i.test(msg);
       const notFound = /404|not\s*found/i.test(msg);
-  const toolCallsSeq = /tool_calls.*must\s*be\s*followed\s*by\s*tool\s*messages|tool\s*messages\s*responding\s*to\s*each\s*tool_call_id|messages?\s*with\s*role\s*['"]tool['"][^\n]*must\s*be\s*a\s*prece?e?d(?:ing|ent)\s*message\s*with\s*['"]tool_calls['"]/i.test(msg);
+      // Robust detection of Copilot tool/tool_calls sequencing error regardless of line breaks
+      const toolCallsSeq = /tool_calls.*must\s*be\s*followed\s*by\s*tool\s*messages|tool\s*messages\s*responding\s*to\s*each\s*tool_call_id|messages?\s*with\s*role\s*['"]tool['"][^]*?must\s*be\s*a\s*prece?e?d(?:ing|ent)\s*message\s*with\s*['"]?t\s*o\s*o\s*l\s*_\s*c\s*a\s*l\s*l\s*s['"]/i.test(msg);
       if (tooLong) {
         console.log('[CONTEXT_LIMIT] Goose Web reported token overflow. Falling back to SSE with extra compression...');
         const fallbackMax = Math.max(2000, Math.floor(ORCH_MAX_MISTRAL_USER_CHARS * 0.5));
