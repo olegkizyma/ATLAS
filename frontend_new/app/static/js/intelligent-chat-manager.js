@@ -1202,6 +1202,8 @@ class AtlasIntelligentChatManager {
     async processSpeechInput(transcript, confidence) {
         const lowerTranscript = transcript.toLowerCase();
         
+        this.log(`[STT] Processing speech input: "${transcript}" (lowercase: "${lowerTranscript}")`);
+        
         // Check for interruption keywords
         const isInterruption = this.speechSystem.interruptionKeywords.some(
             keyword => lowerTranscript.includes(keyword)
@@ -1211,6 +1213,8 @@ class AtlasIntelligentChatManager {
         const isCommand = this.speechSystem.commandKeywords.some(
             keyword => lowerTranscript.includes(keyword)
         );
+
+        this.log(`[STT] Classification - isInterruption: ${isInterruption}, isCommand: ${isCommand}`);
 
         if (isInterruption || isCommand) {
             this.log(`[STT] ${isCommand ? 'Command' : 'Interruption'} detected: "${transcript}"`);
@@ -1262,17 +1266,35 @@ class AtlasIntelligentChatManager {
     }
 
     async sendSpeechToChat(transcript, confidence) {
+        this.log(`[STT] Attempting to send speech to chat: "${transcript}"`);
+        
+        // Check if transcript is not empty
+        if (!transcript || transcript.trim().length === 0) {
+            this.log('[STT] Empty transcript, not sending to chat');
+            return;
+        }
+        
         // Fill the chat input with recognized text
-        const chatInput = document.getElementById('chat-input');
+        const chatInput = document.getElementById('message-input');
         if (chatInput) {
-            chatInput.value = transcript;
-            this.log(`[STT] Text filled in chat input: "${transcript}"`);
+            chatInput.value = transcript.trim();
+            this.log(`[STT] Text filled in chat input: "${transcript.trim()}"`);
             
-            // Trigger send automatically
-            await this.sendMessage();
-            this.log(`[STT] Message sent to chat automatically`);
+            try {
+                // Trigger send automatically
+                await this.sendMessage();
+                this.log(`[STT] Message sent to chat automatically`);
+            } catch (error) {
+                this.log(`[STT] Error sending message: ${error.message}`);
+            }
         } else {
-            this.log(`[STT] Chat input not found, cannot send speech text`);
+            this.log(`[STT] Chat input element not found (looking for 'message-input')`);
+            // Try to find any input element as fallback
+            const allInputs = document.querySelectorAll('input[type="text"], input:not([type])');
+            this.log(`[STT] Found ${allInputs.length} input elements on page`);
+            for (let i = 0; i < allInputs.length; i++) {
+                this.log(`[STT] Input ${i}: id="${allInputs[i].id}", placeholder="${allInputs[i].placeholder}"`);
+            }
         }
     }
 
