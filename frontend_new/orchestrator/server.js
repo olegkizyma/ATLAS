@@ -1186,9 +1186,9 @@ async function callAtlas(userMessage, sessionId, options = {}) {
       }
       
       return {
-  user_reply: (userReply && userReply.trim()) || politeFallbackReply(userMessage),
+        user_reply: (userReply && userReply.trim()) || politeFallbackReply(userMessage),
         task_spec: taskSpec,
-        _attemptsUsed: maxAttempts,
+        _attemptsUsed: usedAttempts,
         _fallbackUsed: 'local_api',
         _keyUsed: 'fallback'
       };
@@ -1206,7 +1206,7 @@ async function callAtlas(userMessage, sessionId, options = {}) {
           tools_needed: [],
           msps_needed: []
         },
-        _attemptsUsed: maxAttempts,
+        _attemptsUsed: usedAttempts,
         _fallbackUsed: 'minimal',
         _keyUsed: null
       };
@@ -1240,33 +1240,51 @@ const FALLBACK_MODELS = {
 };
 
 async function callFallbackAPI(messages, model, options = {}) {
-  try {
-    console.log(`[Fallback] Using local API with model: ${model}`);
-    
-    const requestBody = {
-      model: model,
-      messages: messages,
-      max_tokens: options.max_tokens || 2048,
-      temperature: options.temperature || 0.7
-    };
-    
-    const response = await axios.post(`${FALLBACK_API_BASE}/chat/completions`, requestBody, {
+  const requestBody = {
+    model: model,
+    messages: messages,
+    max_tokens: options.max_tokens || 2048,
+    temperature: options.temperature || 0.7
+  };
+
+  const postOnce = async (base) => {
+    const url = `${base.replace(/\/$/, '')}/chat/completions`;
+    return axios.post(url, requestBody, {
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer dummy-key' // Local API doesn't validate keys
+        'Authorization': 'Bearer dummy-key'
       },
       timeout: 45000
     });
-    
-    if (response.data && response.data.choices && response.data.choices[0]) {
+  };
+
+  console.log(`[Fallback] Using local API with model: ${model}`);
+  try {
+    const response = await postOnce(FALLBACK_API_BASE);
+    if (response.data?.choices?.[0]) {
       const content = response.data.choices[0].message.content;
       console.log(`[Fallback] Received response from ${model}: ${content.substring(0, 100)}...`);
       return content;
     }
-    
-    throw new Error('No valid response from fallback API');
-    
   } catch (error) {
+    const status = error?.response?.status;
+    const base = String(FALLBACK_API_BASE);
+    // Auto-switch between /v1 and /api if a 404 occurs (external providers may expose /api)
+    if (status === 404) {
+      let altBase = base.includes('/v1') ? base.replace('/v1', '/api') : base.includes('/api') ? base.replace('/api', '/v1') : base + '/v1';
+      try {
+        console.warn(`[Fallback] ${base} returned 404. Retrying with ${altBase}...`);
+        const response = await postOnce(altBase);
+        if (response.data?.choices?.[0]) {
+          const content = response.data.choices[0].message.content;
+          console.log(`[Fallback] Received response from ${model} (alt base): ${content.substring(0, 100)}...`);
+          return content;
+        }
+      } catch (e2) {
+        console.error(`[Fallback] Alt base failed:`, e2?.response?.status || e2.message);
+        throw e2;
+      }
+    }
     console.error(`[Fallback] Error calling local API with ${model}:`, error.message);
     throw error;
   }
@@ -2229,6 +2247,16 @@ function cleanUserReply(text) {
   // прибрати зайві лапки навколо
   out = out.replace(/^"(.+)"$/s, '$1');
   return out.trim();
+}
+
+// Helper for polite short fallback reply in Ukrainian
+function politeFallbackReply(userMessage) {
+  const msg = String(userMessage || '').trim();
+  if (!msg) return 'Дякую, прийняв запит. Зараз підготую відповідь.';
+  // коротка ввічлива відповідь без зайвих префіксів
+  const maxLen = 320;
+  const echo = msg.length > maxLen ? msg.slice(0, maxLen) + '…' : msg;
+  return `Коротко по суті: ${echo}`;
 }
 
 // Запуск сервера
