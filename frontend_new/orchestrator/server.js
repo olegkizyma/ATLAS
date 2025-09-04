@@ -13,6 +13,8 @@ import os from 'os';
 
 const app = express();
 const PORT = process.env.ORCH_PORT || 5101;
+const GRISHA_CONFIDENCE_THRESHOLD = Math.max(0, Math.min(1, parseFloat(process.env.GRISHA_CONFIDENCE_THRESHOLD || '0.8')));
+const GRISHA_MAX_VERIFY_ITER = Math.max(1, parseInt(process.env.GRISHA_MAX_VERIFY_ITER || '3', 10));
 
 app.use(cors({
     origin: '*',
@@ -73,6 +75,77 @@ const generateMessageId = () => `msg_${Date.now()}_${++messageCounter}`;
 const logMessage = (level, message) => {
     console.log(`[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`);
 };
+
+// Tetyana structured report helpers
+function tetianaSystemInstruction({ enableTools } = { enableTools: false }) {
+    const base = [
+        'Ти — Тетяна, виконавиця. Відповідай СТИСЛО та ЧІТКО, лише факти і результати.',
+        'ЗАВЖДИ ПОВЕРТАЙ структурований звіт за шаблоном нижче українською.',
+        '',
+        'Формат звіту:',
+        '1) РЕЗЮМЕ (1-2 речення): коротко що зроблено і статус.',
+        '2) КРОКИ: нумерований список виконаних кроків.',
+        '3) РЕЗУЛЬТАТИ: ключові результати з конкретикою (шляхи файлів, команди, посилання).',
+        '4) ДОКАЗИ: мапа criterion -> evidence (мінімум 2 критерії) у вигляді списку.',
+        '5) ПЕРЕВІРКА: як ти перевірила результат (що саме і яким способом).',
+        '6) СТАТУС: Done | Blocked (з причиною) | Needs Clarification (з конкретним питанням).',
+        '',
+        'Відповідь починай з підпису [ТЕТЯНА]. Уникай розлогих міркувань.'
+    ];
+    if (enableTools) {
+        base.push('Якщо потрібно — використовуй доступні інструменти/дії (файли/OS/додатки). Віддавай перевагу реальному виконанню, а не симуляції.');
+    }
+    return base.join('\n');
+}
+
+function isVagueTetianaResponse(text) {
+    const t = String(text || '').toLowerCase().trim();
+    if (!t) return true;
+    const generic = ['завдання опрацьовано', 'завдання виконано', 'готово', 'готовий', 'готова'];
+    return generic.some(g => t === g || t.startsWith(g));
+}
+
+function validateTetianaReport(text) {
+    const t = String(text || '');
+    const hasResume = /\bРЕЗЮМЕ\b/i.test(t);
+    const hasSteps = /\bКРОКИ\b/i.test(t);
+    const hasResults = /\bРЕЗУЛЬТАТИ\b/i.test(t);
+    const hasEvidence = /\bДОКАЗИ\b/i.test(t) || /criterion\s*->\s*evidence/i.test(t);
+    const hasVerification = /\bПЕРЕВІРКА\b/i.test(t);
+    const hasStatus = /\bСТАТУС\b/i.test(t);
+    const missing = [];
+    if (!hasResume) missing.push('РЕЗЮМЕ');
+    if (!hasSteps) missing.push('КРОКИ');
+    if (!hasResults) missing.push('РЕЗУЛЬТАТИ');
+    if (!hasEvidence) missing.push('ДОКАЗИ');
+    if (!hasVerification) missing.push('ПЕРЕВІРКА');
+    if (!hasStatus) missing.push('СТАТУС');
+    return { ok: missing.length === 0, missing };
+}
+
+function enforceTetianaStructure(text) {
+    let out = String(text || '').trim();
+    if (!out.startsWith('[ТЕТЯНА]')) {
+        out = `[ТЕТЯНА] ${out}`;
+    }
+    const v = validateTetianaReport(out);
+    if (v.ok) return out;
+    const template = [
+        out,
+        '',
+        'РЕЗЮМЕ: —',
+        'КРОКИ:',
+        '1.',
+        '2.',
+        'РЕЗУЛЬТАТИ:',
+        '•',
+        'ДОКАЗИ (criterion -> evidence):',
+        '• критерій: … -> доказ: …',
+        'ПЕРЕВІРКА: —',
+        'СТАТУС: Needs Clarification — доповнити відсутні частини: ' + v.missing.join(', ')
+    ];
+    return template.join('\n');
+}
 
 // Agent dialogue system
 class AgentDialogueManager {
@@ -247,7 +320,8 @@ app.post('/chat/stream', async (req, res) => {
             session: {
                 id: sessionId,
                 currentAgent: session.currentAgent,
-                requiresUserCommand: dialogueManager.requiresUserCommand()
+                requiresUserCommand: dialogueManager.requiresUserCommand(),
+                nextAction: session.nextAction || null
             }
         });
 
@@ -325,12 +399,30 @@ async function processAgentCycle(userMessage, session) {
     responses.push(atlasResponse);
     session.history.push(atlasResponse);
 
-    // If message looks actionable (OS/app/file commands) -> invoke Tetyana to execute
+    // If message looks actionable (OS/app/file commands) -> staged pipeline with TTS pacing
     if (isActionableTask(userMessage)) {
-        const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\n\nВиконай кроки та коротко звітуй.`;
-        const tetyanaExec = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
-        responses.push(tetyanaExec);
-        session.history.push(tetyanaExec);
+        // 1) Grisha precheck now; execution deferred until frontend TTS completes
+        const precheckPrompt = [
+            'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
+            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ», де кожен пункт — конкретне завдання з очікуваним артефактом.',
+            '',
+            `Завдання користувача: ${userMessage}`,
+            `План Atlas: ${atlasResponse.content}`
+        ].join('\n');
+        const grishaPre = await generateAgentResponse('grisha', precheckPrompt, session);
+        responses.push(grishaPre);
+        session.history.push(grishaPre);
+
+        // Save pipeline state and instruct frontend to call /chat/continue after TTS
+        session.pipeline = {
+            type: 'actionable',
+            stage: 'prechecked',
+            userMessage,
+            atlasPlan: atlasResponse.content,
+            grishaPre: grishaPre.content,
+            iter: 0
+        };
+        session.nextAction = 'tetyana_execute';
         return responses;
     }
 
@@ -354,6 +446,96 @@ async function processAgentCycle(userMessage, session) {
 
     return responses;
 }
+
+// Continue staged pipeline after TTS completes on the frontend
+app.post('/chat/continue', async (req, res) => {
+    try {
+        const { sessionId } = req.body || {};
+        if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
+        const session = sessions.get(sessionId);
+        if (!session || !session.pipeline) return res.status(400).json({ error: 'No active pipeline for session' });
+
+        const responses = [];
+        const pipe = session.pipeline;
+
+        if (pipe.type === 'actionable' && pipe.stage === 'prechecked') {
+            // Execute by Tetiana
+            const execPrompt = `Завдання користувача: ${pipe.userMessage}\nПлан Atlas: ${pipe.atlasPlan}\nВимоги Гриші: ${pipe.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
+            const tetyanaExec = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+            responses.push(tetyanaExec);
+            session.history.push(tetyanaExec);
+
+            // Verify by Grisha
+            const verify = await grishaVerifyWithGoose(pipe.userMessage, pipe.atlasPlan, tetyanaExec.content, session.id);
+            const confirmed = verify.confidence >= GRISHA_CONFIDENCE_THRESHOLD;
+            const verdictMsg = confirmed
+                ? `Незалежна перевірка: CONF=${verify.confidence.toFixed(2)} — Завдання ПІДТВЕРДЖЕНО виконаним.`
+                : `Незалежна перевірка: CONF=${verify.confidence.toFixed(2)} — Недостатньо доказів. Посилити перевірку.`;
+            const grishaVerdict = await generateAgentResponse('grisha', verdictMsg + (verify.result?.summary ? `\n${verify.result.summary}` : ''), session);
+            responses.push(grishaVerdict);
+            session.history.push(grishaVerdict);
+
+            if (!confirmed) {
+                const missing = (verify.result?.criteria || []).filter(c => c && c.result === false).map(c => c.name);
+                const ask = `Потрібно надати додаткові докази по: ${missing.join(', ') || 'не визначено'}. Надати конкретні шляхи/вміст/виходи команд.`;
+                const grishaFollow = await generateAgentResponse('grisha', ask, session);
+                responses.push(grishaFollow);
+                session.history.push(grishaFollow);
+                // update pipeline for next continuation
+                pipe.stage = 'needs_more';
+                pipe.need = missing;
+                pipe.lastReport = tetyanaExec.content;
+                session.nextAction = 'tetyana_supplement';
+            } else {
+                // clear pipeline
+                session.pipeline = null;
+                session.nextAction = null;
+            }
+        } else if (pipe.type === 'actionable' && pipe.stage === 'needs_more') {
+            pipe.iter = (pipe.iter || 0) + 1;
+            const extraPrompt = `Додаткові докази потрібні по: ${pipe.need?.join(', ') || 'не визначено'}. Надати конкретні файли/вміст/виходи команд. Онови звіт.`;
+            const tetyanaMore = await generateAgentResponse('tetyana', extraPrompt, session, { enableTools: true });
+            responses.push(tetyanaMore);
+            session.history.push(tetyanaMore);
+
+            const verify = await grishaVerifyWithGoose(pipe.userMessage, pipe.atlasPlan, tetyanaMore.content, session.id);
+            const confirmed = verify.confidence >= GRISHA_CONFIDENCE_THRESHOLD;
+            const verdictMsg = confirmed
+                ? `Незалежна повторна перевірка: CONF=${verify.confidence.toFixed(2)} — Завдання ПІДТВЕРДЖЕНО.`
+                : `Незалежна повторна перевірка: CONF=${verify.confidence.toFixed(2)} — Недостатньо доказів.`;
+            const grishaVerdict = await generateAgentResponse('grisha', verdictMsg + (verify.result?.summary ? `\n${verify.result.summary}` : ''), session);
+            responses.push(grishaVerdict);
+            session.history.push(grishaVerdict);
+
+            if (!confirmed && pipe.iter < GRISHA_MAX_VERIFY_ITER) {
+                const missing = (verify.result?.criteria || []).filter(c => c && c.result === false).map(c => c.name);
+                const ask = `Ще потрібно посилити докази по: ${missing.join(', ') || 'не визначено'}.`;
+                const grishaFollow = await generateAgentResponse('grisha', ask, session);
+                responses.push(grishaFollow);
+                session.history.push(grishaFollow);
+                pipe.need = missing;
+                session.nextAction = 'tetyana_supplement';
+            } else {
+                session.pipeline = null;
+                session.nextAction = null;
+            }
+        }
+
+        res.json({
+            success: true,
+            response: responses,
+            session: {
+                id: session.id,
+                currentAgent: session.currentAgent,
+                requiresUserCommand: dialogueManager.requiresUserCommand(),
+                nextAction: session.nextAction || null
+            }
+        });
+    } catch (error) {
+        logMessage('error', `/chat/continue failed: ${error.message}`);
+        res.status(500).json({ error: 'continue failed', details: error.message });
+    }
+});
 
 // Heuristics: detect actionable tasks that require an executor (Tetyana)
 function isActionableTask(text) {
@@ -408,26 +590,42 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     
     if (agentName === 'tetyana') {
         // Tetiana strictly uses Goose
-        const gooseText = await callGooseAgent(prompt, session.id, { enableTools: options.enableTools === true });
-        content = gooseText || 'Завдання опрацьовано.';
+    let gooseText = await callGooseAgent(prompt, session.id, { enableTools: options.enableTools === true, systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true }) });
+        if (!gooseText || isVagueTetianaResponse(gooseText)) {
+            logMessage('warn', 'Tetyana returned vague/empty response. Retrying with strict report-only instruction.');
+            const strictPrompt = `${tetianaSystemInstruction({ enableTools: options.enableTools === true })}\n\nКонтекст завдання:\n${inputMessage}\n\nСФОРМУЙ ЛИШЕ ЗВІТ за наведеним шаблоном. Без зайвих пояснень.`;
+            gooseText = await callGooseAgent(strictPrompt, session.id, { enableTools: options.enableTools === true, systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true }) }) || gooseText;
+        }
+        content = enforceTetianaStructure(gooseText || 'Завдання опрацьовано.');
         provider = 'goose';
         model = 'github_copilot';
     } else {
-        // Try OpenAI-compatible failover for Atlas/Grisha first
-        const tried = await tryOpenAICompatForAgent(agentName, prompt);
-        if (tried && tried.text) {
-            content = tried.text;
-            provider = tried.provider;
-            model = tried.model;
+        // Prefer Goose even for Atlas/Grisha (live intelligence), tools disabled
+        const sysInstr = (agentName === 'atlas')
+            ? 'Ти — ATLAS (стратег). Стисло сформуй план дій з чіткими кроками та точками контролю. Уникай води.'
+            : 'Ти — ГРИША (контролер). Перевір план на безпеку та здійсненність, дай стислий конструктивний фідбек.';
+        const gooseText = await callGooseAgent(prompt, session.id, { enableTools: false, systemInstruction: sysInstr });
+        if (gooseText) {
+            content = gooseText;
+            provider = 'goose';
+            model = 'github_copilot';
         } else {
-            // Fallback to local simulation
-            content = await simulateAgentThinking(agentName, prompt);
+            // Try OpenAI-compatible failover
+            const tried = await tryOpenAICompatForAgent(agentName, prompt);
+            if (tried && tried.text) {
+                content = tried.text;
+                provider = tried.provider;
+                model = tried.model;
+            } else {
+                // Final minimal fallback
+                content = await simulateAgentThinking(agentName, prompt);
+            }
         }
     }
     
     return {
         role: 'assistant',
-        content: `${agent.signature} ${content}`,
+    content: `${agent.signature} ${content.replace(/^\[ТЕТЯНА\]\s*/i, '')}`,
         agent: agentName,
         messageId: messageId,
         timestamp: Date.now(),
@@ -446,7 +644,7 @@ async function callGooseAgent(message, sessionId, opts = {}) {
     try {
         // If tools are explicitly enabled, prefer SSE (it supports tool_choice)
         if (opts?.enableTools) {
-            const sseToolsResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey, { enableTools: true });
+            const sseToolsResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey, { enableTools: true, systemInstruction: opts.systemInstruction });
             if (sseToolsResult) return sseToolsResult;
         }
 
@@ -455,7 +653,7 @@ async function callGooseAgent(message, sessionId, opts = {}) {
         if (result) return result;
         
         // Fallback to SSE /reply endpoint (tools disabled)
-        const sseResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey, { enableTools: false });
+    const sseResult = await callGooseSSE(gooseBaseUrl, message, sessionId, secretKey, { enableTools: false, systemInstruction: opts.systemInstruction });
         if (sseResult) return sseResult;
         
     // Final fallback -> signal failure so that upper layer can switch provider
@@ -540,7 +738,7 @@ async function callGooseWebSocket(baseUrl, message, sessionId, secretKey) {
 }
 
 // SSE integration with Goose (fallback)
-async function callGooseSSE(baseUrl, message, sessionId, secretKey, options = { enableTools: false }) {
+async function callGooseSSE(baseUrl, message, sessionId, secretKey, options = { enableTools: false, systemInstruction: undefined }) {
     try {
         const url = `${baseUrl}/reply`;
         const headers = {
@@ -551,11 +749,11 @@ async function callGooseSSE(baseUrl, message, sessionId, secretKey, options = { 
         
         // Build OpenAI-compatible messages; include a system instruction to allow tool usage when enabled
         const messages = [];
-        if (options?.enableTools) {
+        if (options?.systemInstruction) {
             messages.push({
                 role: 'system',
                 created: Math.floor(Date.now() / 1000),
-                content: [{ type: 'text', text: 'You are Tetiana, the executor. Use available tools to perform OS/app/file actions when needed. Prefer real execution over simulation. Keep responses concise.' }]
+                content: [{ type: 'text', text: options.systemInstruction }]
             });
         }
         messages.push({
@@ -729,6 +927,85 @@ function getRecentHistory(session, count = 3) {
         .slice(-count)
         .map(msg => `${msg.role}: ${msg.content.substring(0, 200)}`)
         .join('\n');
+}
+
+// ----------------------------
+// Grisha independent verification via Goose
+// ----------------------------
+
+function grishaVerificationSessionId(baseSessionId) {
+    const ts = Date.now();
+    return `${baseSessionId || 'default'}-grisha-verify-${ts}`;
+}
+
+function extractJson(text) {
+    // Try to extract the last JSON object from text
+    const s = String(text || '');
+    const start = s.lastIndexOf('{');
+    const end = s.lastIndexOf('}');
+    if (start !== -1 && end !== -1 && end > start) {
+        try { return JSON.parse(s.slice(start, end + 1)); } catch (_) {}
+    }
+    return null;
+}
+
+async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, baseSessionId) {
+    const verifySession = grishaVerificationSessionId(baseSessionId);
+    let iteration = 0;
+    let confidence = 0;
+    let lastResult = null;
+    let notes = [];
+
+    while (iteration < GRISHA_MAX_VERIFY_ITER) {
+        iteration++;
+        const verifyPrompt = [
+            'Ти — Гриша, незалежний валідаційний агент. Твоє завдання — ПЕРЕВІРИТИ твердження Тетяни незалежно, використовуючи доступ до системи (файли/OS/додатки).',
+            'Працюй акуратно, виконуй перевірки інструментами, якщо потрібно.',
+            'Поверни РІВНО JSON з полями:',
+            '{ "criteria": [ { "name": string, "result": true|false, "evidence": string }... ], "confidence": number (0..1), "summary": string }',
+            '',
+            `Завдання користувача: ${userMessage}`,
+            `План Atlas: ${atlasPlan}`,
+            `Звіт Тетяни: ${tetyanaReport}`,
+            '',
+            'Валідаційні інструкції:',
+            '- Перевіряй наявність артефактів, вміст файлів, коректність шляхів, результати команд.',
+            '- Для кожного критерію надай конкретний доказ (evidence), напр. абсолютний шлях, фрагмент вмісту, вихід команди).',
+            '- Оціни загальну впевненість у діапазоні 0..1.'
+        ].join('\n');
+
+    const grishaSys = 'Ти — Гриша, валідаційний агент. Виконуй перевірки інструментально. ПОВЕРТАЙ СТРОГО JSON: { "criteria": [ { "name": string, "result": true|false, "evidence": string } ], "confidence": number, "summary": string }';
+    const gooseOut = await callGooseAgent(verifyPrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
+        const parsed = extractJson(gooseOut);
+        if (parsed && typeof parsed === 'object') {
+            lastResult = parsed;
+            confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
+            notes.push(`iter${iteration}: conf=${confidence}`);
+            if (confidence >= GRISHA_CONFIDENCE_THRESHOLD) break;
+            // Refine: ask to focus on failed criteria only
+            const failed = (parsed.criteria || []).filter(c => c && c.result === false).map(c => c.name).join(', ');
+            if (failed) {
+                const refinePrompt = [
+                    'Попередня валідація недостатня. Посилити перевірку по провалених критеріях:',
+                    failed,
+                    'ПОВЕРНИ ЛИШЕ JSON у тому ж форматі, підтверджуючи або спростовуючи.'
+                ].join('\n');
+                const refine = await callGooseAgent(refinePrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
+                const refParsed = extractJson(refine);
+                if (refParsed && typeof refParsed === 'object' && typeof refParsed.confidence === 'number') {
+                    lastResult = refParsed;
+                    confidence = refParsed.confidence;
+                }
+            }
+        } else {
+            // Could not parse JSON; treat as low confidence and break to avoid loop
+            lastResult = { criteria: [], confidence: 0, summary: 'Неможливо розібрати відповідь Goose.' };
+            confidence = 0;
+            break;
+        }
+    }
+
+    return { result: lastResult, confidence, iterations: iteration, notes };
 }
 
 // SSE endpoint for real-time streaming

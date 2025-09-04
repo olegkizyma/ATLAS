@@ -343,7 +343,14 @@ class AtlasIntelligentChatManager {
                 if (this.voiceSystem.ttsQueue.length > 0) {
                     this.processTTSQueue();
                 }
-                
+
+                // If orchestrator indicates nextAction, continue pipeline only after TTS completes
+                if (data.session && data.session.nextAction) {
+                    this.log(`[CHAT] Next action scheduled: ${data.session.nextAction}. Waiting for TTS to finish...`);
+                    await this.waitForTTSIdle(60000);
+                    await this.continuePipeline(data.session.id, 0);
+                }
+
                 this.log('Agent conversation completed successfully');
             } else {
                 throw new Error('Invalid response format from orchestrator');
@@ -371,6 +378,50 @@ class AtlasIntelligentChatManager {
         } finally {
             this.isStreaming = false;
             clearTimeout(timeoutId);
+        }
+    }
+
+    async continuePipeline(sessionId, depth = 0) {
+        if (!sessionId) return;
+        if (depth > 5) { this.log('[CHAT] Max continuation depth reached'); return; }
+        try {
+            const response = await fetch(`${this.orchestratorBase}/chat/continue`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ sessionId })
+            });
+            if (!response.ok) {
+                const t = await response.text().catch(() => '');
+                throw new Error(`continue HTTP ${response.status}: ${t}`);
+            }
+            const data = await response.json();
+            if (!(data && data.success && Array.isArray(data.response))) {
+                this.log('[CHAT] Invalid continue payload');
+                return;
+            }
+
+            // Render responses
+            for (const agentResponse of data.response) {
+                const agent = agentResponse.agent || 'atlas';
+                const content = agentResponse.content || '';
+                const signature = agentResponse.signature || this.voiceSystem.agents[agent]?.signature;
+                this.addVoiceMessage(content, agent, signature);
+                if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
+                    this.voiceSystem.ttsQueue.push({ text: content.replace(/^\[.*?\]\s*/, ''), agent });
+                }
+                await this.delay(400);
+            }
+            if (this.voiceSystem.ttsQueue.length > 0) {
+                this.processTTSQueue();
+            }
+
+            if (data.session && data.session.nextAction) {
+                this.log(`[CHAT] Next action: ${data.session.nextAction}. Waiting for TTS…`);
+                await this.waitForTTSIdle(60000);
+                return await this.continuePipeline(data.session.id, depth + 1);
+            }
+        } catch (error) {
+            this.log(`[CHAT] Continue pipeline failed: ${error.message}`);
         }
     }
     appendToMessage(messageTextElement, delta) {

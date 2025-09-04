@@ -48,7 +48,8 @@ goose_client = GooseClient(base_url="http://localhost:3000", secret_key="test")
 # Configuration
 FRONTEND_PORT = int(os.environ.get('FRONTEND_PORT', 5001))
 ORCHESTRATOR_URL = os.environ.get('ORCHESTRATOR_URL', 'http://localhost:5101')
-TTS_SERVER_URL = os.environ.get('TTS_SERVER_URL', 'http://localhost:3000')
+# Default TTS points to Ukrainian TTS server on port 3001 (can be overridden via env)
+TTS_SERVER_URL = os.environ.get('TTS_SERVER_URL', 'http://127.0.0.1:3001')
 
 # Agent voice configuration
 AGENT_VOICES = {
@@ -268,16 +269,21 @@ def synthesize_voice():
         # Try Ukrainian TTS server first
         if requests:
             try:
-                tts_response = requests.post(f'{TTS_SERVER_URL}/synthesize',
-                                           json={
-                                               'text': text,
-                                               'voice': voice_name,
-                                               'agent': agent
-                                           },
-                                           timeout=10)
+                # Ukrainian TTS server expects /tts and returns JSON by default.
+                # Ask it to return an audio WAV file directly.
+                tts_response = requests.post(
+                    f'{TTS_SERVER_URL}/tts',
+                    json={
+                        'text': text,
+                        'voice': voice_name,
+                        'agent': agent,
+                        'return_audio': True
+                    },
+                    timeout=15
+                )
                 
                 if tts_response.status_code == 200:
-                    # Save audio file temporarily and return it
+                    # If server returned a file, forward it as audio/wav
                     with tempfile.NamedTemporaryFile(delete=False, suffix='.wav') as temp_file:
                         temp_file.write(tts_response.content)
                         temp_path = temp_file.name
@@ -287,8 +293,8 @@ def synthesize_voice():
                                    as_attachment=False,
                                    download_name=f'{agent}_{int(datetime.now().timestamp())}.wav')
                 
-            except Exception:
-                logger.warning("TTS server unavailable, falling back to mock")
+            except Exception as e:
+                logger.warning(f"TTS server unavailable, falling back to browser TTS: {e}")
         
         # Fallback: return success for Web Speech API to handle
         return jsonify({
