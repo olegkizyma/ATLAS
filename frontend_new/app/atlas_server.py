@@ -379,6 +379,21 @@ def handle_voice_interrupt():
         logger.error(f"Voice interruption handling error: {e}")
         return jsonify({'error': 'Voice interruption handling failed'}), 500
 
+@app.route('/api/status')
+def status():
+    """Simple status endpoint for Status Manager"""
+    return jsonify({
+        'timestamp': datetime.now().isoformat(),
+        'processes': {
+            'frontend': {'count': 1, 'status': 'running'},
+            'orchestrator': {'count': 1 if check_orchestrator_health() == 'running' else 0, 'status': check_orchestrator_health()},
+            'recovery': {'count': 1, 'status': 'running'},  # Recovery bridge is usually running if frontend is up
+            'tts': {'count': 1 if check_tts_health() == 'running' else 0, 'status': check_tts_health()}
+        },
+        'memory': {'usage': 50},  # Placeholder
+        'network': {'active': True}
+    })
+
 @app.route('/api/system/status')
 def system_status():
     """Get complete system status"""

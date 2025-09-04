@@ -27,7 +27,13 @@ class AtlasApp {
         try {
             // Ініціалізуємо менеджери в правильному порядку
             this.managers.logger = new AtlasLogger();
+            
+            // Робимо logger глобально доступним відразу
+            window.atlasLogger = this.managers.logger;
+            
+            // Ініціалізуємо status manager
             this.managers.status = new AtlasStatusManager();
+            window.atlasStatus = this.managers.status;
             
             // Використовуємо інтелектуальний чат-менеджер з голосовою системою
             // Конструктор сам викликає initVoiceSystem(); додатковий виклик прибрано, щоб уникнути дублю
@@ -36,10 +42,9 @@ class AtlasApp {
             // Ініціалізуємо мінімалістичний чат
             this.initMinimalChat();
             
-            // Робимо глобально доступними
-            window.atlasLogger = this.managers.logger;
+            // Робимо інші менеджери глобально доступними
             window.atlasChat = this.managers.chat;
-            window.atlasStatus = this.managers.status;
+            // atlasStatus вже встановлений вище, якщо існує
             
             this.isInitialized = true;
             this.log('Atlas Intelligent Application initialized successfully');

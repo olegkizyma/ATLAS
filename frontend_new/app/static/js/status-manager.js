@@ -19,7 +19,8 @@ class AtlasStatusManager {
         this.resourceStatus = document.getElementById('resourceStatus');
         
         if (!this.statusPanel) {
-            console.warn('Status panel not found - status monitoring disabled (logs-only mode)');
+            // Status panel not found - running in minimal interface mode
+            this.log('Running in minimal interface mode (no status panel)');
             return;
         }
         
