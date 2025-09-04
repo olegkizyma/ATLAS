@@ -87,8 +87,16 @@ class AtlasServer:
         
         @self.app.route('/static/<path:filename>')
         def static_files(filename):
-            """Статичні файли"""
-            return send_from_directory(self.app.static_folder, filename)
+            """Статичні файли з відключеним кешуванням для розробки"""
+            from flask import make_response
+            response = make_response(send_from_directory(self.app.static_folder, filename))
+            
+            # Відключаємо кешування для розробки
+            response.headers['Cache-Control'] = 'no-cache, no-store, must-revalidate'
+            response.headers['Pragma'] = 'no-cache'
+            response.headers['Expires'] = '0'
+            
+            return response
         
         @self.app.route('/logs')
         def get_logs():
