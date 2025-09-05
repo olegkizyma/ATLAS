@@ -22,15 +22,29 @@ class STTManager:
     
     def __init__(self):
         self.whisper_model = None
-        self.model_size = os.getenv('WHISPER_MODEL', 'base')
-        self.device = os.getenv('WHISPER_DEVICE', 'cpu')
+        self.model_size = os.getenv('WHISPER_MODEL', 'large-v3')
+        # Normalize device (allow 'mps' from PyTorch users by mapping to auto)
+        raw_device = os.getenv('WHISPER_DEVICE', 'cpu').lower()
+        if raw_device == 'mps':
+            # CTranslate2 does not recognize 'mps'; best effort is 'auto'
+            logger.info("WHISPER_DEVICE=mps detected. Mapping to device=auto for CTranslate2 (Metal).")
+            self.device = 'auto'
+        else:
+            self.device = raw_device
+        # Compute type (quantization/precision)
+        # Defaults: int8 for CPU/auto, float16 for CUDA if not explicitly set
+        env_ct = (os.getenv('WHISPER_COMPUTE_TYPE') or '').strip().lower()
+        if env_ct:
+            self.compute_type = env_ct
+        else:
+            self.compute_type = 'float16' if self.device == 'cuda' else 'int8'
         self.temp_dir = os.getenv('WHISPER_TEMP_DIR', tempfile.gettempdir())
-        
+
         # Підтримувані формати
         self.allowed_extensions = {
             'wav', 'mp3', 'mp4', 'm4a', 'aac', 'ogg', 'flac', 'webm', 'opus'
         }
-        
+
         self._init_whisper()
     
     def _init_whisper(self) -> bool:
@@ -40,11 +54,11 @@ class STTManager:
             return False
         
         try:
-            logger.info(f"Завантажую Whisper модель: {self.model_size} на {self.device}")
+            logger.info(f"Завантажую Whisper модель: {self.model_size} на {self.device} (compute_type={self.compute_type})")
             self.whisper_model = WhisperModel(
                 self.model_size, 
                 device=self.device,
-                compute_type="int8"
+                compute_type=self.compute_type
             )
             logger.info("✅ Whisper модель успішно завантажена")
             return True
@@ -132,6 +146,7 @@ class STTManager:
             'whisper_available': self.is_whisper_available(),
             'whisper_model': self.model_size if self.is_whisper_available() else None,
             'device': self.device,
+            'compute_type': getattr(self, 'compute_type', None),
             'supported_formats': list(self.allowed_extensions),
             'fallback_available': True,  # Web Speech API завжди доступний у браузері
         }

@@ -43,11 +43,11 @@ class LLMClient:
                  base_url: Optional[str] = None,
                  model: Optional[str] = None,
                  api_key: Optional[str] = None,
-                 timeout: int = 20):
+                 timeout: float = 20.0):
         self.base_url = (base_url or os.environ.get('INTENT_LLM_BASE') or '').rstrip('/')
         self.model = model or os.environ.get('INTENT_LLM_MODEL') or 'gpt-4o-mini'
         self.api_key = api_key or os.environ.get('INTENT_LLM_API_KEY') or ''
-        self.timeout = max(5, timeout)
+        self.timeout = max(0.5, float(timeout))
 
     def is_configured(self) -> bool:
         return bool(self.base_url and requests)
@@ -77,29 +77,61 @@ class LLMClient:
             return None
 
 
+def _heuristic_intent(user_text: str) -> str:
+    """Lightweight fallback classifier: returns 'task' if clear action triggers, else 'chat'."""
+    if not user_text or not user_text.strip():
+        return 'chat'
+    s = user_text.strip().lower()
+    # Quick exits
+    if len(s) < 60 and not any(ch.isdigit() for ch in s):
+        q_words = ("як справи", "привіт", "дякую", "дяка", "ок", "окей", "hi", "hello", "thanks")
+        if any(w in s for w in q_words):
+            return 'chat'
+    # Action triggers (UA + EN)
+    triggers = (
+        'запусти', 'порахуй', 'створи', 'відкрий', 'скачай', 'перевір', 'зроби', 'надішли', 'знайди', 'зміни', 'онови',
+        'напиши', 'згенеруй', 'проаналізуй', 'побудуй', 'розрахуй', 'налаштуй', 'видали', 'запусти скрипт',
+        'run', 'create', 'open', 'download', 'check', 'do ', 'send', 'find', 'change', 'update', 'write', 'generate',
+        'analyze', 'build', 'calculate', 'setup', 'configure', 'delete'
+    )
+    if any(t in s for t in triggers):
+        return 'task'
+    # "How to" patterns
+    howto = ("як зробити", "як налаштувати", "how to", "інструкц")
+    if any(h in s for h in howto):
+        return 'task'
+    return 'chat'
+
+
 def classify_intent(user_text: str, client: Optional[LLMClient] = None) -> str:
-    """Return 'chat' or 'task' using LLM-only prompt; defaults to 'chat' on failure."""
-    client = client or LLMClient()
+    """Return 'chat' or 'task' using LLM; fallback to heuristic if LLM unavailable/invalid."""
+    # Prefer a short timeout for intent
+    try:
+        ms = int(os.environ.get('INTENT_LLM_TIMEOUT_MS', '800'))
+    except Exception:
+        ms = 800
+    if client is None:
+        client = LLMClient(timeout=max(0.5, ms / 1000.0))
     messages = [
         {"role": "system", "content": INTENT_SYSTEM_PROMPT},
         {"role": "user", "content": user_text or ''}
     ]
+    if not client.is_configured():
+        return _heuristic_intent(user_text)
     raw = client.chat(messages)
     if not raw:
-        return 'chat'
+        return _heuristic_intent(user_text)
     try:
-        # Accept either pure JSON or JSON fenced in backticks
         s = raw.strip()
         if s.startswith('```'):
             s = s.strip('`')
-            # might contain json\n prefix
             if s.lower().startswith('json'):
                 s = s[4:]
         obj = json.loads(s)
         intent = str(obj.get('intent', 'chat')).lower()
         return 'task' if intent == 'task' else 'chat'
     except Exception:
-        return 'chat'
+        return _heuristic_intent(user_text)
 
 
 def generate_casual_reply(user_text: str, client: Optional[LLMClient] = None) -> str:

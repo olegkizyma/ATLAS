@@ -47,6 +47,10 @@ echo "========================================"
 
 # Запуск всіх сервісів
 if [ -f "./start_stack_macos.sh" ]; then
+    # Увімкнути GPU/Metal для Whisper STT за замовчуванням (не перезаписує користувацькі значення)
+    export WHISPER_DEVICE=${WHISPER_DEVICE:-auto}
+    export WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+    echo "🎧 STT defaults: WHISPER_DEVICE=$WHISPER_DEVICE, WHISPER_COMPUTE_TYPE=$WHISPER_COMPUTE_TYPE (override to float16/int8_float16 if supported)"
     ./start_stack_macos.sh
 else
     echo "❌ start_stack_macos.sh not found!"

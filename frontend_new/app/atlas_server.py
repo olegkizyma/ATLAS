@@ -22,7 +22,7 @@ import tempfile
 import subprocess
 from pathlib import Path
 from goose_client import GooseClient
-from intent_router import classify_intent, generate_casual_reply
+# intent classification is handled in orchestrator now
 from stt_manager import stt_manager
 from typing import Optional
 import io
@@ -510,60 +510,29 @@ def chat_with_tetyana():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Main chat endpoint with intent routing: casual chat vs task execution"""
+    """Main chat endpoint: pure proxy to orchestrator for unified LLM intent and replies"""
     try:
         data = request.get_json()
         message = data.get('message', '')
         session_id = data.get('sessionId', 'default')
         user_id = data.get('userId', 'user')
-        
+
         if not message.strip():
             return jsonify({'error': 'Message cannot be empty'}), 400
 
-        # 1) Classify user's intent with prompt-only router (no keywords)
-        try:
-            intent = classify_intent(message)
-        except Exception:
-            intent = 'chat'
+        if not requests:
+            return jsonify({'error': 'Requests module unavailable'}), 500
 
-        if intent == 'chat':
-            # 2) Stay at Atlas level: generate a short, friendly reply and do not invoke tools/agents
-            try:
-                reply = generate_casual_reply(message)
-            except Exception:
-                reply = f"Отримав повідомлення: {message}"
-            return jsonify({
-                'success': True,
-                'response': [{
-                    'role': 'assistant',
-                    'content': f'[ATLAS] {reply}',
-                    'agent': 'atlas',
-                    'voice': AGENT_VOICES.get('atlas', {}).get('voice', 'dmytro')
-                }]
-            })
-
-        # 3) intent == 'task': forward to orchestrator (existing behavior)
-        if requests:
-            response = requests.post(
-                f'{ORCHESTRATOR_URL}/chat/stream',
-                json={'message': message, 'sessionId': session_id, 'userId': user_id},
-                timeout=30
-            )
-            if response.status_code == 200:
-                return jsonify(response.json())
-            else:
-                return jsonify({'error': 'Orchestrator error'}), response.status_code
+        response = requests.post(
+            f'{ORCHESTRATOR_URL}/chat/stream',
+            json={'message': message, 'sessionId': session_id, 'userId': user_id},
+            timeout=30
+        )
+        if response.status_code == 200:
+            return jsonify(response.json())
         else:
-            return jsonify({
-                'success': True,
-                'response': [{
-                    'role': 'assistant',
-                    'content': f'[ATLAS] Отримав повідомлення: {message}',
-                    'agent': 'atlas',
-                    'voice': 'dmytro'
-                }]
-            })
-            
+            return jsonify({'error': 'Orchestrator error'}), response.status_code
+
     except Exception as e:
         if requests and hasattr(e, '__class__') and 'RequestException' in str(e.__class__):
             logger.error(f"Orchestrator connection failed: {e}")
@@ -980,7 +949,8 @@ def stt_transcribe():
             file.save(temp_file.name)
             
             # Отримуємо параметри з форми
-            language = request.form.get('language')  # None для автовизначення
+            # Якщо мова не задана клієнтом, дефолтимо на українську ('uk')
+            language = request.form.get('language') or 'uk'
             beam_size = int(request.form.get('beam_size', 5))
             temperature = float(request.form.get('temperature', 0.0))
             
@@ -1025,6 +995,7 @@ def stt_models():
             'current_model': stt_manager.model_size if stt_manager.is_whisper_available() else None,
             'available_models': available_models,
             'device': stt_manager.device,
+            'compute_type': getattr(stt_manager, 'compute_type', None),
             'web_speech_available': True  # Завжди доступний у браузері
         })
     except Exception as e:

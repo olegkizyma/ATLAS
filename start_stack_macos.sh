@@ -10,6 +10,10 @@ set -e
 : "${REAL_TTS_MODE:=true}"
 : "${TTS_DEVICE:=mps}"
 
+# Whisper STT GPU/Metal (Apple Silicon) — безпечні значення за замовчуванням
+export WHISPER_DEVICE=${WHISPER_DEVICE:-auto}
+export WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+
 echo "🍎 ATLAS macOS-Compatible Multi-Agent System"
 echo "🚀 Starting ATLAS Stack..."
 echo "🎤 TTS Mode: ${REAL_TTS_MODE} (Device: ${TTS_DEVICE})"

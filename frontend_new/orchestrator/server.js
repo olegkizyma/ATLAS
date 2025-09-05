@@ -10,6 +10,7 @@ import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
+import ModelRegistry from './model_registry.js';
 
 const app = express();
 const PORT = process.env.ORCH_PORT || 5101;
@@ -33,12 +34,37 @@ async function callOpenAICompatChat(baseUrl, model, userMessage) {
         messages: [ { role: 'user', content: userMessage } ],
         stream: false
     };
-    const headers = { 'Content-Type': 'application/json' };
+    const apiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || '';
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {})
+    };
     const resp = await axios.post(url, payload, { headers, timeout: 20000 });
     if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
     const text = resp.data?.choices?.[0]?.message?.content;
     return (typeof text === 'string' && text.trim()) ? text.trim() : null;
 }
+
+async function callOpenAICompatChatWithTimeout(baseUrl, model, userMessage, timeoutMs = 1500) {
+    const url = `${baseUrl}/chat/completions`;
+    const payload = {
+        model,
+        messages: [ { role: 'user', content: userMessage } ],
+        stream: false
+    };
+    const apiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || '';
+    const headers = {
+        'Content-Type': 'application/json',
+        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {})
+    };
+    const resp = await axios.post(url, payload, { headers, timeout: timeoutMs });
+    if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
+    const text = resp.data?.choices?.[0]?.message?.content;
+    return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+}
+
+// Dynamic model/provider registry
+const registry = new ModelRegistry();
 
 // Agent configurations
 const AGENTS = {
@@ -75,6 +101,7 @@ const generateMessageId = () => `msg_${Date.now()}_${++messageCounter}`;
 const logMessage = (level, message) => {
     console.log(`[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`);
 };
+
 
 // Tetyana structured report helpers
 function tetianaSystemInstruction({ enableTools } = { enableTools: false }) {
@@ -208,6 +235,24 @@ app.get('/agents', (req, res) => {
     res.json(AGENTS);
 });
 
+// Providers/admin endpoints
+app.get('/providers/state', (req, res) => {
+    try {
+        return res.json(registry.getState());
+    } catch (e) {
+        return res.status(500).json({ error: 'failed to get state', details: e.message });
+    }
+});
+
+app.post('/providers/check', async (req, res) => {
+    try {
+        await registry.checkAllProviders();
+        return res.json(registry.getState());
+    } catch (e) {
+        return res.status(500).json({ error: 'failed to run health checks', details: e.message });
+    }
+});
+
 // Main chat processing endpoint
 // Direct Tetyana endpoint
 app.post('/agent/tetyana', async (req, res) => {
@@ -219,22 +264,54 @@ app.post('/agent/tetyana', async (req, res) => {
 
         logMessage('info', `Direct Tetyana request: ${message.substring(0, 100)}...`);
 
-        // Tetiana strictly uses Goose
-        const gooseContent = await callGooseAgent(message, sessionId);
-        if (!gooseContent) {
+        // 1) Виконання: Тетяна працює ТІЛЬКИ через Goose (без провайдерних фолбеків)
+        const sys = tetianaSystemInstruction({ enableTools: true });
+        const gooseExec = await callGooseAgent(message, sessionId, { enableTools: true, systemInstruction: sys });
+        if (!gooseExec) {
             return res.status(502).json({ error: 'Goose is unavailable for Tetiana' });
         }
 
+        // 2) Короткий звіт: формуємо через openai-compat з окремого списку моделей (до 58)
+        let provider = 'goose';
+        let model = 'github_copilot';
+        let content = null;
+        try {
+            const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
+            const reportPrompt = [
+                'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
+                `Виконання (сирий вивід): ${String(gooseExec).slice(0, 6000)}`
+            ].join('\n');
+            for (const route of reportRoutes) {
+                try {
+                    const started = Date.now();
+                    const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, reportPrompt);
+                    if (txt) {
+                        content = txt;
+                        provider = 'openai_compat';
+                        model = route.model;
+                        registry.reportSuccess(route, Date.now() - started);
+                        break;
+                    }
+                    registry.reportFailure(route);
+                } catch (_) {
+                    registry.reportFailure(route);
+                }
+            }
+        } catch (_) { /* ignore summarizer errors, fallback to goose text below */ }
+
+        // 3) Якщо summarizer не спрацював — повертаємо структурований вивід Goose як є
+        const finalText = enforceTetianaStructure(content || gooseExec);
+
         const msg = {
             role: 'assistant',
-            content: `[ТЕТЯНА] ${gooseContent}`,
+            content: finalText.startsWith('[ТЕТЯНА]') ? finalText : `[ТЕТЯНА] ${finalText}`,
             agent: 'tetyana',
             messageId: generateMessageId(),
             timestamp: Date.now(),
             voice: 'tetiana',
             color: '#00ffff',
-            provider: 'goose',
-            model: 'github_copilot'
+            provider,
+            model
         };
 
         return res.json({
@@ -314,6 +391,9 @@ app.post('/chat/stream', async (req, res) => {
             logMessage('info', `Processed message for session=${sessionId || 'n/a'} agents=[${meta}]`);
         } catch {}
         
+    // Автозакриття тільки якщо немає пайплайну/наступної дії і це НЕ smalltalk
+    const ended = !session.pipeline && !session.nextAction && session.intent !== 'smalltalk';
+
         res.json({
             success: true,
             response: response,
@@ -322,7 +402,8 @@ app.post('/chat/stream', async (req, res) => {
                 currentAgent: session.currentAgent,
                 requiresUserCommand: dialogueManager.requiresUserCommand(),
                 nextAction: session.nextAction || null
-            }
+            },
+            endOfConversation: ended === true
         });
 
     } catch (error) {
@@ -394,13 +475,19 @@ async function processAgentCycle(userMessage, session) {
         timestamp: Date.now()
     });
 
-    // Phase 1: Atlas creates plan
-    const atlasResponse = await generateAgentResponse('atlas', userMessage, session);
+    // Phase 1: Atlas creates primary reply/plan (use heuristic intent to bias model choice)
+    const preIntent = classifyIntentHeuristic(userMessage, '');
+    const atlasResponse = await generateAgentResponse('atlas', userMessage, session, { intentHint: preIntent });
     responses.push(atlasResponse);
     session.history.push(atlasResponse);
 
-    // If message looks actionable (OS/app/file commands) -> staged pipeline with TTS pacing
-    if (isActionableTask(userMessage)) {
+    // Classify user intent to route the flow efficiently (LLM-first with fallback)
+    const intent = await classifyIntentSmart(userMessage, atlasResponse.content || '');
+    session.intent = intent;
+    logMessage('info', `Intent classified as: ${intent}`);
+
+    // If actionable -> staged pipeline with TTS pacing
+    if (intent === 'actionable') {
         // 1) Grisha precheck now; execution deferred until frontend TTS completes
         const precheckPrompt = [
             'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
@@ -426,25 +513,80 @@ async function processAgentCycle(userMessage, session) {
         return responses;
     }
 
-    // Phase 2: Grisha reviews plan (if discussion required)
-    if (shouldTriggerDiscussion(atlasResponse.content)) {
+    // Phase 2: Optional review (planning/complex discussions only)
+    if (intent === 'planning' && shouldTriggerDiscussion(atlasResponse.content)) {
         const grishaResponse = await generateAgentResponse('grisha', atlasResponse.content, session);
         responses.push(grishaResponse);
         session.history.push(grishaResponse);
 
-        // Phase 3: Tetiana provides input
-        const tetyanaResponse = await generateAgentResponse('tetyana', 
-            `Atlas plan: ${atlasResponse.content}\nGrisha review: ${grishaResponse.content}`, session);
-        responses.push(tetyanaResponse);
-        session.history.push(tetyanaResponse);
-
         // Start discussion if there's disagreement
-        if (detectDisagreement([atlasResponse, grishaResponse, tetyanaResponse])) {
+        if (detectDisagreement([atlasResponse, grishaResponse])) {
             dialogueManager.startDiscussion('Task execution approach', ['atlas', 'grisha', 'tetyana']);
         }
     }
 
     return responses;
+}
+
+// Lightweight intent classifier for routing
+// Returns: 'actionable' | 'planning' | 'qa' | 'smalltalk'
+function classifyIntentHeuristic(userText, atlasText) {
+    const t = String(userText || '').toLowerCase();
+    const a = String(atlasText || '').toLowerCase();
+
+    // Actionable if explicit commands present
+    if (isActionableTask(t)) return 'actionable';
+
+    // Small talk
+    const smallTalkRe = /(привіт|вітаю|добр(ий|ого)|хай|як справи|дякую|будь ласка|гарного дня|на добраніч|салют|hello|hi|thanks|thank you)/i;
+    if (smallTalkRe.test(t)) return 'smalltalk';
+
+    // Q&A indicators
+    const qaRe = /(\?|що таке|як зробити|як налаштувати|поясни|explain|how to|why|що робити)/i;
+    if (qaRe.test(t)) return 'qa';
+
+    // Planning if plan/strategy is the focus without direct action
+    const planningRe = /(план|стратегія|кроки|етапи|ризик|безпека)/i;
+    if (planningRe.test(a) || planningRe.test(t)) return 'planning';
+
+    // Default fallback
+    return /(^що\b|^як\b|^чому\b)/i.test(t) ? 'qa' : 'smalltalk';
+}
+
+// LLM-based intent classification via openai_compat (3010) with fallback to heuristic
+async function classifyIntentSmart(userText, atlasText) {
+    try {
+        const routes = (registry.getRoutes('atlas') || []).filter(r => r.provider === 'openai_compat');
+        const prompt = [
+            'Класифікуй намір користувача в одну категорію: actionable | planning | qa | smalltalk.',
+            'Формат відповіді: тільки одне слово з цього списку. Без пояснень, без лапок.',
+            '',
+            `Повідомлення: ${String(userText || '').slice(0, 2000)}`
+        ];
+        if (atlasText && String(atlasText).trim()) {
+            prompt.push(`Контекст Atlas: ${String(atlasText).slice(0, 1000)}`);
+        }
+        const promptStr = prompt.join('\n');
+
+        for (const route of routes) {
+            try {
+                const started = Date.now();
+                const out = await callOpenAICompatChatWithTimeout(route.baseUrl || FALLBACK_API_BASE, route.model, promptStr, 1500);
+                if (out) {
+                    registry.reportSuccess(route, Date.now() - started);
+                    const norm = out.trim().toLowerCase();
+                    if (['actionable','planning','qa','smalltalk'].includes(norm)) return norm;
+                    const token = norm.split(/\s|\W/).find(x => ['actionable','planning','qa','smalltalk'].includes(x));
+                    if (token) return token;
+                } else {
+                    registry.reportFailure(route);
+                }
+            } catch (_) {
+                registry.reportFailure(route);
+            }
+        }
+    } catch {}
+    return classifyIntentHeuristic(userText, atlasText);
 }
 
 // Continue staged pipeline after TTS completes on the frontend
@@ -521,6 +663,9 @@ app.post('/chat/continue', async (req, res) => {
             }
         }
 
+    // Для етапів пайплайну (actionable) залишаємо стандартне завершення, smalltalk тут не проходить
+    const ended = !session.pipeline && !session.nextAction;
+
         res.json({
             success: true,
             response: responses,
@@ -529,7 +674,8 @@ app.post('/chat/continue', async (req, res) => {
                 currentAgent: session.currentAgent,
                 requiresUserCommand: dialogueManager.requiresUserCommand(),
                 nextAction: session.nextAction || null
-            }
+            },
+            endOfConversation: ended === true
         });
     } catch (error) {
         logMessage('error', `/chat/continue failed: ${error.message}`);
@@ -551,33 +697,7 @@ function isActionableTask(text) {
     return verbs.some(v => t.includes(v));
 }
 
-// OpenAI-compat failover helpers for Atlas/Grisha
-const AGENT_MODEL_PLAN = {
-    atlas: [
-        'Meta-Llama-3.1-8B-Instruct',
-        'microsoft/Phi-3.5-mini-instruct',
-        'gpt-4o-mini'
-    ],
-    grisha: [
-        'microsoft/Phi-3.5-mini-instruct',
-        'Mistral-Nemo',
-        'gpt-4o-mini'
-    ]
-};
-
-async function tryOpenAICompatForAgent(agentName, prompt) {
-    if (!FALLBACK_API_BASE) return null;
-    const models = AGENT_MODEL_PLAN[agentName] || [];
-    for (const model of models) {
-        try {
-            const text = await callOpenAICompatChat(FALLBACK_API_BASE, model, prompt);
-            if (text) return { text, provider: 'fallback_openai', model };
-        } catch (_) {
-            // try next model
-        }
-    }
-    return null;
-}
+// Legacy static plan removed: dynamic routing handled by ModelRegistry
 
 // Real agent integration
 async function generateAgentResponse(agentName, inputMessage, session, options = {}) {
@@ -592,37 +712,87 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     let model = undefined;
     
     if (agentName === 'tetyana') {
-        // Tetiana strictly uses Goose
-    let gooseText = await callGooseAgent(prompt, session.id, { enableTools: options.enableTools === true, systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true }) });
-        if (!gooseText || isVagueTetianaResponse(gooseText)) {
-            logMessage('warn', 'Tetyana returned vague/empty response. Retrying with strict report-only instruction.');
-            const strictPrompt = `${tetianaSystemInstruction({ enableTools: options.enableTools === true })}\n\nКонтекст завдання:\n${inputMessage}\n\nСФОРМУЙ ЛИШЕ ЗВІТ за наведеним шаблоном. Без зайвих пояснень.`;
-            gooseText = await callGooseAgent(strictPrompt, session.id, { enableTools: options.enableTools === true, systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true }) }) || gooseText;
-        }
-        content = enforceTetianaStructure(gooseText || 'Завдання опрацьовано.');
-        provider = 'goose';
-        model = 'github_copilot';
-    } else {
-        // Prefer Goose even for Atlas/Grisha (live intelligence), tools disabled
-        const sysInstr = (agentName === 'atlas')
-            ? 'Ти — ATLAS (стратег). Стисло сформуй план дій з чіткими кроками та точками контролю. Уникай води.'
-            : 'Ти — ГРИША (контролер). Перевір план на безпеку та здійсненність, дай стислий конструктивний фідбек.';
-        const gooseText = await callGooseAgent(prompt, session.id, { enableTools: false, systemInstruction: sysInstr });
-        if (gooseText) {
-            content = gooseText;
+        // Execution via Goose only (no provider fallbacks for execution)
+        const execNotes = await callGooseAgent(prompt, session.id, {
+            enableTools: options.enableTools === true,
+            systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true })
+        });
+
+        if (!execNotes) {
+            // Execution failed -> return blocked status without switching providers
+            const blocked = 'РЕЗЮМЕ: Виконання недоступне (Goose недоступний).\nСТАТУС: Blocked — повторити пізніше або перевірити підключення.';
+            content = enforceTetianaStructure(blocked);
             provider = 'goose';
             model = 'github_copilot';
         } else {
-            // Try OpenAI-compatible failover
-            const tried = await tryOpenAICompatForAgent(agentName, prompt);
-            if (tried && tried.text) {
-                content = tried.text;
-                provider = tried.provider;
-                model = tried.model;
-            } else {
-                // Final minimal fallback
-                content = await simulateAgentThinking(agentName, prompt);
+            // Short structured report via openai-compat using configured 58-model list
+            const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
+            const reportPrompt = [
+                'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
+                `Виконання (сирий вивід): ${String(execNotes).slice(0, 6000)}`
+            ].join('\n');
+            let reportText = null;
+            for (const route of reportRoutes) {
+                try {
+                    const started = Date.now();
+                    const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, reportPrompt);
+                    if (txt) {
+                        reportText = txt;
+                        registry.reportSuccess(route, Date.now() - started);
+                        provider = 'openai_compat';
+                        model = route.model;
+                        break;
+                    }
+                    registry.reportFailure(route);
+                } catch (_) {
+                    registry.reportFailure(route);
+                }
             }
+            const base = reportText || execNotes;
+            content = enforceTetianaStructure(base);
+            if (!provider) { provider = 'goose'; model = 'github_copilot'; }
+        }
+    } else {
+        // Dynamic provider/model routing via registry for Atlas/Grisha
+        const sysInstr = (agentName === 'atlas')
+            ? 'Ти — ATLAS (стратег). Стисло сформуй план дій з чіткими кроками та точками контролю. Уникай води.'
+            : 'Ти — ГРИША (контролер). Перевір план на безпеку та здійсненність, дай стислий конструктивний фідбек.';
+
+    // Отримати маршрути з урахуванням наміру (intent-aware пріоритет у ModelRegistry)
+    const routes = registry.getRoutes(agentName, { intentHint: (options?.intentHint) || session.intent });
+        for (const route of routes) {
+            const started = Date.now();
+            try {
+                if (route.provider === 'goose') {
+                    const gooseText = await callGooseAgent(prompt, session.id, { enableTools: false, systemInstruction: sysInstr });
+                    if (gooseText) {
+                        content = gooseText;
+                        provider = 'goose';
+                        model = route.model || 'github_copilot';
+                        registry.reportSuccess(route, Date.now() - started);
+                        break;
+                    }
+                    registry.reportFailure(route);
+                } else if (route.provider === 'openai_compat') {
+                    const text = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, prompt);
+                    if (text) {
+                        content = text;
+                        provider = 'openai_compat';
+                        model = route.model;
+                        registry.reportSuccess(route, Date.now() - started);
+                        break;
+                    }
+                    registry.reportFailure(route);
+                }
+            } catch (err) {
+                registry.reportFailure(route);
+                // keep trying next route
+            }
+        }
+
+        if (!content) {
+            // Final minimal fallback
+            content = await simulateAgentThinking(agentName, prompt);
         }
     }
     
@@ -776,7 +946,7 @@ async function callGooseSSE(baseUrl, message, sessionId, secretKey, options = { 
             ...(options?.enableTools ? { tool_choice: 'auto' } : {})
         };
         
-        const response = await axios.post(url, payload, {
+    const response = await axios.post(url, payload, {
             headers,
             timeout: 20000,
             responseType: 'stream'

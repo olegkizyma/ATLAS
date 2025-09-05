@@ -7,8 +7,9 @@ Usage:
     python whisper_server.py [options]
 
 Environment variables:
-    WHISPER_MODEL: Model size (tiny/base/small/medium/large-v2), default: base
-    WHISPER_DEVICE: Device (cpu/cuda/auto), default: cpu
+    WHISPER_MODEL: Model size (tiny/base/small/medium/large-v1/large-v2/large-v3), default: large-v3
+    WHISPER_DEVICE: Device (cpu/cuda/auto/mps), default: cpu (mps maps to auto for Metal)
+    WHISPER_COMPUTE_TYPE: Precision/quantization (int8, int8_float16, float16, int16, int8_bfloat16, etc.)
     WHISPER_HOST: Host to bind, default: 127.0.0.1
     WHISPER_PORT: Port to bind, default: 5000
     WHISPER_TEMP_DIR: Temporary directory for uploaded files, default: /tmp
@@ -30,8 +31,14 @@ except ImportError:
     print("⚠️  faster-whisper не встановлено. Встановіть: pip install faster-whisper")
 
 # Конфігурація
-MODEL_SIZE = os.getenv("WHISPER_MODEL", "base")
-DEVICE = os.getenv("WHISPER_DEVICE", "cpu")
+MODEL_SIZE = os.getenv("WHISPER_MODEL", "large-v3")
+_RAW_DEVICE = os.getenv("WHISPER_DEVICE", "cpu").lower()
+if _RAW_DEVICE == 'mps':
+    print("WHISPER_DEVICE=mps detected. Using device=auto for CTranslate2 (Metal support).")
+    DEVICE = 'auto'
+else:
+    DEVICE = _RAW_DEVICE
+COMPUTE_TYPE = (os.getenv("WHISPER_COMPUTE_TYPE") or ("float16" if DEVICE == 'cuda' else "int8")).lower()
 HOST = os.getenv("WHISPER_HOST", "127.0.0.1")
 PORT = int(os.getenv("WHISPER_PORT", "5000"))
 TEMP_DIR = os.getenv("WHISPER_TEMP_DIR", tempfile.gettempdir())
@@ -63,8 +70,8 @@ def init_whisper_model():
         return False
     
     try:
-        logger.info(f"Завантажую модель Whisper: {MODEL_SIZE} на пристрої: {DEVICE}")
-        whisper_model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type="int8")
+        logger.info(f"Завантажую модель Whisper: {MODEL_SIZE} на пристрої: {DEVICE} (compute_type={COMPUTE_TYPE})")
+        whisper_model = WhisperModel(MODEL_SIZE, device=DEVICE, compute_type=COMPUTE_TYPE)
         logger.info("✅ Модель Whisper успішно завантажена")
         return True
     except Exception as e:
@@ -78,7 +85,8 @@ def health():
         'status': 'ok',
         'whisper_available': whisper_model is not None,
         'model': MODEL_SIZE,
-        'device': DEVICE,
+    'device': DEVICE,
+    'compute_type': COMPUTE_TYPE,
         'version': '1.0.0'
     })
 
@@ -124,7 +132,7 @@ def transcribe():
             logger.info(f"Файл збережено: {temp_file.name}")
             
             # Параметри транскрибації
-            language = request.form.get('language')  # None для автовизначення
+            language = request.form.get('language') or 'uk'  # дефолт: українська
             beam_size = int(request.form.get('beam_size', 5))
             temperature = float(request.form.get('temperature', 0.0))
             
@@ -189,7 +197,8 @@ def models():
     return jsonify({
         'current_model': MODEL_SIZE,
         'available_models': available_models,
-        'device': DEVICE
+    'device': DEVICE,
+    'compute_type': COMPUTE_TYPE
     })
 
 @app.errorhandler(413)
@@ -205,6 +214,7 @@ if __name__ == '__main__':
     print(f"🔌 Port: {PORT}")
     print(f"🧠 Model: {MODEL_SIZE}")
     print(f"💻 Device: {DEVICE}")
+    print(f"🧮 Compute type: {COMPUTE_TYPE}")
     print(f"📁 Temp dir: {TEMP_DIR}")
     
     # Ініціалізуємо модель

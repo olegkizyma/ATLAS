@@ -485,7 +485,9 @@ class AtlasIntelligentChatManager {
         try {
             this.log(`Starting Orchestrator request (attempt ${retryAttempt + 1}/${maxRetries + 1})...`);
             
-            const response = await fetch(`${this.orchestratorBase}/chat/stream`, {
+            // Send initial user message to Python frontend for intent classification.
+            // Python will either handle smalltalk locally or forward to orchestrator.
+            const response = await fetch(`${this.frontendBase}/api/chat`, {
                 method: 'POST',
                 headers: { 
                     'Content-Type': 'application/json'
@@ -552,6 +554,11 @@ class AtlasIntelligentChatManager {
                     this.log(`[CHAT] Next action scheduled: ${data.session.nextAction}. Waiting for TTS to finish...`);
                     await this.waitForTTSIdle(60000);
                     await this.continuePipeline(data.session.id, 0);
+                } else if (data.endOfConversation === true) {
+                    // No follow-up actions and orchestrator signaled end
+                    this.log('[CHAT] Conversation ended by orchestrator');
+                    // Optionally show a subtle UI hint
+                    try { this.addMessage('— розмову завершено —', 'system'); } catch (_) {}
                 }
 
                 this.log('Agent conversation completed successfully');
@@ -637,6 +644,9 @@ class AtlasIntelligentChatManager {
                 this.log(`[CHAT] Next action: ${data.session.nextAction}. Waiting for TTS…`);
                 await this.waitForTTSIdle(60000);
                 return await this.continuePipeline(data.session.id, depth + 1);
+            } else if (data.endOfConversation === true) {
+                this.log('[CHAT] Conversation ended by orchestrator (continue)');
+                try { this.addMessage('— розмову завершено —', 'system'); } catch (_) {}
             }
         } catch (error) {
             this.log(`[CHAT] Continue pipeline failed: ${error.message}`);
