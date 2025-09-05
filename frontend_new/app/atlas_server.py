@@ -22,6 +22,7 @@ import tempfile
 import subprocess
 from pathlib import Path
 from goose_client import GooseClient
+from intent_router import classify_intent, generate_casual_reply
 from typing import Optional
 import io
 import wave
@@ -508,7 +509,7 @@ def chat_with_tetyana():
 
 @app.route('/api/chat', methods=['POST'])
 def chat():
-    """Main chat endpoint that forwards to orchestrator"""
+    """Main chat endpoint with intent routing: casual chat vs task execution"""
     try:
         data = request.get_json()
         message = data.get('message', '')
@@ -517,23 +518,41 @@ def chat():
         
         if not message.strip():
             return jsonify({'error': 'Message cannot be empty'}), 400
-            
-        # Forward to orchestrator
+
+        # 1) Classify user's intent with prompt-only router (no keywords)
+        try:
+            intent = classify_intent(message)
+        except Exception:
+            intent = 'chat'
+
+        if intent == 'chat':
+            # 2) Stay at Atlas level: generate a short, friendly reply and do not invoke tools/agents
+            try:
+                reply = generate_casual_reply(message)
+            except Exception:
+                reply = f"Отримав повідомлення: {message}"
+            return jsonify({
+                'success': True,
+                'response': [{
+                    'role': 'assistant',
+                    'content': f'[ATLAS] {reply}',
+                    'agent': 'atlas',
+                    'voice': AGENT_VOICES.get('atlas', {}).get('voice', 'dmytro')
+                }]
+            })
+
+        # 3) intent == 'task': forward to orchestrator (existing behavior)
         if requests:
-            response = requests.post(f'{ORCHESTRATOR_URL}/chat/stream', 
-                                   json={
-                                       'message': message,
-                                       'sessionId': session_id,
-                                       'userId': user_id
-                                   },
-                                   timeout=30)
-            
+            response = requests.post(
+                f'{ORCHESTRATOR_URL}/chat/stream',
+                json={'message': message, 'sessionId': session_id, 'userId': user_id},
+                timeout=30
+            )
             if response.status_code == 200:
                 return jsonify(response.json())
             else:
                 return jsonify({'error': 'Orchestrator error'}), response.status_code
         else:
-            # Fallback mock response if requests not available
             return jsonify({
                 'success': True,
                 'response': [{
