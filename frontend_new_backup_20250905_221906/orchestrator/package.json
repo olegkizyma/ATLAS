@@ -6,12 +6,8 @@
   "type": "module",
   "scripts": {
     "start": "node server.js",
-    "start:intelligent": "node intelligent_server_wrapper.js",
-    "start:standard": "node server.js",
-    "dev": "node --inspect server.js",
-    "dev:intelligent": "node --inspect intelligent_server_wrapper.js",
-    "test": "cross-env NODE_ENV=test node --test",
-    "migrate": "cd ../config && python configuration_migrator.py --target orchestrator"
+  "dev": "node --inspect server.js",
+  "test": "cross-env NODE_ENV=test node --test"
   },
   "dependencies": {
     "express": "^4.18.2",

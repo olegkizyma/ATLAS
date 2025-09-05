@@ -1,7 +1,7 @@
 /**
  * ATLAS 3-Agent System Orchestrator
  * Manages communication between Atlas, Tetiana, and Grisha agents
- * Integrates with TTS system and intelligent recovery system
+ * Integrates with TTS system for real-time dialogue
  */
 import express from 'express';
 import cors from 'cors';
@@ -10,34 +10,10 @@ import WebSocket from 'ws';
 import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
-import { readFileSync, existsSync } from 'fs';
 import ModelRegistry from './model_registry.js';
-
-// Імпортуємо Recovery Bridge Integration
-let recoveryBridge, handleExecutionFailure;
-try {
-    const recoveryModule = await import('../config/recovery_bridge_integration.js');
-    ({ recoveryBridge, handleExecutionFailure } = recoveryModule);
-    console.log('✅ Recovery Bridge integration loaded');
-} catch (e) {
-    console.log('⚠️  Recovery Bridge integration not available:', e.message);
-    recoveryBridge = null;
-    handleExecutionFailure = null;
-}
 
 const app = express();
 const PORT = process.env.ORCH_PORT || 5101;
-
-// Інтелігентні налаштування з adaptive behavior
-const INTELLIGENT_MODE = process.env.ORCH_INTELLIGENT_MODE === 'true';
-const AUTO_ADAPT = process.env.ORCH_AUTO_ADAPT === 'true';
-const LEARNING_ENABLED = process.env.ORCH_LEARNING_ENABLED === 'true';
-
-console.log('🧠 ATLAS Orchestrator Intelligent Status:');
-console.log(`   Intelligent Mode: ${INTELLIGENT_MODE ? '✅ Enabled' : '❌ Disabled'}`);
-console.log(`   Auto-Adaptation: ${AUTO_ADAPT ? '✅ Enabled' : '❌ Disabled'}`);
-console.log(`   Learning System: ${LEARNING_ENABLED ? '✅ Enabled' : '❌ Disabled'}`);
-
 const GRISHA_CONFIDENCE_THRESHOLD = Math.max(0, Math.min(1, parseFloat(process.env.GRISHA_CONFIDENCE_THRESHOLD || '0.8')));
 const GRISHA_MAX_VERIFY_ITER = Math.max(1, parseInt(process.env.GRISHA_MAX_VERIFY_ITER || '3', 10));
 
@@ -89,91 +65,6 @@ async function callOpenAICompatChatWithTimeout(baseUrl, model, userMessage, time
 
 // Dynamic model/provider registry
 const registry = new ModelRegistry();
-
-// Інтелігентна обробка помилок з recovery system
-async function handleIntelligentError(error, context, executionData = {}) {
-    console.error('🔥 Error detected:', error.message);
-    
-    if (INTELLIGENT_MODE && handleExecutionFailure) {
-        try {
-            const failureData = {
-                error_message: error.message,
-                agent_name: context.agent || 'orchestrator',
-                attempt_count: context.attempts || 1,
-                partial_success: context.partialSuccess || false,
-                user_request: context.userRequest || '',
-                task_spec: context.taskSpec || {},
-                context: context,
-                session_id: context.sessionId || 'unknown',
-                metadata: {
-                    ...executionData,
-                    timestamp: new Date().toISOString(),
-                    intelligent_mode: INTELLIGENT_MODE,
-                    auto_adapt: AUTO_ADAPT
-                }
-            };
-            
-            console.log('🧠 Requesting intelligent recovery...');
-            const recoveryRecommendations = await handleExecutionFailure(failureData, context);
-            
-            if (recoveryRecommendations) {
-                console.log('✅ Recovery recommendations received:', recoveryRecommendations);
-                
-                // Применяем адаптации к контексту
-                if (recoveryRecommendations.adaptations) {
-                    applyIntelligentAdaptations(recoveryRecommendations.adaptations);
-                }
-                
-                return {
-                    shouldRetry: recoveryRecommendations.action === 'retry_with_adaptations',
-                    adaptations: recoveryRecommendations.adaptations,
-                    strategy: recoveryRecommendations.strategy,
-                    recommendations: recoveryRecommendations
-                };
-            }
-        } catch (recoveryError) {
-            console.error('⚠️  Recovery system error:', recoveryError.message);
-        }
-    }
-    
-    // Fallback для звичайної обробки помилок
-    return {
-        shouldRetry: false,
-        adaptations: {},
-        strategy: 'fallback',
-        recommendations: null
-    };
-}
-
-// Застосування інтелігентних адаптацій
-function applyIntelligentAdaptations(adaptations) {
-    console.log('🔄 Applying intelligent adaptations:', adaptations);
-    
-    // Адаптація timeout
-    if (adaptations.increase_timeout_factor) {
-        const newTimeout = Math.round(20000 * adaptations.increase_timeout_factor);
-        console.log(`⏱️  Adapted request timeout: ${newTimeout}ms`);
-        // Можна зберегти в глобальну змінну для наступних запитів
-    }
-    
-    // Адаптація context limits
-    if (adaptations.reduce_context_factor) {
-        const reduction = adaptations.reduce_context_factor;
-        console.log(`📝 Context reduction factor applied: ${reduction}`);
-    }
-    
-    // Консервативний режим
-    if (adaptations.use_conservative_mode) {
-        console.log('🛡️  Conservative mode activated');
-        process.env.ORCH_CONSERVATIVE_MODE = 'true';
-    }
-    
-    // Детальне логування
-    if (adaptations.enable_detailed_logging) {
-        console.log('📊 Detailed logging enabled');
-        process.env.ORCH_DETAILED_LOGGING = 'true';
-    }
-}
 
 // Agent configurations
 const AGENTS = {

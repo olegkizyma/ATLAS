@@ -101,36 +101,16 @@ class ResourceAwareStrategy(ConfigurationStrategy):
     
     def _get_system_info(self) -> Dict[str, Any]:
         """Отримує інформацію про систему"""
-        try:
-            import psutil
-            
-            # Безпечне отримання мережевих з'єднань
-            try:
-                network_connections = len(psutil.net_connections())
-            except (psutil.AccessDenied, PermissionError, OSError):
-                network_connections = 10  # Fallback значення
-            
-            return {
-                'cpu_count': psutil.cpu_count(),
-                'memory_total': psutil.virtual_memory().total // (1024*1024),
-                'memory_available': psutil.virtual_memory().available // (1024*1024),
-                'disk_space': psutil.disk_usage('/').free // (1024*1024*1024),
-                'network_connections': network_connections,
-                'load_average': psutil.getloadavg() if hasattr(psutil, 'getloadavg') else (0.5, 0.5, 0.5)
-            }
-        except ImportError:
-            # Fallback для випадків коли psutil недоступний
-            import os
-            import multiprocessing
-            
-            return {
-                'cpu_count': multiprocessing.cpu_count(),
-                'memory_total': 4096,  # Fallback 4GB
-                'memory_available': 2048,  # Fallback 2GB
-                'disk_space': 50,  # Fallback 50GB
-                'network_connections': 10,  # Fallback
-                'load_average': (0.5, 0.5, 0.5)  # Fallback
-            }
+        import psutil
+        
+        return {
+            'cpu_count': psutil.cpu_count(),
+            'memory_total': psutil.virtual_memory().total // (1024*1024),
+            'memory_available': psutil.virtual_memory().available // (1024*1024),
+            'disk_space': psutil.disk_usage('/').free // (1024*1024*1024),
+            'network_connections': len(psutil.net_connections()),
+            'load_average': psutil.getloadavg() if hasattr(psutil, 'getloadavg') else (0, 0, 0)
+        }
     
     def _generate_server_config(self, system_info: Dict[str, Any]) -> Dict[str, Any]:
         """Генерує конфігурацію сервера"""

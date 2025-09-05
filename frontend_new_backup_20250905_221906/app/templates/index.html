@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATLAS Minimal Interface v2.0</title>
+    <link rel="icon" href="{{ url_for('static', filename='assets/atlas-icon.svg') }}" type="image/svg+xml">
+    <link rel="icon" href="{{ url_for('static', filename='assets/favicon.ico') }}" type="image/x-icon">
+    <link rel="apple-touch-icon" href="{{ url_for('static', filename='assets/apple-touch-icon.png') }}">
+    
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+</head>
+<body>
+    <!-- 3D Model Background -->
+    <div class="model-container">
+        <model-viewer 
+            id="model-viewer"
+            src="{{ url_for('static', filename='assets/DamagedHelmet.glb') }}"
+            auto-rotate
+            auto-rotate-delay="500"
+            rotation-per-second="30deg"
+            camera-controls
+            shadow-intensity="0.3"
+            shadow-softness="0.8"
+            environment-image="neutral"
+            disable-zoom
+            style="--poster-color: transparent;">
+        </model-viewer>
+    </div>
+
+    <!-- Main Container -->
+    <div class="container">
+    <!-- Status dots will be mounted next to the right-side logo (agent-indicator) dynamically -->
+
+        <!-- Main Content -->
+        <div class="main-content">
+            <!-- Desktop Logs Panel (hidden on mobile) -->
+            <div class="logs-panel desktop">
+                <div id="logs-container-desktop" class="logs-container"></div>
+            </div>
+
+            <!-- Minimal Chat Panel -->
+            <div class="minimal-chat-panel">
+                <div class="chat-content" id="chat-content">
+                    <div class="chat-tabs">
+                        <button id="tab-chat" class="tab active">Chat</button>
+                        <button id="tab-logs" class="tab">Logs</button>
+                    </div>
+
+                    <div id="chat-view" class="view active">
+                        <div id="chat-container" class="chat-container">
+                            <!-- Початкові системні повідомлення видалено на користь точок-індикаторів -->
+                        </div>
+                        <div class="input-container">
+                            <input
+                                type="text"
+                                id="message-input"
+                                placeholder="Введіть повідомлення..."
+                                autocomplete="off"
+                                maxlength="1000"
+                            >
+                            <div class="button-row">
+                                <button id="send-button" class="btn btn-primary">
+                                    <span class="btn-text">Send</span>
+                                    <span class="btn-shortcut">↵</span>
+                                </button>
+                                <button id="microphone-btn" class="btn btn-secondary">
+                                    <span class="btn-text">🎤</span>
+                                </button>
+                                <button id="voice-toggle" class="btn btn-secondary">
+                                    <span class="btn-text">🔊</span>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="logs-view" class="view" style="display:none;">
+                        <div id="logs-container" class="logs-container"></div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- Loading Overlay -->
+    <div id="loading-overlay" class="loading-overlay">
+        <div class="loading-content">
+            <div class="loading-spinner"></div>
+            <div class="loading-text">Initializing ATLAS...</div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/config.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/logger-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/status-manager.js') }}"></script>
+    
+    <script src="{{ url_for('static', filename='js/intelligent-chat-manager.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+
+    <!-- Service Worker -->
+    <script>
+        if ('serviceWorker' in navigator) {
+            navigator.serviceWorker.register('{{ url_for("static", filename="js/service-worker.js") }}')
+                .then(registration => console.log('SW registered:', registration))
+                .catch(error => console.log('SW registration failed:', error));
+        }
+    </script>
+</body>
+</html>

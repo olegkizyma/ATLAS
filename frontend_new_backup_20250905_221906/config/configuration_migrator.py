@@ -7,8 +7,6 @@ Intelligent Configuration Adapter
 import os
 import json
 import logging
-import argparse
-from datetime import datetime
 from pathlib import Path
 from typing import Dict, Any, Optional
 from intelligent_config import IntelligentConfigManager
@@ -28,13 +26,13 @@ class ConfigurationMigrator:
         """Мігрує конфігурацію оркестратора"""
         orchestrator_dir = self.atlas_root / 'frontend_new' / 'orchestrator'
         
-        # Генеруємо інтелігентну конфігурацію
+        # Генеруємо інтелектуальну конфігурацію
         intelligent_config = self.config_manager.generate_complete_config({
             'service_type': 'orchestrator',
             'environment': 'development'
         })
         
-        # Створюємо новий .env файл з інтелігентними налаштуваннями
+        # Створюємо новий .env файл з інтелектуальними налаштуваннями
         env_content = self._generate_intelligent_env(intelligent_config)
         
         # Зберігаємо новий .env
@@ -42,24 +40,7 @@ class ConfigurationMigrator:
         with open(env_path, 'w', encoding='utf-8') as f:
             f.write(env_content)
         
-        # Також створюємо файл з метаданими
-        metadata_path = orchestrator_dir / '.intelligent_metadata.json'
-        with open(metadata_path, 'w', encoding='utf-8') as f:
-            json.dump({
-                'generated_at': datetime.now().isoformat(),
-                'config_version': '1.0',
-                'intelligent_features': [
-                    'adaptive_context_limits',
-                    'smart_timeout_scaling',
-                    'resource_aware_allocation',
-                    'performance_monitoring'
-                ],
-                'source_config': str(orchestrator_dir / '.env'),
-                'migration_status': 'complete'
-            }, f, indent=2)
-        
         logger.info(f"Generated intelligent orchestrator config: {env_path}")
-        logger.info(f"Generated metadata file: {metadata_path}")
         
         return env_path
     
@@ -276,41 +257,20 @@ echo "   • Gradually remove hardcoded values from your code"
 
 def main():
     """Головна функція міграції"""
-    parser = argparse.ArgumentParser(description='ATLAS Configuration Migrator')
-    parser.add_argument('--target', choices=['orchestrator', 'frontend', 'all'], 
-                        default='all', help='Target component to migrate')
-    parser.add_argument('--force', action='store_true', 
-                        help='Force overwrite existing intelligent configs')
-    parser.add_argument('--dry-run', action='store_true',
-                        help='Show what would be migrated without making changes')
-    
-    args = parser.parse_args()
-    
     atlas_root = Path(__file__).parent.parent.parent
+    
     migrator = ConfigurationMigrator(atlas_root)
     
     try:
-        if args.dry_run:
-            print("🔍 DRY RUN MODE - No files will be modified")
-            print(f"📂 Atlas root: {atlas_root}")
-            print(f"🎯 Target: {args.target}")
-            return 0
+        print("🚀 Starting ATLAS intelligent configuration migration...")
         
-        print("🚀 Starting ATLAS Configuration Migration...")
-        print(f"📂 Atlas root: {atlas_root}")
-        print(f"🎯 Target: {args.target}")
+        # Мігруємо конфігурацію оркестратора
+        env_path = migrator.migrate_orchestrator_config()
+        print(f"✅ Generated intelligent config: {env_path}")
         
-        if args.target in ['orchestrator', 'all']:
-            # Мігруємо конфігурацію оркестратора
-            config_path = migrator.migrate_orchestrator_config()
-            print(f"✅ Created intelligent orchestrator config: {config_path}")
-            
-            # Створюємо інтелігентну обгортку сервера
-            wrapper_path = migrator.create_intelligent_server_wrapper()
-            print(f"✅ Created intelligent server wrapper: {wrapper_path}")
-        
-        if args.target in ['frontend', 'all']:
-            print("✅ Frontend migration - intelligent systems already integrated")
+        # Створюємо інтелектуальну обгортку сервера
+        wrapper_path = migrator.create_intelligent_server_wrapper()
+        print(f"✅ Created intelligent server wrapper: {wrapper_path}")
         
         # Створюємо скрипт міграції
         script_path = migrator.create_migration_script()
@@ -318,10 +278,10 @@ def main():
         
         print("\n🎉 Migration setup completed!")
         print("\n💡 Next steps:")
-        print("1. Run intelligent orchestrator: node orchestrator/intelligent_server_wrapper.js")
-        print("2. Monitor adaptive behavior in logs")
-        print("3. Verify intelligent recovery system integration")
-        print("4. Test system resilience and adaptation")
+        print(f"1. Run the migration: cd {script_path.parent} && ./migrate_to_intelligent.sh")
+        print("2. Test intelligent mode: node intelligent_server.js")
+        print("3. Monitor adaptive behavior in logs")
+        print("4. Gradually remove remaining hardcoded values")
         
     except Exception as e:
         logger.error(f"Migration failed: {e}")

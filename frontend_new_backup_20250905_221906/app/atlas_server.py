@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
-ATLAS Intelligent Frontend Server with TTS Integration
-Flask server with intelligent configuration and adaptive behavior
+ATLAS Frontend Server with TTS Integration
+Flask server that serves the web interface and provides TTS API
 """
 
 import os
@@ -9,17 +9,7 @@ import sys
 import logging
 import json
 from datetime import datetime
-from pathlib import Path
 from flask import Flask, render_template, jsonify, request, send_file, make_response
-
-# Додаємо config директорію до sys.path для імпорту інтелігентних модулів
-config_path = Path(__file__).parent.parent / 'config'
-sys.path.insert(0, str(config_path))
-
-# Імпортуємо інтелігентні системи
-from intelligent_config import IntelligentConfigManager
-from intelligent_orchestrator import IntelligentOrchestrator
-from intelligent_recovery import IntelligentRecoverySystem
 try:
     from flask_cors import CORS
 except ImportError:
@@ -61,25 +51,6 @@ CURRENT_DIR = Path(__file__).parent
 TEMPLATE_DIR = CURRENT_DIR / 'templates'
 STATIC_DIR = CURRENT_DIR / 'static'
 TTS_DIR = CURRENT_DIR.parent.parent / 'ukrainian-tts'
-
-# Ініціалізуємо інтелігентні системи
-logger.info("🧠 Initializing intelligent systems...")
-
-# Інтелігентний конфігураційний менеджер
-config_manager = IntelligentConfigManager()
-intelligent_config = config_manager.generate_complete_config({
-    'service_type': 'frontend',
-    'environment': 'development',
-    'current_directory': str(CURRENT_DIR)
-})
-
-# Інтелігентний оркестратор для internal coordination
-intelligent_orchestrator = IntelligentOrchestrator()
-
-# Система відновлення для frontend
-recovery_system = IntelligentRecoverySystem()
-
-logger.info("✅ Intelligent systems initialized")
 
 app = Flask(__name__, 
            template_folder=str(TEMPLATE_DIR),
