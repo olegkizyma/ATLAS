@@ -58,7 +58,15 @@ check_service() {
 check_python_deps() {
     log_info "🐍 Checking Python dependencies..."
     
-    cd intelligent_atlas
+    # Перевіряємо, чи ми вже в папці intelligent_atlas
+    if [ ! -f "start_intelligent.sh" ]; then
+        if [ -d "intelligent_atlas" ]; then
+            cd intelligent_atlas
+        else
+            log_error "❌ Cannot find intelligent_atlas directory!"
+            exit 1
+        fi
+    fi
     
     if [ ! -d "venv" ]; then
         log_info "Creating Python virtual environment..."
@@ -124,7 +132,15 @@ check_required_services() {
 start_intelligent_system() {
     log_info "🧠 Starting Intelligent ATLAS System..."
     
-    cd intelligent_atlas
+    # Перевіряємо, чи ми вже в папці intelligent_atlas
+    if [ ! -f "start_intelligent.sh" ]; then
+        if [ -d "intelligent_atlas" ]; then
+            cd intelligent_atlas
+        else
+            log_error "❌ Cannot find intelligent_atlas directory!"
+            exit 1
+        fi
+    fi
     source venv/bin/activate
     
     # Встановлюємо PYTHONPATH для імпорту модулів
