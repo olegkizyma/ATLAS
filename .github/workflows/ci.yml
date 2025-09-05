@@ -6,9 +6,54 @@ on:
   pull_request:
 
 jobs:
-  python-tests:
-    name: Python tests (frontend_new)
+  intelligent-atlas-tests:
+    name: ATLAS Pure Intelligent System tests
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: intelligent_atlas
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: intelligent_atlas/requirements.txt
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run tests (if available)
+        run: |
+          if [ -f "test_intelligent.py" ]; then
+            python -m pytest test_intelligent.py -v
+          elif [ -d "tests" ]; then
+            python -m pytest tests/ -v
+          else
+            echo "No tests found - running import validation"
+            python -c "
+            import sys
+            sys.path.append('.')
+            sys.path.append('./core')
+            sys.path.append('./config')
+            try:
+                from core.intelligent_engine import intelligent_engine
+                from core.web_interface import WebInterface
+                from config.dynamic_config import DynamicConfigManager
+                print('✅ All core modules import successfully')
+            except ImportError as e:
+                print(f'❌ Import failed: {e}')
+                sys.exit(1)
+            "
+          fi
+
+  legacy-python-tests:
+    name: Legacy Python tests (frontend_new)
+    runs-on: ubuntu-latest
+    if: ${{ hashFiles('frontend_new/requirements.txt') != '' }}
     defaults:
       run:
         working-directory: frontend_new
@@ -45,9 +90,10 @@ jobs:
       - name: Run pytest
         run: pytest -q
 
-  node-tests:
-    name: Node tests (orchestrator)
+  legacy-node-tests:
+    name: Legacy Node tests (orchestrator)
     runs-on: ubuntu-latest
+    if: ${{ hashFiles('frontend_new/orchestrator/package.json') != '' }}
     defaults:
       run:
         working-directory: frontend_new/orchestrator
@@ -77,43 +123,37 @@ jobs:
 
   e2e-smoke:
     name: E2E smoke (self-hosted)
-    # Требуется self-hosted runner с преднастроенными зависимостями (Python 3.11, Node 20, curl)
+    # Требуется self-hosted runner с преднастроенными зависимостями (Python 3.8+, curl)
     runs-on: self-hosted
     if: github.event_name != 'pull_request' # не гоняем на PR, только на push в ветки
+    needs: [intelligent-atlas-tests] # только если основные тесты прошли
     steps:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Set up Node.js
-        uses: actions/setup-node@v4
-        with:
-          node-version: '20'
-
-      - name: Install orchestrator dependencies
-        working-directory: frontend_new/orchestrator
+      - name: Set up Python environment
         run: |
-          if [ -f package-lock.json ]; then
-            npm ci
-          else
-            npm install --no-audit --no-fund
+          cd intelligent_atlas
+          if [ ! -d "venv" ]; then
+            python3 -m venv venv
           fi
-
-      - name: Install Python dependencies
-        working-directory: frontend_new
-        run: pip3 install -r requirements.txt
+          source venv/bin/activate
+          pip install -r requirements.txt
 
       - name: Make scripts executable
         run: |
           chmod +x ./start_stack_macos.sh || true
+          chmod +x ./start_stack.sh || true
           chmod +x ./stop_stack.sh || true
           chmod +x ./scripts/smoke_e2e.sh || true
 
-      - name: Start stack
+      - name: Start ATLAS intelligent stack
         env:
           # Можно задать переменные окружения для портов/урлов при необходимости
-          FRONTEND_PORT: '5001'
-          ORCHESTRATOR_URL: 'http://localhost:5101'
-          TTS_SERVER_URL: 'http://127.0.0.1:3001'
+          ATLAS_WEB_PORT: '5001'
+          ATLAS_AI_API_URL: 'http://127.0.0.1:3010'
+          ATLAS_GOOSE_URL: 'http://127.0.0.1:3000'
+          ATLAS_TTS_URL: 'http://127.0.0.1:3001'
         run: |
           if [ -x ./start_stack_macos.sh ]; then
             ./start_stack_macos.sh
@@ -123,12 +163,12 @@ jobs:
           # Дать сервисам время полностью подняться (измерено ~30s)
           sleep 30
 
-      - name: Status
+      - name: Status check
         run: ./status_stack.sh || true
 
       - name: Run smoke script
         run: ./scripts/smoke_e2e.sh
 
-      - name: Stop stack
+      - name: Stop ATLAS stack
         if: always()
         run: ./stop_stack.sh
