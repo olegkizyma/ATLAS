@@ -57,6 +57,11 @@ class AtlasIntelligentChatManager {
             firstTtsDone: false // Guard to avoid double TTS on very first response
         };
 
+    // Режим озвучування: 'quick' (коротко) або 'standard' (повністю)
+    // За замовчуванням — швидкий режим
+    this.ttsMode = (localStorage.getItem('atlas_tts_mode') || 'quick').toLowerCase() === 'standard' ? 'standard' : 'quick';
+    this.conversationStyle = { liveAddressing: true };
+
         // STT (Speech-to-Text) system for user interruptions
         this.speechSystem = {
             enabled: false,
@@ -246,6 +251,19 @@ class AtlasIntelligentChatManager {
                         this.setVoiceEnabled(true);
                         this.log('[VOICE] Voice system enabled by default');
                     }
+
+                    // Одноразова підказка щодо режимів TTS
+                    if (!localStorage.getItem('atlas_tts_mode_prompted')) {
+                        const current = this.getTTSMode && this.getTTSMode() === 'quick' ? 'швидкому' : 'стандартному';
+                        try {
+                            this.addVoiceMessage(
+                                `Працюю у ${current} режимі озвучування. Можна сказати або написати: "увімкни швидкий/стандартний режим", або запитати: "який режим зараз?"`,
+                                'atlas',
+                                this.voiceSystem.agents.atlas.signature
+                            );
+                        } catch (_) {}
+                        localStorage.setItem('atlas_tts_mode_prompted', 'true');
+                    }
                 }
             }
         } catch (error) {
@@ -339,6 +357,12 @@ class AtlasIntelligentChatManager {
         const message = this.chatInput.value.trim();
         if (!message || this.isStreaming || this.ttsSync.isWaitingForTTS) {
             this.log('[CHAT] Message blocked: streaming or waiting for TTS');
+            return;
+        }
+
+        // Команди керування режимом озвучування з чату
+        if (this.maybeHandleModeCommand && this.maybeHandleModeCommand(message, 'chat')) {
+            this.chatInput.value = '';
             return;
         }
         
@@ -495,10 +519,19 @@ class AtlasIntelligentChatManager {
                     
                     // Add to TTS queue if voice is enabled
                     if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
-                        const segments = this.segmentForTTS(content, agent);
-                        const batched = this.combineSegmentsForAgent(segments, agent);
-                        for (const seg of batched) {
-                            this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                        if (this.isQuickMode && this.isQuickMode()) {
+                            const shortText = this.buildQuickTTS(content, agent);
+                            if (shortText) {
+                                this.voiceSystem.ttsQueue.push({ text: shortText, agent });
+                            } else {
+                                const segments = this.segmentForTTS(content, agent);
+                                const batched = this.combineSegmentsForAgent(segments, agent);
+                                for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                            }
+                        } else {
+                            const segments = this.segmentForTTS(content, agent);
+                            const batched = this.combineSegmentsForAgent(segments, agent);
+                            for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
                         }
                     }
                     
@@ -574,10 +607,22 @@ class AtlasIntelligentChatManager {
                 const signature = agentResponse.signature || this.voiceSystem.agents[agent]?.signature;
                 this.addVoiceMessage(content, agent, signature);
                 if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
-                    const raw = content.replace(/^\[.*?\]\s*/, '');
-                    const segs = this.segmentForTTS(raw, agent);
-                    const batched = this.combineSegmentsForAgent(segs, agent);
-                    for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                    if (this.isQuickMode && this.isQuickMode()) {
+                        const shortText = this.buildQuickTTS(content, agent);
+                        if (shortText) {
+                            this.voiceSystem.ttsQueue.push({ text: shortText, agent });
+                        } else {
+                            const raw = content.replace(/^\[.*?\]\s*/, '');
+                            const segs = this.segmentForTTS(raw, agent);
+                            const batched = this.combineSegmentsForAgent(segs, agent);
+                            for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                        }
+                    } else {
+                        const raw = content.replace(/^\[.*?\]\s*/, '');
+                        const segs = this.segmentForTTS(raw, agent);
+                        const batched = this.combineSegmentsForAgent(segs, agent);
+                        for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                    }
                 }
                 await this.delay(400);
             }
@@ -751,6 +796,60 @@ class AtlasIntelligentChatManager {
         const result = picked.join(' ').trim();
         // Обмежуємо довжину фрази для промовляння
         return result.length > 220 ? result.slice(0, 220) : result;
+    }
+
+    // Побудова короткого тексту для швидкого режиму озвучення
+    buildQuickTTS(text, agent = 'atlas') {
+        if (!text) return '';
+        const a = (agent || 'atlas').toLowerCase();
+        let src = String(text);
+        // Прибираємо підпис на початку
+        src = src.replace(/^\s*\[[^\]]+\]\s*/i, '');
+        // Тетяна: спершу [VOICE], далі стисле РЕЗЮМЕ/СТАТУС
+        if (a.includes('tet') || a.includes('goose')) {
+            const v = this.extractVoiceOnly(src);
+            if (v) return v;
+            const t = this.summarizeTetianaForTTS(src);
+            if (t) return t;
+        }
+        // Загальна евристика: 1–2 ключові речення або заголовки
+        let cleaned = src
+            .replace(/^#+\s+/gm, '')
+            .replace(/\*\*|__|`/g, '')
+            .replace(/\n{2,}/g, '\n')
+            .trim();
+        const lines = cleaned.split(/\n+/).map(s => s.trim()).filter(Boolean);
+        const picked = [];
+        const prefer = [/^Суть\b/i, /^Висновок\b/i, /^Статус\b/i, /^План\b/i, /^Кроки\b/i, /^Ризик/i];
+        for (const re of prefer) {
+            const hit = lines.find(l => re.test(l));
+            if (hit) picked.push(hit.replace(/^[^:]+:\s*/, ''));
+        }
+        if (picked.length < 1) {
+            const sentences = cleaned.split(/(?<=[.!?…])\s+/).map(s => s.trim()).filter(Boolean);
+            if (sentences[0]) picked.push(sentences[0]);
+            if (sentences[1]) picked.push(sentences[1]);
+        }
+        let result = picked.filter(Boolean).slice(0, 2).join(' ');
+        if (!/[А-ЯІЇЄҐа-яіїєґ]/.test(result)) {
+            result = this.translateToUAInline(result);
+        }
+        if (result) {
+            // Додамо легке звертання між агентами (без жорсткого шаблону)
+            if (this.conversationStyle?.liveAddressing) {
+                const pref = (() => {
+                    if (a.includes('atlas')) return 'Тетяно, Гриша, ';
+                    if (a.includes('grisha')) return 'Атласе, Тетяно, ';
+                    if (a.includes('tet') || a.includes('goose')) return 'Атласе, ';
+                    return '';
+                })();
+                result = `${pref}Коротко: ${result}`;
+            } else {
+                result = `Коротко: ${result}`;
+            }
+        }
+        if (result.length > 240) result = result.slice(0, 240);
+        return result;
     }
 
     async processTTSQueue() {
@@ -1487,6 +1586,11 @@ class AtlasIntelligentChatManager {
             this.showInterimSpeech(transcript);
             
             if (result.isFinal && confidence > this.speechSystem.confidenceThreshold) {
+                // Обробка голосових команд режимів
+                if (this.maybeHandleModeCommand && this.maybeHandleModeCommand(transcript, 'stt')) {
+                    this.hideInterimSpeech();
+                    continue;
+                }
                 await this.processSpeechInput(transcript, confidence);
                 // Hide interim display after processing final result
                 this.hideInterimSpeech();
@@ -1781,6 +1885,49 @@ class AtlasIntelligentChatManager {
                 microphoneBtn.classList.remove('listening');
             }
         }
+    }
+
+    // ====== Режими TTS: довідник і перемикачі ======
+    getTTSMode() { return this.ttsMode; }
+    isQuickMode() { return this.ttsMode === 'quick'; }
+    setTTSMode(mode) {
+        const m = (mode || '').toLowerCase();
+        if (m !== 'quick' && m !== 'standard') return false;
+        this.ttsMode = m;
+        localStorage.setItem('atlas_tts_mode', m);
+        return true;
+    }
+    modeStatusText() {
+        return this.isQuickMode() ? 'швидкий (короткі озвучки)' : 'стандартний (повні озвучки)';
+    }
+    maybeHandleModeCommand(text, source = 'chat') {
+        if (!text) return false;
+        const t = String(text).toLowerCase();
+        // Запит статусу
+        const isAsk = /(який|яка|which|current|what)\s+(режим|mode)|режим\s*\?/.test(t) || /статус\s+режим(у|а)/.test(t);
+        if (isAsk) {
+            const msg = `Режим озвучування: ${this.modeStatusText()}. Скажіть/напишіть: "увімкни швидкий режим" або "увімкни стандартний режим".`;
+            this.addVoiceMessage(msg, 'atlas', this.voiceSystem.agents.atlas.signature);
+            return true;
+        }
+        // Перемикання на швидкий/стандартний
+        const hasSwitchVerb = /(режим|mode|перемкни|увімкни|перейди|switch|set)/.test(t);
+        const toQuick = /(швидк|fast|quick)/.test(t) && hasSwitchVerb;
+        const toStandard = /(стандартн|повн|детальн|standard)/.test(t) && hasSwitchVerb;
+        if (toQuick) {
+            this.setTTSMode('quick');
+            this.addVoiceMessage('Перемикаюся на швидкий режим озвучування: короткі, збалансовані фрази.', 'atlas', this.voiceSystem.agents.atlas.signature);
+            return true;
+        }
+        if (toStandard) {
+            this.setTTSMode('standard');
+            this.addVoiceMessage('Перемикаюся на стандартний режим озвучування: повний текст як у чаті.', 'atlas', this.voiceSystem.agents.atlas.signature);
+            return true;
+        }
+        // Розмовні скорочення: "говори коротко/детально"
+        if (/говори\s+коротко/.test(t)) { this.setTTSMode('quick'); this.addVoiceMessage('Добре, озвучую коротко.', 'atlas', this.voiceSystem.agents.atlas.signature); return true; }
+        if (/говори\s+детально|говори\s+повно/.test(t)) { this.setTTSMode('standard'); this.addVoiceMessage('Гаразд, озвучую повний текст.', 'atlas', this.voiceSystem.agents.atlas.signature); return true; }
+        return false;
     }
 }
 
