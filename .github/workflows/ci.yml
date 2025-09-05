@@ -58,3 +58,43 @@ jobs:
         env:
           NODE_ENV: test
         run: npm test --silent
+
+  e2e-smoke:
+    name: E2E smoke (self-hosted)
+    # Требуется self-hosted runner с преднастроенными зависимостями (Python 3.11, Node 20, curl)
+    runs-on: self-hosted
+    if: github.event_name != 'pull_request' # не гоняем на PR, только на push в ветки
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Make scripts executable
+        run: |
+          chmod +x ./start_stack_macos.sh || true
+          chmod +x ./stop_stack.sh || true
+          chmod +x ./scripts/smoke_e2e.sh || true
+
+      - name: Start stack
+        env:
+          # Можно задать переменные окружения для портов/урлов при необходимости
+          FRONTEND_PORT: '5001'
+          ORCHESTRATOR_URL: 'http://localhost:5101'
+          TTS_SERVER_URL: 'http://127.0.0.1:3001'
+        run: |
+          if [ -x ./start_stack_macos.sh ]; then
+            ./start_stack_macos.sh
+          else
+            ./start_stack.sh
+          fi
+          # Дать сервисам время полностью подняться (измерено ~30s)
+          sleep 30
+
+      - name: Status
+        run: ./status_stack.sh || true
+
+      - name: Run smoke script
+        run: ./scripts/smoke_e2e.sh
+
+      - name: Stop stack
+        if: always()
+        run: ./stop_stack.sh

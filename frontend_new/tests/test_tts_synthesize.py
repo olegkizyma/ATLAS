@@ -1,4 +1,6 @@
 import os
+import io
+import wave
 import threading
 import time
 import requests
@@ -12,35 +14,134 @@ from atlas_server import app  # type: ignore
 
 # Monkeypatch TTS endpoints inside app by overriding helper functions
 
-def test_tts_synthesize_with_mock(monkeypatch):
-    # Mock _tts_post to return a fake wav payload
+def _make_valid_wav_bytes(ms: int = 100) -> bytes:
+    sr = 22050
+    frames = int(sr * ms / 1000)
+    buf = io.BytesIO()
+    with wave.open(buf, 'wb') as wf:
+        wf.setnchannels(1)
+        wf.setsampwidth(2)
+        wf.setframerate(sr)
+        wf.writeframes(b"\x00\x00" * frames)
+    return buf.getvalue()
+
+
+def test_tts_synthesize_valid_wav(monkeypatch):
     class Resp:
         status_code = 200
-        content = b'RIFF' + b'\x00' * 100  # minimal stub, not a valid wav but enough for route logic
+        content = _make_valid_wav_bytes(120)
         text = ''
 
     def fake_post(path, json_payload, timeout):
         return Resp(), 'http://mock-tts'
 
-    # Disable lock contention
-    from atlas_server import _tts_post, tts_lock  # type: ignore
     monkeypatch.setattr('atlas_server._tts_post', fake_post)
 
-    # Start server
     srv = make_test_server(app)
     srv.start()
     try:
         time.sleep(0.1)
-        payload = {
-            'text': 'Привіт! Це тест.',
-            'agent': 'atlas',
-            'voice': 'dmytro',
-            'rate': 1.0
-        }
+        payload = {'text': 'Привіт! Це тест.', 'agent': 'atlas', 'voice': 'dmytro', 'rate': 1.0}
         r = requests.post(f'{BASE}/api/voice/synthesize', json=payload, timeout=5)
         assert r.status_code == 200
-        # Should be WAV content
-        assert r.headers.get('Content-Type','').startswith('audio/wav')
+        assert r.headers.get('Content-Type', '').startswith('audio/wav')
+        assert r.headers.get('X-TTS-Fallback') is None
+    finally:
+        srv.shutdown()
+
+
+def test_tts_synthesize_empty_text_400():
+    srv = make_test_server(app)
+    srv.start()
+    try:
+        time.sleep(0.1)
+        payload = {'text': '   ', 'agent': 'atlas'}
+        r = requests.post(f'{BASE}/api/voice/synthesize', json=payload, timeout=5)
+        assert r.status_code == 400
+        assert 'error' in r.json()
+    finally:
+        srv.shutdown()
+
+
+def test_tts_synthesize_unknown_agent_400():
+    srv = make_test_server(app)
+    srv.start()
+    try:
+        time.sleep(0.1)
+        payload = {'text': 'ok', 'agent': 'unknown'}
+        r = requests.post(f'{BASE}/api/voice/synthesize', json=payload, timeout=5)
+        assert r.status_code == 400
+        assert 'error' in r.json()
+    finally:
+        srv.shutdown()
+
+
+def test_tts_synthesize_tts_500_fallback_silent(monkeypatch):
+    class Resp:
+        status_code = 500
+        content = b''
+        text = 'error'
+
+    def fake_post(path, json_payload, timeout):
+        return Resp(), 'http://mock-tts'
+
+    monkeypatch.setattr('atlas_server._tts_post', fake_post)
+
+    srv = make_test_server(app)
+    srv.start()
+    try:
+        time.sleep(0.1)
+        payload = {'text': 'test', 'agent': 'atlas'}
+        r = requests.post(f'{BASE}/api/voice/synthesize', json=payload, timeout=5)
+        assert r.status_code == 200
+        assert r.headers.get('Content-Type', '').startswith('audio/wav')
+        assert r.headers.get('X-TTS-Fallback') == 'silent'
+    finally:
+        srv.shutdown()
+
+
+def test_tts_synthesize_tts_200_empty_content_fallback_silent(monkeypatch):
+    class Resp:
+        status_code = 200
+        content = b''
+        text = ''
+
+    def fake_post(path, json_payload, timeout):
+        return Resp(), 'http://mock-tts'
+
+    monkeypatch.setattr('atlas_server._tts_post', fake_post)
+
+    srv = make_test_server(app)
+    srv.start()
+    try:
+        time.sleep(0.1)
+        payload = {'text': 'test', 'agent': 'atlas'}
+        r = requests.post(f'{BASE}/api/voice/synthesize', json=payload, timeout=5)
+        assert r.status_code == 200
+        assert r.headers.get('Content-Type', '').startswith('audio/wav')
+        assert r.headers.get('X-TTS-Fallback') == 'silent'
+    finally:
+        srv.shutdown()
+
+
+def test_tts_synthesize_lock_busy_fallback_busy_silence(monkeypatch):
+    class FakeLock:
+        def acquire(self, timeout=None):
+            return False
+        def release(self):
+            pass
+
+    monkeypatch.setattr('atlas_server.tts_lock', FakeLock())
+
+    srv = make_test_server(app)
+    srv.start()
+    try:
+        time.sleep(0.1)
+        payload = {'text': 'test', 'agent': 'atlas'}
+        r = requests.post(f'{BASE}/api/voice/synthesize', json=payload, timeout=5)
+        assert r.status_code == 200
+        assert r.headers.get('Content-Type', '').startswith('audio/wav')
+        assert r.headers.get('X-TTS-Fallback') == 'busy-silence'
     finally:
         srv.shutdown()
 
