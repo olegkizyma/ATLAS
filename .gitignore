@@ -1,3 +1,27 @@
+# VSCode
+.vscode/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Node
+node_modules/
+
+# Logs and PIDs
+logs/*.log
+logs/*.pid
+
+# Python venv
+frontend_new/venv/
+
+# macOS
+.DS_Store
+
+# Backup artifacts
+**/*.backup
 # Python
 __pycache__/
 *.py[cod]

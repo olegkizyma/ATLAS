@@ -786,6 +786,63 @@ def voice_agents():
         logger.error(f"Error building voice agents: {e}")
         return jsonify({'success': False, 'error': 'Failed to build agents'}), 500
 
+@app.route('/api/voice/prepare_response', methods=['POST'])
+def voice_prepare_response():
+    """Prepare voice response: detect agent, strip signatures, and normalize text.
+    Input JSON: { text: str }
+    Output JSON: { success: bool, text: str, agent: str, signature: str }
+    """
+    try:
+        data = request.get_json(force=True) or {}
+        raw = str(data.get('text') or '').strip()
+        if not raw:
+            return jsonify({'success': False, 'error': 'Text is required'}), 400
+
+        # Detect agent by explicit signature like [ATLAS], [ТЕТЯНА], [ГРИША] or by name:
+        lowered = raw.lower()
+        agent = 'atlas'
+        if re.search(r'\[(тетр?яна|tetyana)\]', lowered) or lowered.startswith('[т') or 'тетяна' in lowered:
+            agent = 'tetyana'
+        elif re.search(r'\[(гриша|grisha)\]', lowered) or 'гриша' in lowered:
+            agent = 'grisha'
+        elif re.search(r'\[(atlas)\]', lowered) or 'atlas' in lowered:
+            agent = 'atlas'
+
+        # Extract only VOICE-lines for Tetyana if present
+        prepared = raw
+        if agent == 'tetyana':
+            lines = raw.splitlines()
+            voice_lines = []
+            for ln in lines:
+                m1 = re.match(r'^\s*\[VOICE\]\s*(.+)$', ln, flags=re.IGNORECASE)
+                m2 = re.match(r'^\s*VOICE\s*:\s*(.+)$', ln, flags=re.IGNORECASE)
+                if m1:
+                    voice_lines.append(m1.group(1).strip())
+                elif m2:
+                    voice_lines.append(m2.group(1).strip())
+            if voice_lines:
+                prepared = ' '.join(voice_lines).strip()
+        
+        # Strip leading signatures like [ATLAS] or NAME:
+        prepared = re.sub(r'^\s*\[[^\]]+\]\s*', '', prepared)
+        prepared = re.sub(r'^\s*[A-ZА-ЯІЇЄҐ]+\s*:\s*', '', prepared)
+        prepared = prepared.strip()
+
+        # Clamp to a reasonable maximum to avoid overlong TTS requests
+        if len(prepared) > 2000:
+            prepared = prepared[:2000]
+
+        sig = AGENT_VOICES.get(agent, {}).get('signature', '[ATLAS]')
+        return jsonify({
+            'success': True,
+            'text': prepared,
+            'agent': agent,
+            'signature': sig
+        })
+    except Exception as e:
+        logger.error(f"/api/voice/prepare_response error: {e}")
+        return jsonify({'success': False, 'error': 'Failed to prepare response'}), 500
+
 def check_orchestrator_health():
     """Check if orchestrator is responding"""
     if not requests:

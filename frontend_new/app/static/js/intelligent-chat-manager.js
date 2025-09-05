@@ -8,7 +8,7 @@ class AtlasIntelligentChatManager {
     this.isStreamPending = false;
     this.messages = [];
     // Separate bases: orchestrator (Node, 5101) and frontend (Flask, 5001)
-    this.orchestratorBase = 'http://localhost:5101';
+    this.orchestratorBase = (window.ATLAS_CFG && window.ATLAS_CFG.orchestratorBase) || 'http://127.0.0.1:5101';
     this.frontendBase = (window.ATLAS_CFG && window.ATLAS_CFG.frontendBase) || window.location.origin;
         this.retryCount = 0;
         this.maxRetries = 3;

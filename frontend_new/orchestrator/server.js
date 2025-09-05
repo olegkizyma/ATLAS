@@ -40,6 +40,11 @@ async function callOpenAICompatChat(baseUrl, model, userMessage) {
     return (typeof text === 'string' && text.trim()) ? text.trim() : null;
 }
 
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(PORT, () => {
+        logMessage('info', `ATLAS Orchestrator running on port ${PORT}`);
+    });
+}
 // Agent configurations
 const AGENTS = {
     atlas: {
@@ -1036,9 +1041,11 @@ app.get('/chat/stream/:sessionId', (req, res) => {
 });
 
 // Start server
-app.listen(PORT, () => {
-    logMessage('info', `ATLAS Orchestrator running on port ${PORT}`);
-    logMessage('info', 'Agent system initialized with TTS integration');
-});
+if (process.env.NODE_ENV !== 'test') {
+    app.listen(PORT, () => {
+        logMessage('info', `ATLAS Orchestrator running on port ${PORT}`);
+        logMessage('info', 'Agent system initialized with TTS integration');
+    });
+}
 
 export default app;
