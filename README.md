@@ -208,19 +208,100 @@ The system is entirely configuration-free and self-adapting. All parameters are 
 - Real-time resource availability
 - Agent capability assessment
 
-## Development
+## 🛠️ Development & Deployment
 
 ### Project Structure
 
 ```
 /
-├── frontend/           # Python intelligent recovery system
-├── frontend_new/       # Node.js orchestrator
-├── goose/             # Goose CLI integration
-├── logs/              # Runtime logs and monitoring
-├── scripts/           # Deployment and maintenance
-└── arhiv/             # Archived legacy components
+├── intelligent_atlas/        # 🧠 Pure Intelligent System (MAIN)
+│   ├── core/                # Core AI agents and engine
+│   ├── config/              # Dynamic configuration system
+│   ├── static/              # Web interface assets
+│   └── templates/           # Web templates
+├── frontend_new/            # 📦 Legacy Node.js orchestrator (archived)
+├── goose/                   # 🦢 Goose CLI integration
+├── logs/                    # 📄 Runtime logs and monitoring
+├── scripts/                 # 🔧 Deployment and maintenance
+├── .github/workflows/       # 🚀 CI/CD automation
+└── old*/                    # 📚 Archived legacy components
 ```
+
+### 🚀 Quick Deployment
+
+#### macOS (Recommended):
+```bash
+./start_stack_macos.sh    # Full intelligent stack
+./status_stack.sh         # Check system health
+./stop_stack.sh           # Graceful shutdown
+```
+
+#### Linux:
+```bash
+./start_stack.sh          # Full intelligent stack
+./status_stack.sh         # Check system health  
+./stop_stack.sh           # Graceful shutdown
+```
+
+### 🧪 Testing & Validation
+
+#### Local Testing:
+```bash
+# Start the system
+./start_stack_macos.sh
+
+# Run smoke tests
+./scripts/smoke_e2e.sh
+
+# Check detailed status
+./status_stack.sh
+```
+
+#### Required Services:
+- ✅ **ATLAS Web Interface** (port 5001) - Main system
+- ✅ **Local AI API** (port 3010) - CRITICAL for all AI decisions
+- ⚠️ **Goose Executor** (port 3000) - Optional, enables real task execution
+- ⚠️ **Ukrainian TTS** (port 3001) - Optional, enables voice synthesis
+
+### 🔄 CI/CD Pipeline
+
+#### Automated Testing:
+- **Python Import Validation** - Core module integrity
+- **Legacy System Tests** - Backward compatibility (if present)
+- **E2E Smoke Tests** - Full system validation (self-hosted runner)
+
+#### Deployment Stages:
+1. **Validation** - Code quality and import validation
+2. **Staging** - Automatic deployment to staging environment
+3. **Production** - Manual approval for production deployment
+
+#### Dependabot Integration:
+- **Weekly Python Updates** - intelligent_atlas dependencies
+- **Monthly Rust/Node Updates** - Goose and legacy components
+- **GitHub Actions Updates** - CI/CD pipeline maintenance
+
+### 🔧 Development Workflow
+
+#### Setting up Development Environment:
+```bash
+# Clone and setup
+cd intelligent_atlas
+python3 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+
+# Development mode
+export PYTHONPATH="$(pwd):$(pwd)/core:$(pwd)/config:$PYTHONPATH"
+export ATLAS_MODE="intelligent"
+```
+
+#### Making Changes:
+1. **Make surgical changes** to intelligent_atlas/
+2. **Test locally** with ./start_stack_macos.sh
+3. **Run smoke tests** with ./scripts/smoke_e2e.sh
+4. **Commit changes** - CI/CD will validate automatically
+5. **Deploy to staging** - Automatic on master branch
+6. **Deploy to production** - Manual workflow dispatch
 
 ### Key Files
 
