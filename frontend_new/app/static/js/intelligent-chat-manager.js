@@ -66,6 +66,7 @@ class AtlasIntelligentChatManager {
         this.speechSystem = {
             enabled: false,
             recognition: null,
+            wakeRecognition: null,
             isListening: false,
             isEnabled: false,
             permissionDenied: false,
@@ -82,6 +83,14 @@ class AtlasIntelligentChatManager {
             isRecording: false,
             mediaRecorder: null,
             audioChunks: [],
+
+            // One-shot vs wake-word modes
+            currentBeamSize: 5, // 5 для одиночного запису ("віспер 5"), 3 для після гарячого слова ("віспер 3")
+            wakeModeActive: false,
+            resumeWakeAfterTranscribe: false,
+            wakeWord: 'атлас',
+            wakeWordVariants: ['атлас', 'аталс', 'атласе', 'atlas'],
+            _micClickTimer: null,
             
             // Interruption detection
             interruptionKeywords: [
@@ -1532,6 +1541,9 @@ class AtlasIntelligentChatManager {
             if (!this.speechSystem.whisperAvailable || !this.speechSystem.preferWhisper) {
                 await this.initWebSpeechAPI();
             }
+
+            // Підготуємо wake-розпізнавання (окремий інстанс)
+            await this.initWakeRecognition().catch(() => {});
             
             // Add speech controls to UI
             this.addSpeechControls();
@@ -1606,6 +1618,82 @@ class AtlasIntelligentChatManager {
         this.setupSpeechEventHandlers();
         
         this.log('[STT] Web Speech API initialized');
+    }
+
+    async initWakeRecognition() {
+        // Окремий інстанс для режиму «гарячого слова» (щоб не конфліктував із основним розпізнаванням)
+        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+            this.log('[STT] Wake recognition not available (Web Speech API missing)');
+            return false;
+        }
+        try {
+            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+            const rec = new SpeechRecognition();
+            rec.continuous = true;
+            rec.interimResults = false;
+            rec.lang = this.speechSystem.language || 'uk-UA';
+
+            rec.onstart = () => this.log('[STT] Wake recognition started (listening for "Атлас")');
+            rec.onend = () => {
+                this.log('[STT] Wake recognition ended');
+                // авто-перезапуск у режимі wake, якщо активний
+                if (this.speechSystem.wakeModeActive) {
+                    setTimeout(() => { try { rec.start(); } catch(_){} }, 500);
+                }
+            };
+            rec.onerror = (e) => this.log(`[STT] Wake recognition error: ${e.error}`);
+            rec.onresult = async (event) => {
+                for (let i = event.resultIndex; i < event.results.length; i++) {
+                    const result = event.results[i];
+                    if (!result || result.length === 0) continue;
+                    const raw = (result[0].transcript || '').trim();
+                    const transcript = raw.toLowerCase();
+                    const conf = result[0].confidence || 0;
+                    if (!transcript) continue;
+                    this.log(`[STT] Wake heard: "${transcript}" (${conf.toFixed(2)})`);
+
+                    const hasWake = this.speechSystem.wakeWordVariants.some(w => transcript.includes(w));
+                    if (hasWake && conf > 0.4) {
+                        // Якщо фраза містить привітання і одразу команду — беремо хвіст після звернення й відправляємо без підтвердження й без додаткового запису
+                        const greetRe = /(привіт|привет|вітаю|здрастуйте|добрий\s+день|добрий\s+вечір|добрий\s+ранок)/i;
+                        const wakeRe = /(атлас|аталс|атласе|atlas)/i;
+                        const greetPos = raw.search(greetRe);
+                        const wakePos = raw.search(wakeRe);
+                        let tail = '';
+                        if (wakePos !== -1) {
+                            // Хвіст після слова «Атлас» або після «привіт Атлас» тощо
+                            tail = raw.slice(wakePos + raw.slice(wakePos).match(wakeRe)[0].length).trim();
+                            // Прибрати розділові/звертальні частки на початку хвоста
+                            tail = tail.replace(/^[,!:\-\s]+/, '').replace(/^(будь\s*ласка|скажи|розкажи|поясни)\s+/i, '');
+                        }
+
+                        // Якщо хвіст суттєвий (є змістова частина) — одразу шлемо в чат
+                        if (tail && tail.length > 1) {
+                            try { rec.stop(); } catch(_) {}
+                            this.stopWakeListening();
+                            this.log(`[STT] Wake+command inline detected, sending tail: "${tail}"`);
+                            await this.sendSpeechToChat(tail, Math.max(conf, 0.85));
+                            // Після відправки — залишаємося у wake-режимі й перезапускаємо слухання без озвучки
+                            if (this.speechSystem.wakeModeActive) {
+                                setTimeout(() => this.startWakeListening(), 300);
+                            }
+                            break;
+                        }
+
+                        // Інакше — звичайний сценарій: підтвердження + одноразовий запис (віспер 3)
+                        try { rec.stop(); } catch(_) {}
+                        await this.handleWakeWordTriggered();
+                        break;
+                    }
+                }
+            };
+
+            this.speechSystem.wakeRecognition = rec;
+            return true;
+        } catch (e) {
+            this.log(`[STT] Failed to init wake recognition: ${e.message}`);
+            return false;
+        }
     }
 
     setupSpeechEventHandlers() {
@@ -1691,7 +1779,8 @@ class AtlasIntelligentChatManager {
             const formData = new FormData();
             formData.append('file', audioBlob, 'recording.webm');
             formData.append('language', 'uk'); // Ukrainian
-            formData.append('beam_size', '5');
+            const beam = String(this.speechSystem.currentBeamSize || 5);
+            formData.append('beam_size', beam);
             formData.append('temperature', '0.0');
 
             // Send to Whisper endpoint
@@ -1714,6 +1803,16 @@ class AtlasIntelligentChatManager {
                 
                 // Hide interim display
                 this.hideInterimSpeech();
+
+                // Якщо активний сценарій «повернутися у wake-режим» — вмикаємо його знову
+                if (this.speechSystem.resumeWakeAfterTranscribe) {
+                    this.speechSystem.resumeWakeAfterTranscribe = false;
+                    // Відновлюємо стандартний beam для наступних разів
+                    this.speechSystem.currentBeamSize = 5;
+                    if (this.speechSystem.wakeModeActive) {
+                        setTimeout(() => this.startWakeListening(), 400);
+                    }
+                }
             } else {
                 this.log(`[STT] Whisper failed: ${result.error || 'Unknown error'}`);
                 
@@ -1814,7 +1913,7 @@ class AtlasIntelligentChatManager {
         }
         
         // Fallback to Web Speech API
-        return this.startWebSpeechRecognition();
+    return this.startWebSpeechRecognition();
     }
 
     stopSpeechRecognition() {
@@ -1834,6 +1933,29 @@ class AtlasIntelligentChatManager {
     }
 
     async processSpeechInput(transcript, confidence) {
+        // Якщо активний wake-режим і ми не в фазі «після тригера», ігноруємо випадкові фрази
+        if (this.speechSystem.wakeModeActive && !this.speechSystem.resumeWakeAfterTranscribe) {
+            const t = String(transcript || '').toLowerCase();
+            const isWakeWord = this.speechSystem.wakeWordVariants.some(w => t.includes(w));
+            if (!isWakeWord) {
+                this.log('[STT] Ignored non-wake phrase during wake mode');
+                return;
+            }
+            // Якщо є звернення + команда в одному реченні — відправляємо лише хвіст
+            const raw = String(transcript || '');
+            const wakeRe = /(атлас|аталс|атласе|atlas)/i;
+            const greetRe = /(привіт|привет|вітаю|здрастуйте|добрий\s+день|добрий\s+вечір|добрий\s+ранок)/i;
+            const wakePos = raw.search(wakeRe);
+            if (wakePos !== -1) {
+                let tail = raw.slice(wakePos + raw.slice(wakePos).match(wakeRe)[0].length).trim();
+                tail = tail.replace(/^[,!:\-\s]+/, '').replace(/^(будь\s*ласка|скажи|розкажи|поясни)\s+/i, '');
+                if (tail.length > 1) {
+                    transcript = tail;
+                    this.log(`[STT] Using tail after wake for processing: "${transcript}"`);
+                }
+            }
+        }
+
         const lowerTranscript = transcript.toLowerCase();
         
         this.log(`[STT] Processing speech input: "${transcript}" (lowercase: "${lowerTranscript}")`);
@@ -2053,13 +2175,130 @@ class AtlasIntelligentChatManager {
         // Use existing microphone button instead of creating new one
         const microphoneBtn = document.getElementById('microphone-btn');
         if (microphoneBtn) {
-            microphoneBtn.onclick = () => this.toggleSpeechRecognition();
-            microphoneBtn.title = 'Речевий ввід (натисніть для запуску/зупинки STT)';
+            // Один/подвійний клік: одиночний — одноразовий запис; подвійний — перехід у режим «Атлас»
+            microphoneBtn.onclick = (e) => this._handleMicClick(e);
+            microphoneBtn.ondblclick = (e) => this._handleMicDoubleClick(e);
+            microphoneBtn.title = '🎤 Один клік — разовий запис; Подвійний — режим "Атлас" (гаряче слово)';
             // Update button state immediately after attaching event
             this.updateSpeechButton();
             this.log('[STT] Speech controls initialized with existing microphone button');
         } else {
             this.log('[STT] Warning: microphone button not found');
+        }
+    }
+
+    _handleMicClick(e) {
+        // Детектор одинарного кліку з невеликою затримкою, щоб відрізнити від doubleclick
+        if (this.speechSystem._micClickTimer) return;
+        this.speechSystem._micClickTimer = setTimeout(() => {
+            this.speechSystem._micClickTimer = null;
+            this._performSingleClickAction();
+        }, 250);
+    }
+
+    _handleMicDoubleClick(e) {
+        // Подвійний клік: скасовуємо відкладений single та вмикаємо/вимикаємо wake-режим
+        if (this.speechSystem._micClickTimer) {
+            clearTimeout(this.speechSystem._micClickTimer);
+            this.speechSystem._micClickTimer = null;
+        }
+        this._toggleWakeMode();
+    }
+
+    _performSingleClickAction() {
+        // Якщо активний wake-режим — одноклік вимикає його
+        if (this.speechSystem.wakeModeActive) {
+            this.disableWakeMode(true);
+            return;
+        }
+        // Інакше — запускаємо одноразовий запис через Whisper (beam_size=5)
+        this.speechSystem.currentBeamSize = 5;
+        if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
+            this.startWhisperRecording();
+        } else {
+            // Fallback — звичайне розпізнавання (старт/стоп як один раз)
+            if (this.speechSystem.isEnabled) this.stopSpeechRecognition();
+            this.startSpeechRecognition();
+        }
+    }
+
+    _toggleWakeMode() {
+        if (this.speechSystem.wakeModeActive) {
+            this.disableWakeMode(true);
+        } else {
+            this.enableWakeMode();
+        }
+    }
+
+    async enableWakeMode() {
+        // Вмикаємо режим «гарячого слова» (Атлас)
+        this.speechSystem.wakeModeActive = true;
+        // Забороняємо звичайне розпізнавання під час wake-режиму
+        if (this.speechSystem.isEnabled) {
+            this.stopSpeechRecognition();
+        }
+        this.speechSystem.isEnabled = false;
+        // Гарантуємо наявність wakeRecognition
+        if (!this.speechSystem.wakeRecognition) {
+            await this.initWakeRecognition();
+        }
+        // Запускаємо wake-слухання
+        this.startWakeListening();
+        this.updateSpeechButton();
+        this.addMessage('Режим прослуховування «Атлас» увімкнено. Скажіть: «Атлас».', 'system');
+    }
+
+    disableWakeMode(showMsg = false) {
+        this.speechSystem.wakeModeActive = false;
+        this.stopWakeListening();
+        this.updateSpeechButton();
+        if (showMsg) this.addMessage('Режим прослуховування «Атлас» вимкнено.', 'system');
+    }
+
+    startWakeListening() {
+        const rec = this.speechSystem.wakeRecognition;
+        if (!rec) {
+            this.log('[STT] Wake listening unavailable');
+            return false;
+        }
+        try {
+            rec.start();
+            return true;
+        } catch (e) {
+            this.log(`[STT] Wake start failed: ${e.message}`);
+            return false;
+        }
+    }
+
+    stopWakeListening() {
+        const rec = this.speechSystem.wakeRecognition;
+        if (!rec) return;
+        try { rec.stop(); } catch(_) {}
+    }
+
+    async handleWakeWordTriggered(options = {}) {
+        const { silent = false } = options || {};
+        // Озвучуємо коротке підтвердження від ATLAS і запускаємо запис (beam_size=3)
+        const phrases = [
+            'Слухаю, можете говорити.',
+            'Так, я уважно слухаю.',
+            'Так, Олег Миколайович, творець, я у вашому розпорядженні.'
+        ];
+        if (!silent) {
+            const say = phrases[Math.floor(Math.random()*phrases.length)];
+            try {
+                await this.synthesizeAndPlay(say, 'atlas');
+            } catch(_) {}
+        }
+
+        // Після підтвердження — одноразовий запис для запиту користувача (beam_size=3)
+        this.speechSystem.currentBeamSize = 3;
+        this.speechSystem.resumeWakeAfterTranscribe = true;
+        if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
+            this.startWhisperRecording();
+        } else {
+            // Якщо Whisper недоступний, переходимо на звичайне розпізнавання одразу як фразу
+            this.toggleSpeechRecognition();
         }
     }
 
@@ -2091,6 +2330,11 @@ class AtlasIntelligentChatManager {
         if (!this.speechSystem.enabled || !this.speechSystem.recognition) {
             return;
         }
+        // Не запускаємо звичайний режим, якщо активний wake-режим
+        if (this.speechSystem.wakeModeActive) {
+            this.log('[STT] Suppressing normal recognition while wake mode is active');
+            return;
+        }
         
         try {
             this.speechSystem.isEnabled = true;
@@ -2119,8 +2363,14 @@ class AtlasIntelligentChatManager {
             // Check if recording with Whisper
             const isRecording = this.speechSystem.isRecording || this.speechSystem.isListening;
             const isEnabled = this.speechSystem.isEnabled || this.speechSystem.whisperAvailable;
+            const isWake = this.speechSystem.wakeModeActive;
             
-            if (isRecording) {
+            if (isWake) {
+                micBtnText.textContent = '👂 Атлас';
+                microphoneBtn.style.background = 'rgba(255, 200, 0, 0.35)';
+                microphoneBtn.title = 'Режим «Атлас»: слухаю гаряче слово';
+                microphoneBtn.classList.add('listening');
+            } else if (isRecording) {
                 micBtnText.textContent = '🔴 Слухаю'; // Red dot indicates active listening
                 microphoneBtn.style.background = 'rgba(255, 0, 0, 0.4)';
                 microphoneBtn.title = 'Прослуховуємо... (натисніть для зупинки)';
