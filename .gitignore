@@ -93,6 +93,9 @@ model.pth
 *.ark
 *.glb
 
+# Ignore ATLAS2 mirror
+ATLAS2/
+
 # TTS virtual environment and audio files
 mcp_tts_ukrainian/tts_venv/
 mcp_tts_ukrainian/data/
