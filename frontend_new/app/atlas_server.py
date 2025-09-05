@@ -23,6 +23,7 @@ import subprocess
 from pathlib import Path
 from goose_client import GooseClient
 from intent_router import classify_intent, generate_casual_reply
+from stt_manager import stt_manager
 from typing import Optional
 import io
 import wave
@@ -920,6 +921,115 @@ def translate_api():
     except Exception as e:
         logger.error(f"/api/translate error: {e}")
         return jsonify({'success': False, 'error': 'Translation failed'}), 500
+
+# ========== STT (Speech-to-Text) Endpoints ==========
+
+@app.route('/api/stt/status', methods=['GET'])
+def stt_status():
+    """Повертає статус STT системи."""
+    try:
+        status = stt_manager.get_status()
+        return jsonify(status)
+    except Exception as e:
+        logger.error(f"/api/stt/status error: {e}")
+        return jsonify({'error': 'STT status check failed'}), 500
+
+@app.route('/api/stt/transcribe', methods=['POST'])
+def stt_transcribe():
+    """Транскрибує аудіофайл за допомогою Whisper."""
+    try:
+        # Перевіряємо наявність файлу
+        if 'file' not in request.files:
+            return jsonify({
+                'success': False,
+                'error': 'No file uploaded'
+            }), 400
+
+        file = request.files['file']
+        
+        # Перевіряємо, чи файл не порожній
+        if file.filename == '':
+            return jsonify({
+                'success': False, 
+                'error': 'No file selected'
+            }), 400
+
+        # Перевіряємо підтримку формату
+        if not stt_manager.allowed_file(file.filename):
+            return jsonify({
+                'success': False,
+                'error': f'Unsupported file format. Supported: {", ".join(stt_manager.allowed_extensions)}'
+            }), 400
+
+        # Перевіряємо доступність Whisper
+        if not stt_manager.is_whisper_available():
+            return jsonify({
+                'success': False,
+                'error': 'Whisper not available. Please install faster-whisper.',
+                'fallback': 'Use Web Speech API on client side'
+            }), 503
+
+        # Створюємо тимчасовий файл
+        temp_file = tempfile.NamedTemporaryFile(
+            suffix=f".{file.filename.rsplit('.', 1)[1].lower()}",
+            delete=False
+        )
+        
+        try:
+            # Зберігаємо файл
+            file.save(temp_file.name)
+            
+            # Отримуємо параметри з форми
+            language = request.form.get('language')  # None для автовизначення
+            beam_size = int(request.form.get('beam_size', 5))
+            temperature = float(request.form.get('temperature', 0.0))
+            
+            # Виконуємо транскрибацію
+            result = stt_manager.transcribe_file(
+                temp_file.name,
+                language=language,
+                beam_size=beam_size,
+                temperature=temperature
+            )
+            
+            return jsonify(result)
+            
+        finally:
+            # Видаляємо тимчасовий файл
+            try:
+                os.unlink(temp_file.name)
+            except OSError:
+                pass
+                
+    except Exception as e:
+        logger.error(f"/api/stt/transcribe error: {e}")
+        return jsonify({
+            'success': False,
+            'error': f'Transcription failed: {str(e)}'
+        }), 500
+
+@app.route('/api/stt/models', methods=['GET'])
+def stt_models():
+    """Повертає інформацію про доступні STT моделі."""
+    try:
+        available_models = [
+            'tiny', 'tiny.en',
+            'base', 'base.en', 
+            'small', 'small.en',
+            'medium', 'medium.en',
+            'large-v1', 'large-v2', 'large-v3'
+        ]
+        
+        return jsonify({
+            'whisper_available': stt_manager.is_whisper_available(),
+            'current_model': stt_manager.model_size if stt_manager.is_whisper_available() else None,
+            'available_models': available_models,
+            'device': stt_manager.device,
+            'web_speech_available': True  # Завжди доступний у браузері
+        })
+    except Exception as e:
+        logger.error(f"/api/stt/models error: {e}")
+        return jsonify({'error': 'Failed to get models info'}), 500
 
 if __name__ == '__main__':
     logger.info(f"Starting ATLAS Frontend Server on port {FRONTEND_PORT}")

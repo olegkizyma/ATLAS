@@ -74,6 +74,15 @@ class AtlasIntelligentChatManager {
             language: 'uk-UA', // Ukrainian as primary
             fallbackLanguage: 'en-US',
             confidenceThreshold: 0.5, // Знижено з 0.7 до 0.5 для кращого розпізнання
+            
+            // Whisper STT configuration
+            preferWhisper: true, // Віддавати перевагу Whisper замість Web Speech API
+            whisperAvailable: false,
+            recordingTimeout: 10000, // 10 секунд макс. запис для Whisper
+            isRecording: false,
+            mediaRecorder: null,
+            audioChunks: [],
+            
             // Interruption detection
             interruptionKeywords: [
                 'стоп', 'stop', 'чекай', 'wait', 'припини', 'pause',
@@ -246,23 +255,17 @@ class AtlasIntelligentChatManager {
                     await this.loadAgentInfo();
                     this.addVoiceControls();
                     
-                    // Увімкнути голосову систему за замовчуванням
+                    // НЕ вмикаємо голосову систему автоматично - користувач сам вирішує
                     if (!localStorage.getItem('atlas_voice_enabled')) {
-                        this.setVoiceEnabled(true);
-                        this.log('[VOICE] Voice system enabled by default');
+                        this.setVoiceEnabled(false); // За замовчуванням ВИМКНЕНО
+                        this.log('[VOICE] Voice system disabled by default - user can enable manually');
                     }
 
-                    // Одноразова підказка щодо режимів TTS
+                    // Відключаємо автоматичну підказку щодо режимів TTS при першому запуску
                     if (!localStorage.getItem('atlas_tts_mode_prompted')) {
-                        const current = this.getTTSMode && this.getTTSMode() === 'quick' ? 'швидкому' : 'стандартному';
-                        try {
-                            this.addVoiceMessage(
-                                `Працюю у ${current} режимі озвучування. Можна сказати або написати: "увімкни швидкий/стандартний режим", або запитати: "який режим зараз?"`,
-                                'atlas',
-                                this.voiceSystem.agents.atlas.signature
-                            );
-                        } catch (_) {}
+                        // Просто відмічаємо що підказка була показана, але не показуємо її автоматично
                         localStorage.setItem('atlas_tts_mode_prompted', 'true');
+                        this.log('[VOICE] TTS mode prompting disabled for quiet startup');
                     }
                 }
             }
@@ -1505,33 +1508,94 @@ class AtlasIntelligentChatManager {
 
     async initSpeechSystem() {
         try {
-            // Check if Web Speech API is available
-            if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
-                this.log('[STT] Web Speech API not available');
-                return;
+            // Check Whisper availability first
+            if (this.speechSystem.preferWhisper) {
+                await this.checkWhisperAvailability();
             }
-
-            const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-            this.speechSystem.recognition = new SpeechRecognition();
             
-            // Configure recognition
-            this.speechSystem.recognition.continuous = this.speechSystem.continuous;
-            this.speechSystem.recognition.interimResults = this.speechSystem.interimResults;
-            this.speechSystem.recognition.lang = this.speechSystem.language;
+            // Initialize MediaRecorder for Whisper if available
+            if (this.speechSystem.whisperAvailable) {
+                await this.initWhisperRecording();
+            }
             
-            // Set up event handlers
-            this.setupSpeechEventHandlers();
+            // Fallback to Web Speech API
+            if (!this.speechSystem.whisperAvailable || !this.speechSystem.preferWhisper) {
+                await this.initWebSpeechAPI();
+            }
             
             // Add speech controls to UI
             this.addSpeechControls();
             
             this.speechSystem.enabled = true;
-            this.log('[STT] Speech recognition system initialized');
+            this.log(`[STT] Speech system initialized (Whisper: ${this.speechSystem.whisperAvailable})`);
             
         } catch (error) {
             this.log(`[STT] Failed to initialize speech system: ${error.message}`);
             this.speechSystem.enabled = false;
         }
+    }
+
+    async checkWhisperAvailability() {
+        try {
+            const response = await fetch(`${this.frontendBase}/api/stt/status`);
+            const status = await response.json();
+            this.speechSystem.whisperAvailable = status.whisper_available || false;
+            this.log(`[STT] Whisper availability: ${this.speechSystem.whisperAvailable}`);
+        } catch (error) {
+            this.log(`[STT] Failed to check Whisper: ${error.message}`);
+            this.speechSystem.whisperAvailable = false;
+        }
+    }
+
+    async initWhisperRecording() {
+        try {
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                audio: {
+                    echoCancellation: true,
+                    noiseSuppression: true,
+                    autoGainControl: true
+                } 
+            });
+            
+            this.speechSystem.mediaRecorder = new MediaRecorder(stream);
+            this.speechSystem.audioChunks = [];
+            
+            this.speechSystem.mediaRecorder.ondataavailable = (event) => {
+                if (event.data.size > 0) {
+                    this.speechSystem.audioChunks.push(event.data);
+                }
+            };
+            
+            this.speechSystem.mediaRecorder.onstop = () => {
+                this.processWhisperRecording();
+            };
+            
+            this.log('[STT] Whisper recording initialized');
+        } catch (error) {
+            this.log(`[STT] Failed to initialize Whisper recording: ${error.message}`);
+            this.speechSystem.whisperAvailable = false;
+        }
+    }
+
+    async initWebSpeechAPI() {
+        // Check if Web Speech API is available
+        if (!('webkitSpeechRecognition' in window || 'SpeechRecognition' in window)) {
+            this.log('[STT] Web Speech API not available');
+            return;
+        }
+
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        this.speechSystem.recognition = new SpeechRecognition();
+        
+        // Configure recognition
+        this.speechSystem.recognition.continuous = this.speechSystem.continuous;
+        this.speechSystem.recognition.interimResults = this.speechSystem.interimResults;
+        this.speechSystem.recognition.lang = this.speechSystem.language;
+        
+        // Set up event handlers
+        this.setupSpeechEventHandlers();
+        
+        this.log('[STT] Web Speech API initialized');
     }
 
     setupSpeechEventHandlers() {
@@ -1594,6 +1658,167 @@ class AtlasIntelligentChatManager {
                 await this.processSpeechInput(transcript, confidence);
                 // Hide interim display after processing final result
                 this.hideInterimSpeech();
+            }
+        }
+    }
+
+    // ========== Whisper STT Functions ==========
+
+    async processWhisperRecording() {
+        try {
+            if (this.speechSystem.audioChunks.length === 0) {
+                this.log('[STT] No audio data to process');
+                return;
+            }
+
+            // Create audio blob
+            const audioBlob = new Blob(this.speechSystem.audioChunks, { type: 'audio/webm' });
+            this.speechSystem.audioChunks = [];
+
+            this.log(`[STT] Processing audio with Whisper (${audioBlob.size} bytes)`);
+
+            // Create form data for upload
+            const formData = new FormData();
+            formData.append('file', audioBlob, 'recording.webm');
+            formData.append('language', 'uk'); // Ukrainian
+            formData.append('beam_size', '5');
+            formData.append('temperature', '0.0');
+
+            // Send to Whisper endpoint
+            const response = await fetch(`${this.frontendBase}/api/stt/transcribe`, {
+                method: 'POST',
+                body: formData
+            });
+
+            const result = await response.json();
+
+            if (result.success && result.text) {
+                const transcript = result.text.trim();
+                this.log(`[STT] Whisper recognized: "${transcript}" (${result.language})`);
+                
+                // Show recognized text
+                this.showInterimSpeech(transcript);
+                
+                // Process as speech input
+                await this.processSpeechInput(transcript, 0.9); // High confidence for Whisper
+                
+                // Hide interim display
+                this.hideInterimSpeech();
+            } else {
+                this.log(`[STT] Whisper failed: ${result.error || 'Unknown error'}`);
+                
+                // Fallback to Web Speech API if available
+                if (this.speechSystem.recognition) {
+                    this.log('[STT] Falling back to Web Speech API');
+                    this.startWebSpeechRecognition();
+                }
+            }
+
+        } catch (error) {
+            this.log(`[STT] Whisper processing error: ${error.message}`);
+            
+            // Fallback to Web Speech API
+            if (this.speechSystem.recognition) {
+                this.log('[STT] Falling back to Web Speech API');
+                this.startWebSpeechRecognition();
+            }
+        }
+    }
+
+    startWhisperRecording() {
+        if (!this.speechSystem.mediaRecorder) {
+            this.log('[STT] MediaRecorder not available');
+            return false;
+        }
+
+        try {
+            this.speechSystem.audioChunks = [];
+            this.speechSystem.isRecording = true;
+            this.speechSystem.isListening = true;
+            
+            this.speechSystem.mediaRecorder.start();
+            this.updateSpeechButton();
+            
+            this.log('[STT] Started Whisper recording');
+            
+            // Auto-stop after timeout
+            setTimeout(() => {
+                if (this.speechSystem.isRecording) {
+                    this.stopWhisperRecording();
+                }
+            }, this.speechSystem.recordingTimeout);
+            
+            return true;
+        } catch (error) {
+            this.log(`[STT] Failed to start recording: ${error.message}`);
+            this.speechSystem.isRecording = false;
+            this.speechSystem.isListening = false;
+            this.updateSpeechButton();
+            return false;
+        }
+    }
+
+    stopWhisperRecording() {
+        if (!this.speechSystem.mediaRecorder || !this.speechSystem.isRecording) {
+            return;
+        }
+
+        try {
+            this.speechSystem.mediaRecorder.stop();
+            this.speechSystem.isRecording = false;
+            this.speechSystem.isListening = false;
+            this.updateSpeechButton();
+            
+            this.log('[STT] Stopped Whisper recording');
+        } catch (error) {
+            this.log(`[STT] Error stopping recording: ${error.message}`);
+        }
+    }
+
+    startWebSpeechRecognition() {
+        if (!this.speechSystem.recognition) {
+            this.log('[STT] Web Speech API not available');
+            return false;
+        }
+
+        try {
+            this.speechSystem.recognition.start();
+            return true;
+        } catch (error) {
+            this.log(`[STT] Failed to start Web Speech recognition: ${error.message}`);
+            return false;
+        }
+    }
+
+    // ========== Unified STT Interface ==========
+
+    startSpeechRecognition() {
+        if (!this.speechSystem.enabled) {
+            this.log('[STT] Speech system disabled');
+            return false;
+        }
+
+        // Try Whisper first if available and preferred
+        if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
+            return this.startWhisperRecording();
+        }
+        
+        // Fallback to Web Speech API
+        return this.startWebSpeechRecognition();
+    }
+
+    stopSpeechRecognition() {
+        // Stop Whisper recording if active
+        if (this.speechSystem.isRecording) {
+            this.stopWhisperRecording();
+        }
+        
+        // Stop Web Speech API if active
+        if (this.speechSystem.recognition && this.speechSystem.isListening) {
+            try {
+                this.speechSystem.recognition.stop();
+            } catch (error) {
+                this.log(`[STT] Error stopping Web Speech: ${error.message}`);
             }
         }
     }
@@ -1820,6 +2045,8 @@ class AtlasIntelligentChatManager {
         if (microphoneBtn) {
             microphoneBtn.onclick = () => this.toggleSpeechRecognition();
             microphoneBtn.title = 'Речевий ввід (натисніть для запуску/зупинки STT)';
+            // Update button state immediately after attaching event
+            this.updateSpeechButton();
             this.log('[STT] Speech controls initialized with existing microphone button');
         } else {
             this.log('[STT] Warning: microphone button not found');
@@ -1832,6 +2059,17 @@ class AtlasIntelligentChatManager {
             return;
         }
         
+        // Handle Whisper recording
+        if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
+            if (this.speechSystem.isRecording) {
+                this.stopWhisperRecording();
+            } else {
+                this.startWhisperRecording();
+            }
+            return;
+        }
+        
+        // Fallback to Web Speech API
         if (this.speechSystem.isEnabled) {
             this.stopSpeechRecognition();
         } else {
@@ -1868,20 +2106,24 @@ class AtlasIntelligentChatManager {
         const micBtnText = microphoneBtn?.querySelector('.btn-text');
         
         if (microphoneBtn && micBtnText) {
-            if (this.speechSystem.isListening) {
+            // Check if recording with Whisper
+            const isRecording = this.speechSystem.isRecording || this.speechSystem.isListening;
+            const isEnabled = this.speechSystem.isEnabled || this.speechSystem.whisperAvailable;
+            
+            if (isRecording) {
                 micBtnText.textContent = '🔴 Слухаю'; // Red dot indicates active listening
                 microphoneBtn.style.background = 'rgba(255, 0, 0, 0.4)';
                 microphoneBtn.title = 'Прослуховуємо... (натисніть для зупинки)';
                 microphoneBtn.classList.add('listening');
-            } else if (this.speechSystem.isEnabled) {
+            } else if (isEnabled && this.speechSystem.enabled) {
                 micBtnText.textContent = '🟢 Мікрофон'; // Green dot indicates ready
                 microphoneBtn.style.background = 'rgba(0, 255, 0, 0.4)';
-                microphoneBtn.title = 'Речевий ввід готовий (натисніть для вимкнення)';
+                microphoneBtn.title = 'Речевий ввід готовий (натисніть для запису)';
                 microphoneBtn.classList.remove('listening');
             } else {
                 micBtnText.textContent = '🎤 Мікрофон';
                 microphoneBtn.style.background = 'rgba(0, 20, 10, 0.6)';
-                microphoneBtn.title = 'Речевий ввід вимкнений (натисніть для ввімкнення)';
+                microphoneBtn.title = 'Речевий ввід недоступний або вимкнений';
                 microphoneBtn.classList.remove('listening');
             }
         }

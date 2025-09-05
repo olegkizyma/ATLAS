@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATLAS Voice System Test</title>
+    <style>
+        body {
+            background: #001122;
+            color: #00ff00;
+            font-family: 'Courier New', monospace;
+            padding: 20px;
+        }
+        .test-container {
+            max-width: 800px;
+            margin: 0 auto;
+            border: 1px solid #00ff00;
+            padding: 20px;
+            border-radius: 10px;
+        }
+        .status-box {
+            background: rgba(0, 255, 0, 0.1);
+            padding: 15px;
+            margin: 10px 0;
+            border-radius: 5px;
+        }
+        .button {
+            background: #004400;
+            color: #00ff00;
+            border: 1px solid #00ff00;
+            padding: 10px 20px;
+            margin: 5px;
+            cursor: pointer;
+            border-radius: 5px;
+        }
+        .button:hover {
+            background: #006600;
+        }
+        .test-result {
+            margin: 10px 0;
+            padding: 10px;
+            background: rgba(0, 255, 0, 0.05);
+            border-left: 3px solid #00ff00;
+        }
+    </style>
+</head>
+<body>
+    <div class="test-container">
+        <h1>🎤 ATLAS Voice System Diagnostic Tool</h1>
+        
+        <div class="status-box">
+            <h2>📋 Виправлені проблеми:</h2>
+            <ul>
+                <li>✅ Автоматичне включення голосової системи (ВИМКНЕНО за замовчуванням)</li>
+                <li>✅ Автоматичне відтворення привітального повідомлення (ВИМКНЕНО)</li>
+                <li>✅ Кнопка мікрофону тепер підтримує Whisper STT</li>
+                <li>✅ Правильне відображення стану кнопки мікрофону</li>
+                <li>✅ Graceful fallback з Whisper на Web Speech API</li>
+            </ul>
+        </div>
+
+        <div class="status-box">
+            <h2>🧪 Тестування системи:</h2>
+            <button class="button" onclick="testSTTStatus()">🔍 Перевірити STT статус</button>
+            <button class="button" onclick="testTTSStatus()">🔊 Перевірити TTS статус</button>
+            <button class="button" onclick="testVoiceSystem()">🎤 Тест голосової системи</button>
+            <div id="test-results"></div>
+        </div>
+
+        <div class="status-box">
+            <h2>📝 Інструкції для тестування:</h2>
+            <ol>
+                <li>Відкрийте основний інтерфейс: <a href="http://localhost:5001" style="color: #00ffff;">http://localhost:5001</a></li>
+                <li>Перевірте що НЕ відтворюється автоматичне привітання</li>
+                <li>Натисніть кнопку "🔊" для ввімкнення голосової системи</li>
+                <li>Натисніть кнопку "🎤 Мікрофон" для тестування STT</li>
+                <li>Перевірте що кнопка змінює стан на "🟢 Мікрофон" або "🔴 Слухаю"</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        async function testSTTStatus() {
+            try {
+                const response = await fetch('/api/stt/status');
+                const data = await response.json();
+                displayResult('STT Status', data);
+            } catch (error) {
+                displayResult('STT Status', {error: error.message});
+            }
+        }
+
+        async function testTTSStatus() {
+            try {
+                const response = await fetch('/api/voice/health');
+                const data = await response.json();
+                displayResult('TTS Status', data);
+            } catch (error) {
+                displayResult('TTS Status', {error: error.message});
+            }
+        }
+
+        async function testVoiceSystem() {
+            try {
+                const sttResponse = await fetch('/api/stt/status');
+                const sttData = await sttResponse.json();
+                
+                const ttsResponse = await fetch('/api/voice/health');
+                const ttsData = await ttsResponse.json();
+                
+                const result = {
+                    whisper_available: sttData.whisper_available,
+                    fallback_available: sttData.fallback_available,
+                    tts_status: ttsData.status,
+                    system_health: 'OK'
+                };
+                
+                displayResult('Voice System Test', result);
+            } catch (error) {
+                displayResult('Voice System Test', {error: error.message});
+            }
+        }
+
+        function displayResult(testName, result) {
+            const resultsDiv = document.getElementById('test-results');
+            const resultDiv = document.createElement('div');
+            resultDiv.className = 'test-result';
+            resultDiv.innerHTML = `
+                <h3>${testName}</h3>
+                <pre>${JSON.stringify(result, null, 2)}</pre>
+            `;
+            resultsDiv.appendChild(resultDiv);
+        }
+    </script>
+</body>
+</html>

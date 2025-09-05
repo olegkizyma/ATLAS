@@ -22,11 +22,15 @@ if [ -f "venv/bin/activate" ]; then
     source venv/bin/activate
     echo "✅ Virtual environment activated"
     
-    # Quick dependency check
+    # Quick dependency check including Whisper STT
     if ! python -c "import flask" 2>/dev/null; then
         echo "📦 Installing Python dependencies..."
         pip install -r requirements.txt
         echo "✅ Dependencies installed"
+    elif ! python -c "import faster_whisper" 2>/dev/null; then
+        echo "📦 Installing missing STT dependencies..."
+        pip install -r requirements.txt
+        echo "✅ STT dependencies installed"
     else
         echo "✅ Dependencies already available"
     fi
@@ -430,6 +434,8 @@ else
     echo "   🌐 Web Interface:    (not available - Goose not running)"
 fi
 echo "   🧠 Python Frontend:  http://localhost:5001"
+echo "      📢 TTS API:       http://localhost:3001"
+echo "      🎤 STT API:       http://localhost:5001/api/stt/*"
 echo "   🎭 Orchestrator API: http://localhost:5101" 
 echo "   🔧 Recovery Bridge:  ws://localhost:5102"
 echo ""
