@@ -351,7 +351,24 @@ if [ -f "../../logs/goose.pid" ] && ps -p $(cat ../../logs/goose.pid) > /dev/nul
     export ORCH_FORCE_GOOSE_REPLY=${ORCH_FORCE_GOOSE_REPLY:-false}
 fi
 export FALLBACK_API_BASE=${FALLBACK_API_BASE:-http://127.0.0.1:3010/v1}
-node server.js > ../../logs/orchestrator.log 2>&1 &
+# Safety check: ensure we're in the correct directory and file exists
+if [ ! -f "server.js" ]; then
+        echo "❌ Orchestrator server.js not found in $(pwd). Aborting."
+        exit 1
+fi
+# Explicitly set orchestrator port to avoid ambiguity
+export ORCH_PORT=${ORCH_PORT:-5101}
+
+# Log startup context for diagnostics
+mkdir -p ../../logs
+{
+    echo "==== Orchestrator start $(date -u +%Y-%m-%dT%H:%M:%SZ) ===="
+    echo "CWD: $(pwd)"
+    echo "Node: $(node -v 2>/dev/null || echo unknown)"
+    echo "ORCH_PORT: ${ORCH_PORT}"
+} >> ../../logs/orchestrator.log
+
+node server.js >> ../../logs/orchestrator.log 2>&1 &
 echo $! > ../../logs/orchestrator.pid
 echo "✅ Node.js orchestrator started (PID: $(cat ../../logs/orchestrator.pid))"
 cd ../..

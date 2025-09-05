@@ -40,11 +40,6 @@ async function callOpenAICompatChat(baseUrl, model, userMessage) {
     return (typeof text === 'string' && text.trim()) ? text.trim() : null;
 }
 
-if (process.env.NODE_ENV !== 'test') {
-    app.listen(PORT, () => {
-        logMessage('info', `ATLAS Orchestrator running on port ${PORT}`);
-    });
-}
 // Agent configurations
 const AGENTS = {
     atlas: {
@@ -1042,10 +1037,35 @@ app.get('/chat/stream/:sessionId', (req, res) => {
 
 // Start server
 if (process.env.NODE_ENV !== 'test') {
-    app.listen(PORT, () => {
-        logMessage('info', `ATLAS Orchestrator running on port ${PORT}`);
-        logMessage('info', 'Agent system initialized with TTS integration');
-    });
+    let retryCount = 0;
+    const maxRetries = 3;
+    
+    function startServer() {
+        const server = app.listen(PORT, '0.0.0.0', () => {
+            logMessage('info', `ATLAS Orchestrator running on port ${PORT}`);
+            logMessage('info', 'Agent system initialized with TTS integration');
+        });
+        
+        server.on('error', (err) => {
+            if (err.code === 'EADDRINUSE') {
+                retryCount++;
+                if (retryCount <= maxRetries) {
+                    logMessage('error', `Port ${PORT} is busy. Retry ${retryCount}/${maxRetries} in 2 seconds...`);
+                    setTimeout(() => {
+                        startServer();
+                    }, 2000);
+                } else {
+                    logMessage('error', `Failed to start server after ${maxRetries} retries. Port ${PORT} is permanently busy.`);
+                    process.exit(1);
+                }
+            } else {
+                logMessage('error', `Server error: ${err.message}`);
+                process.exit(1);
+            }
+        });
+    }
+    
+    startServer();
 }
 
 export default app;
