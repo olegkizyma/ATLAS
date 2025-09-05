@@ -1,0 +1,141 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>ATLAS - Intelligent Multi-Agent System</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='assets/favicon.svg') }}">
+</head>
+<body>
+    <div id="app">
+        <!-- Header -->
+        <header class="header">
+            <div class="header-content">
+                <div class="logo">
+                    <h1>🧠 ATLAS</h1>
+                    <span class="tagline">Intelligent Multi-Agent System</span>
+                </div>
+                <div class="system-status">
+                    <div id="status-indicator" class="status-indicator">
+                        <span class="status-dot"></span>
+                        <span class="status-text">Initializing...</span>
+                    </div>
+                </div>
+            </div>
+        </header>
+
+        <!-- Main Content -->
+        <main class="main-content">
+            <!-- Chat Interface -->
+            <section class="chat-section">
+                <div class="chat-container">
+                    <div class="chat-header">
+                        <h2>Intelligent Chat</h2>
+                        <div class="chat-controls">
+                            <button id="voice-toggle" class="voice-btn" title="Voice Input">
+                                🎤
+                            </button>
+                            <button id="clear-chat" class="clear-btn" title="Clear Chat">
+                                🗑️
+                            </button>
+                        </div>
+                    </div>
+                    
+                    <div id="chat-messages" class="chat-messages">
+                        <div class="welcome-message">
+                            <div class="message agent-message">
+                                <div class="message-header">
+                                    <span class="agent-name atlas">ATLAS</span>
+                                    <span class="message-time">{{ current_time or 'now' }}</span>
+                                </div>
+                                <div class="message-content">
+                                    Вітаю! Я - ATLAS, інтелігентна система з трьома агентами. 
+                                    Я можу допомогти вам з планування (Atlas), виконання завдань (Тетяна) 
+                                    та перевірки результатів (Гриша). Що бажаєте зробити?
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <div class="chat-input-container">
+                        <div class="input-wrapper">
+                            <input 
+                                type="text" 
+                                id="chat-input" 
+                                placeholder="Введіть ваше повідомлення або запит..."
+                                autocomplete="off"
+                            >
+                            <button id="send-btn" class="send-btn" title="Send Message">
+                                ➤
+                            </button>
+                        </div>
+                        <div class="input-status">
+                            <span id="typing-indicator" class="typing-indicator"></span>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+            <!-- System Info -->
+            <aside class="system-info">
+                <div class="info-panel">
+                    <h3>Agents Status</h3>
+                    <div class="agents-list">
+                        <div class="agent-item atlas">
+                            <span class="agent-icon">🎯</span>
+                            <div class="agent-details">
+                                <span class="agent-name">Atlas</span>
+                                <span class="agent-role">Planner & Strategist</span>
+                            </div>
+                        </div>
+                        <div class="agent-item tetyana">
+                            <span class="agent-icon">⚙️</span>
+                            <div class="agent-details">
+                                <span class="agent-name">Tetyana</span>
+                                <span class="agent-role">Task Executor</span>
+                            </div>
+                        </div>
+                        <div class="agent-item grisha">
+                            <span class="agent-icon">✅</span>
+                            <div class="agent-details">
+                                <span class="agent-name">Grisha</span>
+                                <span class="agent-role">Validator</span>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="info-panel">
+                    <h3>System Stats</h3>
+                    <div id="system-stats" class="stats-grid">
+                        <div class="stat-item">
+                            <span class="stat-value" id="requests-count">0</span>
+                            <span class="stat-label">Requests</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="success-rate">100%</span>
+                            <span class="stat-label">Success Rate</span>
+                        </div>
+                        <div class="stat-item">
+                            <span class="stat-value" id="uptime">0s</span>
+                            <span class="stat-label">Uptime</span>
+                        </div>
+                    </div>
+                </div>
+            </aside>
+        </main>
+
+        <!-- Loading Overlay -->
+        <div id="loading-overlay" class="loading-overlay">
+            <div class="loading-content">
+                <div class="loading-spinner"></div>
+                <div class="loading-text">Processing intelligent request...</div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Scripts -->
+    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+</body>
+</html>

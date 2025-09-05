@@ -1,53 +1,169 @@
-# ATLAS - Intelligent Multi-Agent System
+# 🧠 ATLAS - Pure Intelligent Multi-Agent System
 
-## Overview
+**Повністю інтелігентна система без хардкорів, імітацій та фейків**
 
-ATLAS is a fully intelligent multi-agent orchestration system designed for autonomous task execution with advanced failure recovery capabilities. The system operates without hardcoded values, using machine learning and adaptive intelligence to handle complex workflows.
+## Огляд
 
-## Architecture
+ATLAS - це революційна інтелігентна система, що працює виключно на базі AI рішень. Система складається з трьох інтелігентних агентів і забезпечує виконання завдань без жодних хардкорів чи симуляцій.
 
-### Core Components
+## 🚀 Швидкий старт
 
-- **Goose Web Interface** (Port 3000) - Primary user interface and task management
-- **Node.js Orchestrator** (Port 5101) - Workflow coordination and agent management  
-- **Python Frontend** (Port 5001) - Advanced processing and intelligent recovery
-- **Intelligent Recovery System** (Port 5102) - WebSocket-based failure recovery bridge
+### Точка входу (як зазначено в завданні):
+```bash
+./start_stack_intelligent.sh
+```
 
-### Multi-Agent Framework
+### Вимоги:
+- **Локальне AI API** на порті 3010 (обов'язково)
+- Python 3.8+
+- Goose на порті 3000 (рекомендовано)
+- TTS сервер на порті 3001 (опціонально)
 
-- **Atlas Agent** (Gemini) - Strategic planning and high-level coordination
-- **Grisha Agent** (Mistral) - Technical implementation and code generation
-- **Tetiana Agent** (Goose) - Quality assurance and validation
-- **Recovery Agent** (Python) - Intelligent failure analysis and adaptive recovery
+### Приклад запуску AI API:
+```bash
+# Ollama
+ollama serve
 
-## Intelligent Features
+# LM Studio
+# Start local server on port 3010
 
-### Failure Recovery System
+# LocalAI  
+./local-ai --port 3010
+```
 
-The system includes advanced failure recovery with 7 failure types and 7 recovery strategies:
+## 📊 Архітектура
 
-**Failure Types:**
-- Context limit violations
-- Rate limit exceeded  
-- Agent communication failures
-- Resource exhaustion
-- Authentication errors
-- Network connectivity issues
-- Execution timeouts
+### Нова інтелігентна система (`intelligent_atlas/`):
+```
+🧠 ATLAS Pure Intelligent System
+├── 🔧 IntelligentEngine     - Головний AI движок (без хардкорів)
+├── 🦢 GooseExecutor         - Реальне виконання через Goose
+├── 🎭 AgentSystem           - 3 інтелігентних агенти
+├── 🎤 VoiceSystem           - TTS/STT (Whisper 3)
+├── 🌐 WebInterface          - Мінімальний веб UI
+└── ⚙️ DynamicConfig         - AI-генеровані конфігурації
+```
 
-**Recovery Strategies:**
-- Context optimization and summarization
-- Exponential backoff with jitter
-- Agent failover and redundancy
-- Resource reallocation
-- Credential refresh and re-authentication
-- Connection retry with circuit breaker
-- Task decomposition and parallel execution
+### Агенти:
+- **🎯 Atlas** - Планувальник (AI-driven planning)
+- **⚙️ Tetyana** - Виконавець (Goose + AI execution)  
+- **✅ Grisha** - Валідатор (AI + Goose validation)
 
-### Adaptive Learning
+## 🧠 Ключові принципи
 
-- **Performance Monitoring** - Real-time tracking of agent efficiency
-- **Pattern Recognition** - Identification of recurring issues and optimal solutions
+### ✅ Pure Intelligence
+- Всі рішення через локальне AI API (порт 3010)
+- Жодних hardcoded правил
+- Повна адаптація до ситуацій
+
+### ✅ Super Reliability  
+- Єдина точка відмови: AI API
+- Автоматичне відновлення
+- Гарантія виконання
+
+### ✅ Zero Hardcode Policy
+- Конфігурації генеруються AI
+- Немає статичних значень
+- Динамічна адаптація
+
+## 📂 Структура проекту
+
+```
+ATLAS/
+├── intelligent_atlas/           # 🧠 Нова інтелігентна система
+│   ├── core/                   # Основні компоненти  
+│   ├── config/                 # AI-генеровані конфігурації
+│   ├── static/                 # Веб ресурси
+│   ├── templates/              # HTML шаблони  
+│   ├── start_intelligent.sh    # Точка входу
+│   └── README.md              # Детальна документація
+├── old2/                       # Бекап старої системи (frontend_new)
+├── archive/                    # Архів старих файлів
+├── goose/                      # Goose система (незмінна)
+├── ukrainian-tts/              # TTS система (незмінна)
+└── start_stack_intelligent.sh  # 🚀 ГОЛОВНА ТОЧКА ВХОДУ
+```
+
+## 🔧 Використання
+
+### Запуск системи:
+```bash
+./start_stack_intelligent.sh
+```
+
+### Доступ до інтерфейсу:
+- **Веб-інтерфейс**: http://127.0.0.1:5001
+- **Чат з агентами**: через веб або API
+- **Голосовий ввід**: підтримується (TTS/STT)
+
+### Управління:
+```bash
+cd intelligent_atlas
+
+# Запуск
+./start_intelligent.sh start
+
+# Статус  
+./start_intelligent.sh status
+
+# Зупинка
+./start_intelligent.sh stop
+
+# Перезапуск
+./start_intelligent.sh restart
+```
+
+## 📋 Що змінилося
+
+### ✅ Створено нову систему:
+- **100% AI-driven** - всі рішення через AI API
+- **Zero hardcodes** - жодних статичних значень
+- **Super reliable** - мінімальні точки відмови
+- **Real execution** - через Goose для всіх агентів
+- **Dynamic config** - AI генерує конфігурації
+
+### ✅ Переміщено старе:
+- `frontend_new` → `old2/` (повний бекап)
+- Старі скрипти → `archive/old_scripts/`
+- Стара документація → `archive/`
+
+### ✅ Очищено корінь:
+- Залишено тільки необхідне
+- Головна точка входу: `start_stack_intelligent.sh`
+- Чиста структура проекту
+
+## 📚 Документація
+
+Детальна документація нової системи:
+- **[intelligent_atlas/README.md](intelligent_atlas/README.md)** - Повний опис нової системи
+- **[Архітектурний план](intelligent_atlas/README.md#архітектура)** - Схема компонентів  
+- **[API документація](intelligent_atlas/README.md#api-endpoints)** - Ендпоінти системи
+
+## 🎯 Результат
+
+Створена повністю інтелігентна система що:
+
+1. **Працює на чистому AI** - без хардкорів та імітацій
+2. **Використовує Goose** - для реального виконання завдань
+3. **Підтримує TTS/STT** - Whisper 3 та українські голоси  
+4. **Супер надійна** - мінімальні шанси на відмову
+5. **Правильна структура** - чиста та логічна організація файлів
+6. **Точка входу** - `start_stack_intelligent.sh` як зазначено
+
+## 🚀 Початок роботи
+
+```bash
+# 1. Запустіть локальне AI API
+ollama serve  # або інший провайдер на порті 3010
+
+# 2. Запустіть ATLAS  
+./start_stack_intelligent.sh
+
+# 3. Відкрийте браузер
+open http://127.0.0.1:5001
+```
+
+**🧠 ATLAS Pure Intelligent System - Майбутнє AI без компромісів!**
 - **Strategy Optimization** - Continuous improvement of recovery approaches
 - **Resource Management** - Dynamic allocation based on workload patterns
 
