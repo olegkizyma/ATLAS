@@ -1,0 +1,122 @@
+version: 2
+updates:
+  # ATLAS Pure Intelligent System dependencies
+  - package-ecosystem: "pip"
+    directory: "/intelligent_atlas"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+    open-pull-requests-limit: 5
+    reviewers:
+      - "olegkizyma"
+    assignees:
+      - "olegkizyma"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    labels:
+      - "dependencies"
+      - "intelligent-atlas"
+    allow:
+      - dependency-type: "direct"
+      - dependency-type: "indirect"
+
+  # Legacy frontend_new dependencies (if exists)
+  - package-ecosystem: "pip"
+    directory: "/frontend_new"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "10:00"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "olegkizyma"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    labels:
+      - "dependencies"
+      - "legacy"
+    allow:
+      - dependency-type: "direct"
+
+  # Legacy orchestrator dependencies (if exists)
+  - package-ecosystem: "npm"
+    directory: "/frontend_new/orchestrator"
+    schedule:
+      interval: "weekly"
+      day: "tuesday"
+      time: "09:00"
+    open-pull-requests-limit: 3
+    reviewers:
+      - "olegkizyma"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    labels:
+      - "dependencies"
+      - "legacy"
+      - "nodejs"
+    allow:
+      - dependency-type: "direct"
+
+  # Goose Rust dependencies (if actively maintained)
+  - package-ecosystem: "cargo"
+    directory: "/goose"
+    schedule:
+      interval: "monthly"
+      day: "first monday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "olegkizyma"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    labels:
+      - "dependencies"
+      - "goose"
+      - "rust"
+    allow:
+      - dependency-type: "direct"
+
+  # Goose desktop Electron app dependencies
+  - package-ecosystem: "npm"
+    directory: "/goose/ui/desktop"
+    schedule:
+      interval: "monthly"
+      day: "second monday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "olegkizyma"
+    commit-message:
+      prefix: "deps"
+      prefix-development: "deps-dev"
+    labels:
+      - "dependencies"
+      - "goose"
+      - "electron"
+    allow:
+      - dependency-type: "direct"
+
+  # GitHub Actions dependencies
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "monthly"
+      day: "third monday"
+      time: "09:00"
+    open-pull-requests-limit: 2
+    reviewers:
+      - "olegkizyma"
+    commit-message:
+      prefix: "ci"
+      prefix-development: "ci-dev"
+    labels:
+      - "dependencies"
+      - "github-actions"
+      - "ci/cd"
+    allow:
+      - dependency-type: "direct"
