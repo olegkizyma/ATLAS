@@ -82,7 +82,7 @@ class AtlasIntelligentChatManager {
         // Поведінка синхронізації TTS з наступними повідомленнями та кроками виконання
         this.ttsSync = {
             // Якщо true — нові повідомлення користувача будуть чекати завершення поточного озвучування
-            blockNextMessageUntilTTSComplete: true,
+            blockNextMessageUntilTTSComplete: false,
             // Диспатчити DOM-події для інтеграції сторонніх модулів (кроки виконання, аналітика)
             dispatchEvents: true,
             // Хуки керування кроками виконання (за потреби заміни цими методами зовні)
@@ -91,12 +91,109 @@ class AtlasIntelligentChatManager {
             // Строга синхронізація агентів: кожен агент чекає завершення попереднього
             strictAgentOrder: true,
             // Максимальний час очікування завершення TTS перед форсуванням (мс)
-            maxWaitTime: 30000,
+            maxWaitTime: 45000,
             // Прапорець для відстеження стану синхронізації
             isWaitingForTTS: false
         };
         
         this.init();
+    }
+
+    // Lightweight UA translation for frequent UI phrases and agent meta; does not translate full content
+    translateToUAInline(text) {
+        if (!text) return '';
+        const map = [
+            // common headers and labels
+            [/^\s*Summary\s*:?/gi, 'Підсумок:'],
+            [/^\s*Plan\s*:?/gi, 'План:'],
+            [/^\s*Next steps\s*:?/gi, 'Наступні кроки:'],
+            [/^\s*Action\s*:?/gi, 'Дія:'],
+            [/^\s*Note\s*:?/gi, 'Примітка:'],
+            // tiny inline words
+            [/\bYes\b/gi, 'Так'],
+            [/\bNo\b/gi, 'Ні'],
+            [/\bOK\b/gi, 'Гаразд'],
+        ];
+        let out = text;
+        for (const [re, ua] of map) out = out.replace(re, ua);
+        return out;
+    }
+
+    // Segment text into short phrases for TTS, force UA-facing content with light translation
+    segmentForTTS(text, agent = 'atlas') {
+        if (!text) return [];
+        // Strip signatures like [ATLAS] or NAME:
+        let clean = String(text).replace(/^\s*\[[^\]]+\]\s*/i, '').replace(/^\s*[A-ZА-ЯІЇЄҐ]+\s*:\s*/i, '');
+        // Remove markdown headers and dividers
+        clean = clean.replace(/^#+\s+/gm, '').replace(/^---+$/gm, '');
+        // Prefer [VOICE] lines for tetyana
+        if (agent === 'tetyana') {
+            const voiceOnly = this.extractVoiceOnly(clean);
+            clean = voiceOnly || clean;
+        }
+        // Light UA inline translation for small phrases
+        clean = this.translateToUAInline(clean);
+        // Split into sentences and clamp length
+        const parts = clean
+            .split(/(?<=[.!?…])\s+|\n+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        const MAX = 140; // target short phrases
+        const result = [];
+        for (let p of parts) {
+            if (p.length <= MAX) { result.push(p); continue; }
+            // Further split by commas/semicolons
+            const sub = p.split(/[,;:\u2014]\s+/).map(s => s.trim()).filter(Boolean);
+            let buf = '';
+            for (const s of sub) {
+                if ((buf + ' ' + s).trim().length > MAX) {
+                    if (buf) result.push(buf.trim());
+                    buf = s;
+                } else {
+                    buf = (buf ? buf + ' ' : '') + s;
+                }
+            }
+            if (buf) result.push(buf.trim());
+        }
+        return result.slice(0, 20); // safety cap per message
+    }
+
+    // Subtitles overlay synced roughly with audio play
+    showSubtitles(text) {
+        if (!text) return;
+        let el = document.getElementById('atlas-subtitles');
+        if (!el) {
+            el = document.createElement('div');
+            el.id = 'atlas-subtitles';
+            el.style.cssText = 'position:fixed;left:50%;bottom:12px;transform:translateX(-50%);'+
+                'background:rgba(0,0,0,.75);color:#eaffea;padding:6px 10px;border-radius:8px;'+
+                'font:14px/1.35 system-ui,Segoe UI,Arial;z-index:9999;max-width:80vw;text-align:center;'+
+                'box-shadow:0 0 10px rgba(0,255,127,.25)';
+            document.body.appendChild(el);
+        }
+        el.textContent = text;
+        clearTimeout(this._subsTimer);
+        this._subsTimer = setTimeout(() => { el.remove(); }, 3000);
+    }
+
+    // Об'єднання коротких сегментів у великі блоки для одного TTS-виклику
+    combineSegmentsForAgent(segments, agent = 'atlas') {
+        const MAX_CHARS = 600; // ~40с на бекенді (0.06*n + 5)
+        const out = [];
+        let buf = '';
+        for (const seg of segments) {
+            const s = seg.trim();
+            if (!s) continue;
+            if (!buf) { buf = s; continue; }
+            if ((buf + ' ' + s).length <= MAX_CHARS) {
+                buf = `${buf} ${s}`;
+            } else {
+                out.push(buf);
+                buf = s;
+            }
+        }
+        if (buf) out.push(buf);
+        return out.length ? out : segments;
     }
     
     async init() {
@@ -398,10 +495,11 @@ class AtlasIntelligentChatManager {
                     
                     // Add to TTS queue if voice is enabled
                     if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
-                        this.voiceSystem.ttsQueue.push({
-                            text: content.replace(/^\[.*?\]\s*/, ''), // Remove signature from TTS
-                            agent: agent
-                        });
+                        const segments = this.segmentForTTS(content, agent);
+                        const batched = this.combineSegmentsForAgent(segments, agent);
+                        for (const seg of batched) {
+                            this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                        }
                     }
                     
                     // Small delay between messages for better UX
@@ -664,6 +762,8 @@ class AtlasIntelligentChatManager {
             while (this.voiceSystem.ttsQueue.length > 0) {
                 const ttsItem = this.voiceSystem.ttsQueue.shift();
                 this.log(`[TTS] Processing queue item for ${ttsItem.agent}: "${ttsItem.text.substring(0, 50)}..."`);
+                // small subtitle hint before playback
+                this.showSubtitles(ttsItem.text);
                 
                 // Wait for current TTS to finish if strict ordering is enabled
                 if (this.ttsSync.strictAgentOrder && this.voiceSystem.currentAudio && !this.voiceSystem.currentAudio.paused) {
@@ -741,13 +841,32 @@ class AtlasIntelligentChatManager {
             const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
             const voice = agentConfig.voice;
 
-            // Для Тетяни озвучуємо лише короткі рядки [VOICE]
+            // Для Тетяни: спершу пробуємо [VOICE], інакше стислий підсумок для TTS
             let speechText = text;
             if (agent === 'tetyana') {
-                speechText = this.extractVoiceOnly(text);
+                const voiceOnly = this.extractVoiceOnly(text);
+                speechText = voiceOnly && voiceOnly.trim().length > 0 ? voiceOnly : this.summarizeTetianaForTTS(text);
                 if (!speechText || speechText.trim().length === 0) {
-                    this.log('[VOICE] Skipping TTS for tetyana: no [VOICE] lines found');
-                    return;
+                    // фолбек: обрізаємо чистий текст без markdown
+                    speechText = String(text).replace(/^#+\s+/gm, '').replace(/\*\*|__|`/g, '').split(/\n+/).map(s=>s.trim()).filter(Boolean).slice(0,3).join('. ');
+                }
+            }
+
+            // Ensure Ukrainian output: attempt light client translation when text looks English
+            if (/\b(the|and|to|of|for|with|is|are|in)\b/i.test(speechText) && !/[А-ЯІЇЄҐа-яіїєґ]/.test(speechText)) {
+                try {
+                    const tr = await fetch(`${this.frontendBase}/api/translate`, {
+                        method: 'POST', headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ text: speechText, source: 'en', target: 'uk' })
+                    }).then(r => r.ok ? r.json() : null).catch(() => null);
+                    if (tr && tr.success && tr.text) {
+                        speechText = tr.text;
+                    } else {
+                        // fallback: minimal inline translation map
+                        speechText = this.translateToUAInline(speechText);
+                    }
+                } catch (_) {
+                    speechText = this.translateToUAInline(speechText);
                 }
             }
             
@@ -805,7 +924,17 @@ class AtlasIntelligentChatManager {
                 }
                 throw new Error(`TTS synthesis failed: ${response.status}`);
             }
-            
+            // Детекція сервісного «тихого» фолбеку: пропустити відтворення і повторити
+            const fb = response.headers.get('X-TTS-Fallback');
+            if (fb) {
+                this.log(`[VOICE] Server returned fallback audio: ${fb}. ${retryCount < this.voiceSystem.maxRetries ? 'Retrying...' : 'Skipping playback.'}`);
+                if (retryCount < this.voiceSystem.maxRetries) {
+                    await this.delay(400 * (retryCount + 1));
+                    return await this.synthesizeAndPlay(text, agent, retryCount + 1);
+                }
+                return; // не відтворюємо тишу
+            }
+
             const audioBlob = await response.blob();
             console.log(`[ATLAS-TTS] Received audio blob for ${agent}: size=${audioBlob.size}, type=${audioBlob.type}`);
             
@@ -845,6 +974,41 @@ class AtlasIntelligentChatManager {
                 this.log(`[VOICE] Voice synthesis failed without fallback: ${error.message}`);
             }
         }
+    }
+
+    // Витягує стисле ТТС-представлення звіту Тетяни: РЕЗЮМЕ + СТАТУС (і, за можливості, короткий підсумок кроків)
+    summarizeTetianaForTTS(text) {
+        const src = String(text || '');
+        const lines = src.split(/\n+/);
+        let resume = '';
+        let status = '';
+        const steps = [];
+        let inSteps = false;
+        for (const raw of lines) {
+            const line = raw.trim();
+            if (!line) continue;
+            if (/^\s*РЕЗЮМЕ\b/i.test(line)) {
+                resume = line.replace(/^\s*РЕЗЮМЕ\s*:?/i, '').trim();
+                inSteps = false;
+                continue;
+            }
+            if (/^\s*СТАТУС\b/i.test(line)) {
+                status = line.replace(/^\s*СТАТУС\s*:?/i, '').trim();
+                inSteps = false;
+                continue;
+            }
+            if (/^\s*КРОКИ\b/i.test(line)) { inSteps = true; continue; }
+            if (inSteps) {
+                const item = line.replace(/^\d+\)\s*|^[-•]\s*/,'').trim();
+                if (item) steps.push(item);
+                if (steps.length >= 2) inSteps = false; // беремо до двох пунктів для стиснення
+            }
+        }
+        const parts = [];
+        if (resume) parts.push(resume);
+        if (steps.length) parts.push(`Кроки: ${steps.slice(0,2).join('; ')}`);
+        if (status) parts.push(`Статус: ${status}`);
+        return parts.join('. ').trim().slice(0, 300);
     }
     
     async playAudioBlob(audioBlob, description, meta = {}) {
@@ -923,12 +1087,25 @@ class AtlasIntelligentChatManager {
                 audio.oncanplay = () => {
                     console.log(`[ATLAS-TTS] Audio can play: ${description}, duration=${audio.duration?.toFixed(1) || 'unknown'}s`);
                     this.log(`[VOICE] Starting playback of ${description} (duration: ${audio.duration?.toFixed(1) || 'unknown'}s)`);
+                    // show first subtitle chunk (approx) if provided
+                    if (text) {
+                        const approxFirst = this.segmentForTTS(text, agent)[0] || '';
+                        if (approxFirst) this.showSubtitles(approxFirst);
+                    }
                 };
                 
                 audio.onplaying = () => {
                     console.log(`[ATLAS-TTS] Audio is playing: ${description}`);
                     // Как только пошло воспроизведение — пробуем снять mute
                     tryUnmute();
+                    // schedule mid-subtitle update
+                    if (text) {
+                        const segs = this.segmentForTTS(text, agent);
+                        if (segs.length > 1) {
+                            const mid = Math.floor(Math.min(segs.length - 1, 1));
+                            setTimeout(() => this.showSubtitles(segs[mid]), Math.max(800, (audio.duration || 2) * 500));
+                        }
+                    }
                 };
                 
                 audio.play().then(() => {
