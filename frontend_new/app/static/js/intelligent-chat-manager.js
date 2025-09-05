@@ -574,7 +574,10 @@ class AtlasIntelligentChatManager {
                 const signature = agentResponse.signature || this.voiceSystem.agents[agent]?.signature;
                 this.addVoiceMessage(content, agent, signature);
                 if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
-                    this.voiceSystem.ttsQueue.push({ text: content.replace(/^\[.*?\]\s*/, ''), agent });
+                    const raw = content.replace(/^\[.*?\]\s*/, '');
+                    const segs = this.segmentForTTS(raw, agent);
+                    const batched = this.combineSegmentsForAgent(segs, agent);
+                    for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
                 }
                 await this.delay(400);
             }
