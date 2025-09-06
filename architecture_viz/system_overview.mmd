@@ -32,17 +32,26 @@ flowchart TD
     subgraph Memory[Shared Memory (SQLite)]
         MAtlas[(Atlas Memory)]
         MGrisha[(Grisha Memory)]
+        Prune[[TTL & Capacity Prune]]
+        Sem[(Semantic (opt))]
     end
 
     Atlas <--> MAtlas
     Grisha <--> MGrisha
     MAtlas <-. shared context .-> MGrisha
+    MAtlas --> Prune
+    MGrisha --> Prune
+    MAtlas -. embeddings .-> Sem
+    MGrisha -. embeddings .-> Sem
 
     subgraph Metrics[Prometheus Metrics]
         P1[pipeline_phase_*]
         P2[probe_*]
         P3[memory_context_tokens]
         P4[memory_context_injections]
+        P5[memory_facts_written]
+        P6[memory_facts_pruned]
+        P7[semantic_enabled]
     end
 
     Orchestrator --> Metrics

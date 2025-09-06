@@ -5,17 +5,22 @@ sequenceDiagram
     participant G as Grisha
     participant M as SQLite (better-sqlite3)
     participant P as Pruner (TTL & Capacity)
-    participant R as Summarizer (summarizeRanked)
+    participant R as Summarizer (summarizeForPrompt)
+    participant S as Semantic (opt)
     participant O as Orchestrator
     participant T as Token Metrics
 
     Note over O: Request arrives
     O->>M: recall recent entries (Atlas, Grisha)
     Note over M,P: prune() on each write (capacity + TTL)
-    O->>R: summarizeRanked(entries, half_life, max_tokens)
-    R-->>O: ranked context block
-    O->>T: estimate tokens(len/4)
-    T-->>O: token count
+    O->>R: summarizeForPrompt(targetTokens, half_life)
+    R-->>O: ranked block
+    opt embeddings enabled
+        O->>S: semanticContext(query)
+        S-->>O: semantic block
+    end
+    O->>T: estimate tokens(len/4) + add semantic tokens
+    T-->>O: token count (ranked + semantic)
     O->>A: prompt + ranked context
     A-->>O: plan / output
     O->>M: rememberSafe(key facts)

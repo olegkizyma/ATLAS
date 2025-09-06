@@ -33,6 +33,7 @@ digraph ATLAS {
         P4 [label="memory_context_injections"];
         P5 [label="memory_facts_written"];
         P6 [label="memory_facts_pruned"];
+        P7 [label="semantic_enabled"];
     }
 
     subgraph cluster_ext { label="Optional Services"; style=dashed; color="#ffe0b2";
@@ -48,10 +49,13 @@ digraph ATLAS {
     Atlas -> MAtlas; Grisha -> MGrisha;
     MAtlas -> MGrisha [dir=both, style=dashed, label="shared context"];
 
-    // Pruning / TTL conceptual node
+    // Pruning / TTL and Semantic conceptual nodes
     Prune [label="TTL & Capacity Pruning", fillcolor="#ffecec", shape=box, style="rounded,filled,dashed"];
+    Semantic [label="Semantic Embeddings (opt)", fillcolor="#eef7ff", shape=box, style="rounded,filled,dashed"];
     MAtlas -> Prune [style=dashed];
     MGrisha -> Prune [style=dashed];
+    MAtlas -> Semantic [style=dashed];
+    MGrisha -> Semantic [style=dashed];
 
     ORCH -> P1; ORCH -> P2; ORCH -> P3; ORCH -> P4;
 

@@ -27,7 +27,8 @@
     <ul style="line-height:1.4; font-size:.9rem; padding-left:1.1rem;">
       <li><strong>Agents</strong>: Atlas (planner), Grisha (validator), Tetyana (executor)</li>
       <li><strong>Probe Cycle</strong>: Мінімальний експеримент для збирання бракуючих артефактів</li>
-      <li><strong>Memory</strong>: SQLite факти (key/value) з exponential decay + frequency ранжуванням</li>
+  <li><strong>Memory</strong>: SQLite факти (key/value) з exponential decay + frequency ранжуванням</li>
+  <li><strong>Semantic</strong>: (опц.) hash/remote embeddings cosine top-K</li>
       <li><strong>Pruning</strong>: Capacity + TTL (3d by default) після кожного запису</li>
       <li><strong>Metrics</strong>: Prometheus endpoints (`/metrics/prometheus`) з memory_* та probe_*</li>
       <li><strong>rememberSafe</strong>: інлайн дедуп (60s) щоб зменшити шум</li>
@@ -76,6 +77,7 @@
           P4[memory_context_injections]
           P5[memory_facts_written]
           P6[memory_facts_pruned]
+          P7[semantic_enabled]
         end
         Orchestrator --> Metrics
         subgraph External[Optional Services]
@@ -96,15 +98,20 @@
         autonumber
         participant U as User/UI
         participant F as Flask API (5001)
-        participant O as Orchestrator (5101)
+  participant O as Orchestrator (5101)
         participant A as Atlas
         participant G as Grisha
         participant T as Tetyana
         participant DB as SQLite Memory
+  participant SC as Semantic (opt)
         U->>F: chat message
         F->>O: /chat
-        O->>DB: recall ranked memory
-        O->>A: plan prompt + memory
+        O->>DB: summarizeForPrompt (ranked)
+        alt embeddings on
+          O->>SC: semanticContext(last user msg)
+          SC-->>O: top-K similar facts
+        end
+        O->>A: plan prompt + memory(+semantic)
         A-->>O: plan
         O->>G: validation
         G-->>O: precheck
@@ -154,14 +161,20 @@
         participant O as Orchestrator
         participant M as SQLite
         participant R as Ranked Summarizer
+        participant S as Semantic (opt)
         participant A as Atlas
         participant G as Grisha
         O->>M: fetch entries
-        O->>R: summarizeRanked
-        R-->>O: ranked context
-        O->>A: planning prompt
+        O->>R: summarizeForPrompt(targetTokens)
+        R-->>O: ranked block
+        opt embeddings enabled
+          O->>S: semanticContext(query)
+          S-->>O: sem block
+        end
+        O->>A: planning prompt (ranked + sem?)
         A-->>O: plan
         O->>M: rememberSafe
+        M-->>O: prune (TTL+capacity)
         O->>G: validation
         G-->>O: verdict
     </div>
