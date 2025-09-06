@@ -31,6 +31,7 @@ from threading import Lock
 from time import monotonic
 import re
 import time
+import math
 
 try:
     # Optional: robust retry adapter if available
@@ -543,19 +544,39 @@ def chat():
         post_url = f'{ORCHESTRATOR_URL}/chat/stream'
         last_exc = None
         response = None
-        for attempt in range(1, 4):
+        # Dynamic timeout logic: compute needed time based on message complexity instead of fixed large timeout
+        def compute_orchestrator_timeout(msg: str) -> int:
+            base_s = int(os.environ.get('ORCH_POST_BASE_TIMEOUT', '12'))  # smaller base
+            max_s = int(os.environ.get('ORCH_POST_MAX_TIMEOUT', os.environ.get('ORCH_POST_TIMEOUT', '45')))
+            per_char_ms = float(os.environ.get('ORCH_POST_PER_CHAR_MS', '6'))  # ms per char heuristic
+            # Complexity boosts
+            length = len(msg)
+            est_ms = base_s * 1000 + length * per_char_ms
+            # Code / structured content tends to require more planning
+            if '```' in msg or '{' in msg or '[' in msg:
+                est_ms *= 1.3
+            # Cap + floor
+            est_s = max(base_s, min(max_s, math.ceil(est_ms / 1000)))
+            return est_s
+
+        orch_timeout = compute_orchestrator_timeout(message)
+        max_attempts = int(os.environ.get('ORCH_POST_RETRIES', '2'))
+        for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
                     post_url,
                     json={'message': message, 'sessionId': session_id, 'userId': user_id},
-                    timeout=120
+                    timeout=orch_timeout
                 )
                 break
             except Exception as e:
                 last_exc = e
-                logger.warning(f"Orchestrator POST attempt {attempt} failed: {e}")
-                # exponential backoff
-                time.sleep(min(2 ** attempt, 8))
+                logger.warning(f"Orchestrator POST attempt {attempt} failed after timeout={orch_timeout}s: {e}")
+                # exponential backoff (capped) unless last attempt
+                if attempt < max_attempts:
+                    time.sleep(min(2 ** attempt, 6))
+                    # Recompute timeout adaptively (e.g. second attempt gets +25% but within max cap)
+                    orch_timeout = min(int(orch_timeout * 1.25), int(os.environ.get('ORCH_POST_MAX_TIMEOUT', '60')))
 
         if response is None:
             logger.error(f"Orchestrator unreachable after retries: {last_exc}")

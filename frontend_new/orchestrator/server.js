@@ -75,6 +75,28 @@ app.use(express.json({ limit: '10mb' }));
 // OpenAI-compatible fallback API base (used for Atlas/Grisha only)
 const FALLBACK_API_BASE = (process.env.FALLBACK_API_BASE || 'http://127.0.0.1:3010/v1').replace(/\/$/, '');
 
+function estimateTokens(str) {
+    if (!str) return 0;
+    // Rough heuristic: 4 chars ≈ 1 token
+    return Math.ceil(str.length / 4);
+}
+
+function dynamicLLMTimeout(model, message) {
+    const baseMs = parseInt(process.env.LLM_BASE_TIMEOUT_MS || '8000', 10); // 8s base
+    const perTokMs = parseFloat(process.env.LLM_PER_TOKEN_TIMEOUT_MS || '18'); // 18ms per token heuristic
+    const maxMs = parseInt(process.env.LLM_MAX_TIMEOUT_MS || process.env.OPENAI_COMPAT_TIMEOUT_MS || '60000', 10);
+    const tokens = estimateTokens(message);
+    let est = baseMs + tokens * perTokMs;
+    // Model-specific adjustments (bigger models slower)
+    const lower = model?.toLowerCase() || '';
+    if (/70b|gpt-5|deepseek-v3/.test(lower)) est *= 1.6;
+    else if (/llama-3\.3|gemma-2|deepseek-r1/.test(lower)) est *= 1.25;
+    // Clamp
+    if (est > maxMs) est = maxMs;
+    if (est < baseMs) est = baseMs;
+    return Math.ceil(est);
+}
+
 async function callOpenAICompatChat(baseUrl, model, userMessage) {
     const url = `${baseUrl}/chat/completions`;
     const payload = {
@@ -87,8 +109,8 @@ async function callOpenAICompatChat(baseUrl, model, userMessage) {
         'Content-Type': 'application/json',
         ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {})
     };
-    // Increase timeout for local LLMs which may be slower; 120s default
-    const resp = await axios.post(url, payload, { headers, timeout: parseInt(process.env.OPENAI_COMPAT_TIMEOUT_MS || '120000', 10) });
+    const timeoutMs = dynamicLLMTimeout(model, userMessage);
+    const resp = await axios.post(url, payload, { headers, timeout: timeoutMs });
     if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
     const text = resp.data?.choices?.[0]?.message?.content;
     return (typeof text === 'string' && text.trim()) ? text.trim() : null;
@@ -106,7 +128,9 @@ async function callOpenAICompatChatWithTimeout(baseUrl, model, userMessage, time
         'Content-Type': 'application/json',
         ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {})
     };
-    const resp = await axios.post(url, payload, { headers, timeout: timeoutMs });
+    // For short probes allow dynamic scaling but cap at provided timeoutMs (acts as upper bound)
+    const dyn = Math.min(timeoutMs, dynamicLLMTimeout(model, userMessage));
+    const resp = await axios.post(url, payload, { headers, timeout: dyn });
     if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
     const text = resp.data?.choices?.[0]?.message?.content;
     return (typeof text === 'string' && text.trim()) ? text.trim() : null;
