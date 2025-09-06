@@ -85,6 +85,41 @@ class WebInterface:
                 'uptime_seconds': time.time() - self.stats['uptime_start'],
                 'engine_initialized': intelligent_engine.is_initialized
             })
+
+        @self.app.route('/api/status')
+        def status():
+            """Alias для health + розширена інформація (сумісність зі скриптами)"""
+            return jsonify({
+                'status': 'ok',
+                'mode': 'intelligent',
+                'uptime_seconds': time.time() - self.stats['uptime_start'],
+                'requests_total': self.stats['requests_total'],
+                'requests_failed': self.stats['requests_failed'],
+                'agents': ['atlas','tetyana','grisha'],
+                'engine_initialized': intelligent_engine.is_initialized
+            })
+
+        @self.app.route('/logs')
+        def get_logs():
+            """Повертає останні N рядків з головного лог-файлу (спрощено)"""
+            limit = 100
+            try:
+                limit_arg = request.args.get('limit')
+                if limit_arg:
+                    limit = max(10, min(1000, int(limit_arg)))
+            except Exception:
+                pass
+
+            log_path = Path('..') / 'logs' / 'atlas_intelligent.log'
+            if not log_path.exists():
+                return jsonify({'logs': [], 'error': 'log file not found'}), 404
+            try:
+                # Читаємо безпечним способом
+                with open(log_path, 'r', encoding='utf-8', errors='replace') as f:
+                    lines = f.readlines()[-limit:]
+                return jsonify({'logs': lines, 'count': len(lines)})
+            except Exception as e:
+                return jsonify({'logs': [], 'error': str(e)}), 500
         
         @self.app.route('/api/chat', methods=['POST'])
         def chat():

@@ -245,45 +245,127 @@ show_system_status() {
 }
 
 # Головна функція
+#############################################
+# LEGACY (frontend_new) MODE SUPPORT
+#############################################
+
+prepare_legacy_environment() {
+    log_info "🔧 Preparing legacy (frontend_new) environment..."
+    if [ ! -d "frontend_new" ]; then
+        log_error "❌ frontend_new directory not found"
+        exit 1
+    fi
+    cd frontend_new
+    if [ ! -d "venv" ]; then
+        log_info "🐍 Creating Python virtual environment (legacy)..."
+        python3 -m venv venv
+    fi
+    source venv/bin/activate
+    log_info "📦 Installing/updating Python deps (legacy)..."
+    pip install -r requirements.txt --quiet --upgrade
+    cd ..
+}
+
+start_legacy_system() {
+    log_intelligent "🧠 Starting ATLAS Legacy Stack (frontend_new + orchestrator) ..."
+    local ROOT_DIR="$(pwd)"
+    local LOG_DIR="$ROOT_DIR/logs"
+    mkdir -p "$LOG_DIR"
+
+    # Start orchestrator (Node.js)
+    if pgrep -f "frontend_new/orchestrator/server.js" > /dev/null; then
+        log_warn "⚠️  Orchestrator already running"
+    else
+        (cd frontend_new/orchestrator && \
+            if [ ! -d node_modules ]; then npm install --quiet; fi && \
+            LOG_DIR="$LOG_DIR" nohup node server.js > "$LOG_DIR/orchestrator.log" 2>&1 & echo $! > "$LOG_DIR/orchestrator.pid")
+        if [ -f "$LOG_DIR/orchestrator.pid" ]; then
+            log_info "🚀 Orchestrator started (PID: $(cat "$LOG_DIR/orchestrator.pid"))"
+        else
+            log_warn "⚠️  Orchestrator PID file not found"
+        fi
+    fi
+
+    # Start Flask frontend
+    if pgrep -f "frontend_new/app/atlas_server.py" > /dev/null; then
+        log_warn "⚠️  Legacy Flask already running"
+    else
+        (cd frontend_new && source venv/bin/activate && \
+            LOG_DIR="$LOG_DIR" nohup python app/atlas_server.py > "$LOG_DIR/frontend.log" 2>&1 & echo $! > "$LOG_DIR/frontend.pid")
+        if [ -f "$LOG_DIR/frontend.pid" ]; then
+            log_info "🚀 Legacy frontend started (PID: $(cat "$LOG_DIR/frontend.pid"))"
+        else
+            log_warn "⚠️  Legacy frontend PID file not found"
+        fi
+    fi
+
+    # Wait for health
+    log_info "⏳ Waiting for legacy health (10s)..."
+    for i in $(seq 1 10); do
+        if curl -s http://127.0.0.1:5001/api/health > /dev/null 2>&1; then
+            log_intelligent "✅ Legacy Web Interface is responding"
+            break
+        fi
+        sleep 1
+    done
+}
+
+show_legacy_status() {
+    log_intelligent "📊 ATLAS Legacy Stack Status:"
+    check_service "Legacy Web" "http://127.0.0.1:5001/api/health" 2 || true
+    check_service "Orchestrator" "http://127.0.0.1:5101/health" 2 || true
+    check_service "Goose Executor" "http://127.0.0.1:3000/health" 2 || true
+}
+
 main() {
+    MODE_ARG="${1:-}"
+    # Allow MODE env var override; precedence: argument > MODE > default(intelligent)
+    if [ -n "$MODE_ARG" ]; then
+        MODE="$MODE_ARG"
+    else
+        MODE="${MODE:-intelligent}"
+    fi
+
     echo ""
-    log_intelligent "🧠 ATLAS Pure Intelligent System - macOS Startup"
+    log_intelligent "🧠 ATLAS Pure Intelligent System - macOS Startup (mode=$MODE)"
     log_intelligent "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    
-    # Перевірки
-    check_macos_requirements
+
+    case "$MODE" in
+        legacy)
+            check_macos_requirements; echo "";
+            # Optional services just for awareness
+            check_optional_services; echo "";
+            prepare_legacy_environment; echo "";
+            start_legacy_system; echo "";
+            show_legacy_status; echo "";
+            log_intelligent "🎉 ATLAS Legacy Stack is running!"
+            log_intelligent "  🌐 Web: http://127.0.0.1:5001"
+            log_intelligent "  🤖 Orchestrator: http://127.0.0.1:5101"
+            log_intelligent "  🛑 Stop: ./stop_stack.sh"
+            ;;
+        intelligent|*)
+            # Перевірки
+            check_macos_requirements; echo "";
+            check_critical_services; echo "";
+            check_optional_services; echo "";
+            # Підготовка та запуск
+            prepare_environment; echo "";
+            start_intelligent_system; echo "";
+            cd ..; # повертаємося з intelligent_atlas
+            show_system_status; echo "";
+            log_intelligent "🎉 ATLAS Pure Intelligent System is running!";
+            log_intelligent "  🌐 Web Interface: http://127.0.0.1:5001";
+            log_intelligent "  📊 Health Check: http://127.0.0.1:5001/api/health";
+            log_intelligent "  📄 Logs: tail -f logs/atlas_intelligent.log";
+            log_intelligent "  🛑 Stop: ./stop_stack.sh";
+            ;;
+    esac
+
     echo ""
-    check_critical_services
-    echo ""
-    check_optional_services
-    echo ""
-    
-    # Підготовка та запуск
-    prepare_environment
-    echo ""
-    start_intelligent_system
-    echo ""
-    
-    # Повернення до кореневої директорії
-    cd ..
-    
-    # Показ статусу
-    show_system_status
-    echo ""
-    
-    log_intelligent "🎉 ATLAS Pure Intelligent System is running!"
-    log_intelligent ""
-    log_intelligent "Access the system:"
-    log_intelligent "  🌐 Web Interface: http://127.0.0.1:5001"
-    log_intelligent "  📊 Health Check: http://127.0.0.1:5001/api/health"
-    log_intelligent "  📄 Logs: tail -f logs/atlas_intelligent.log"
-    log_intelligent ""
-    log_intelligent "Management:"
-    log_intelligent "  🛑 Stop: ./stop_stack.sh"
-    log_intelligent "  📈 Status: ./status_stack.sh"
-    log_intelligent ""
-    log_intelligent "🔥 Ready for intelligent multi-agent operations!"
+    log_intelligent "Usage examples:"
+    log_intelligent "  MODE=legacy ./start_stack_macos.sh  # legacy stack"
+    log_intelligent "  ./start_stack_macos.sh intelligent   # intelligent (default)"
 }
 
 # Запуск

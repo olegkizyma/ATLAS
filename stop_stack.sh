@@ -126,6 +126,30 @@ stop_atlas_system() {
     else
         log_error "❌ Some ATLAS processes may still be running"
     fi
+
+    # Зупиняємо legacy orchestrator (Node.js)
+    if pgrep -f "frontend_new/orchestrator/server.js" > /dev/null; then
+        local orch_pids=$(pgrep -f "frontend_new/orchestrator/server.js" || true)
+        for pid in $orch_pids; do
+            graceful_stop "$pid" "Legacy Orchestrator (Node.js)" 10 || true
+        done
+    fi
+
+    # Зупиняємо legacy Flask frontend
+    if pgrep -f "frontend_new/app/atlas_server.py" > /dev/null; then
+        local flask_pids=$(pgrep -f "frontend_new/app/atlas_server.py" || true)
+        for pid in $flask_pids; do
+            graceful_stop "$pid" "Legacy Frontend (Flask)" 10 || true
+        done
+    fi
+
+    # Порти 5001 / 5101 додатково
+    local port_5101=$(lsof -ti:5101 2>/dev/null || true)
+    if [ -n "$port_5101" ]; then
+        for pid in $port_5101; do
+            graceful_stop "$pid" "Process on port 5101" 5 || true
+        done
+    fi
 }
 
 # Очищення ресурсів
