@@ -735,6 +735,8 @@ app.post('/chat/stream', async (req, res) => {
     if (session.awaitingClarification) {
         session.awaitingClarification = false;
         session.clarificationResolvedAt = Date.now();
+    session.forceNewCycle = true; // сигнал ініціювати повний новий цикл (Atlas -> Grisha -> Tetyana)
+    session.cycleCount = (session.cycleCount || 0) + 1;
         session.history.push({
             role: 'system',
             content: '[clarification_resolved] Користувач надав додатковий контекст',
@@ -886,7 +888,12 @@ async function processAgentCycle(userMessage, session) {
     session.history.push(atlasResponse);
 
     // Classify user intent to route the flow efficiently (LLM-first with fallback)
-    const intent = await classifyIntentSmart(userMessage, atlasResponse.content || '');
+    let intent = await classifyIntentSmart(userMessage, atlasResponse.content || '');
+    // Якщо щойно завершили уточнення — форсуємо новий цикл як actionable, щоб замкнути петлю виконання
+    if (session.forceNewCycle) {
+        intent = 'actionable';
+        session.forceNewCycle = false; // використали
+    }
     session.intent = intent;
     if (intent === 'actionable') {
         try {
