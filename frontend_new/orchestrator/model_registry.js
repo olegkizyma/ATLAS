@@ -53,6 +53,14 @@ export class ModelRegistry {
         // Load extended list for Tetyana short-report summarization
         const tetyanaTextModels = parseModels(['TETYANA_TEXT_MODELS', 'TETYANA_TEXT_MODELS_58'], defaultTetyanaModels);
 
+        // Atlas smarter reasoning defaults (overridable via ATLAS_TEXT_MODELS)
+        // Chosen for diversity: frontier (openai), large open-source (meta), efficient deepseek
+        const defaultAtlasModels = parseModels(['ATLAS_TEXT_MODELS'], [
+            'openai/gpt-5',
+            'meta/meta-llama-3.3-70b-instruct',
+            'deepseek/deepseek-v3-0324'
+        ]);
+
         this.providers = {
             goose: {
                 name: 'goose',
@@ -82,11 +90,7 @@ export class ModelRegistry {
         // Goose has a pseudo-model 'github_copilot' (as used by server.js)
         this.agentPlans = {
             atlas: [
-                { provider: 'openai_compat', models: [
-                    'microsoft/phi-3.5-mini-instruct',
-                    'meta/meta-llama-3.1-8b-instruct',
-                    'openai/gpt-4o-mini'
-                ]},
+                { provider: 'openai_compat', models: defaultAtlasModels },
                 { provider: 'goose' }
             ],
             grisha: [

@@ -1,2 +1,0 @@
-Task: Calculate the square root of 64
-Result: 8
