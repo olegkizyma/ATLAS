@@ -121,6 +121,22 @@ class AtlasIntelligentChatManager {
         this.init();
     }
 
+    generateClientMessageId() {
+        const id = `cmsg_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+        this._lastClientMessageId = id;
+        return id;
+    }
+
+    isDuplicateUserMessage(msg) {
+        if (!msg) return false;
+        if (!this._recentUserMessages) this._recentUserMessages = [];
+        const norm = msg.trim().toLowerCase();
+        const dup = this._recentUserMessages.includes(norm);
+        this._recentUserMessages.push(norm);
+        if (this._recentUserMessages.length > 10) this._recentUserMessages.shift();
+        return dup;
+    }
+
     // Lightweight UA translation for frequent UI phrases and agent meta; does not translate full content
     translateToUAInline(text) {
         if (!text) return '';
@@ -382,6 +398,13 @@ class AtlasIntelligentChatManager {
             return;
         }
 
+        // Відкидаємо точний дублікат останніх повідомлень користувача
+        if (this.isDuplicateUserMessage && this.isDuplicateUserMessage(message)) {
+            this.addMessage('⚠️ Повторне однакове повідомлення пропущено (дедуплікація)', 'system');
+            this.chatInput.value = '';
+            return;
+        }
+
         // Команди керування режимом озвучування з чату
         if (this.maybeHandleModeCommand && this.maybeHandleModeCommand(message, 'chat')) {
             this.chatInput.value = '';
@@ -523,7 +546,8 @@ class AtlasIntelligentChatManager {
                 body: JSON.stringify({ 
                     message, 
                     sessionId: this.getSessionId(),
-                    retryAttempt: retryAttempt
+                    retryAttempt: retryAttempt,
+                    clientMessageId: this.generateClientMessageId?.() || `cmsg_${Date.now()}_${Math.random().toString(36).slice(2,8)}`
                 }),
                 signal: controller.signal
             });

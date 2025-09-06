@@ -1,9 +1,13 @@
 // Circuit Breaker Metrics HUD (Phase 2 completion)
 class CircuitBreakerHUD {
     constructor() {
-        // Build metrics endpoint safely: prefer configured ORCHESTRATOR_URL, fall back to localhost
-        const base = (window.CONFIG?.ORCHESTRATOR_URL ?? '').replace(/\/$/, '');
-        this.metricsEndpoint = base ? `${base}/metrics/pipeline` : 'http://localhost:5101/metrics/pipeline';
+        // Build metrics endpoint safely: try ATLAS_CFG.orchestratorBase, then CONFIG.ORCHESTRATOR_URL, sanitize 'undefined'
+        let baseRaw = (window.ATLAS_CFG?.orchestratorBase || window.CONFIG?.ORCHESTRATOR_URL || '').trim();
+        if (!baseRaw || baseRaw === 'undefined' || baseRaw === 'null') {
+            baseRaw = 'http://127.0.0.1:5101';
+        }
+        const base = baseRaw.replace(/\/+$/, '');
+        this.metricsEndpoint = `${base}/metrics/pipeline`;
         this.updateInterval = 5000; // 5 seconds
         this.isVisible = false;
         this.metrics = null;

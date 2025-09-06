@@ -657,13 +657,65 @@ app.post('/agent/tetyana', async (req, res) => {
 });
 
 app.post('/chat/stream', async (req, res) => {
-    const { message, sessionId, userId } = req.body;
+    const { message, sessionId, userId, clientMessageId } = req.body;
     
     if (!message) {
         return res.status(400).json({ error: 'Message is required' });
     }
 
-    logMessage('info', `Incoming /chat/stream message (session=${sessionId || 'n/a'}): ${String(message).slice(0, 200)}`);
+    // Idempotency: LRU TTL cache (per process) to avoid re-processing duplicates
+    const sid = sessionId || 'default';
+    const NOW = Date.now();
+    const TTL_MS = 5 * 60 * 1000; // 5 хвилин
+    const MAX_ITEMS = 500; // межа для всіх сесій
+    if (!global.__clientMsgCache) {
+        global.__clientMsgCache = {
+            map: new Map(), // key -> { ts, sessionId }
+            order: [] // keys by recency (push newest)
+        };
+    }
+    const cache = global.__clientMsgCache;
+
+    function touch(key) {
+        // Remove existing
+        const idx = cache.order.indexOf(key);
+        if (idx >= 0) cache.order.splice(idx, 1);
+        cache.order.push(key);
+    }
+    function prune() {
+        // TTL prune
+        const cutoff = NOW - TTL_MS;
+        for (const [k, meta] of cache.map.entries()) {
+            if (meta.ts < cutoff) {
+                cache.map.delete(k);
+                const i = cache.order.indexOf(k);
+                if (i >= 0) cache.order.splice(i, 1);
+            }
+        }
+        // Size prune
+        while (cache.order.length > MAX_ITEMS) {
+            const oldest = cache.order.shift();
+            if (oldest) cache.map.delete(oldest);
+        }
+    }
+    prune();
+
+    if (clientMessageId) {
+        const key = `${sid}::${clientMessageId}`;
+        if (cache.map.has(key)) {
+            // Duplicate → миттєва відповідь без повторної обробки
+            return res.json({ success: true, duplicate: true, response: [], session: { id: sid, currentAgent: 'atlas' } });
+        }
+        cache.map.set(key, { ts: NOW, sessionId: sid });
+        touch(key);
+    }
+
+    logMessage('info', `Incoming /chat/stream message (session=${sid} cmsg=${clientMessageId || 'no-id'}): ${String(message).slice(0, 200)}`);
+
+    // Проміжний ACK (offload/accepted) — клієнт може показати статус «Обробка...».
+    if (req.headers['x-atlas-ack'] === 'immediate') {
+        return res.json({ success: true, accepted: true, session: { id: sid }, message: 'accepted' });
+    }
 
     const session = sessions.get(sessionId) || { 
         id: sessionId,
