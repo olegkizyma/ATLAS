@@ -22,6 +22,39 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_debug() { echo -e "${BLUE}[DEBUG]${NC} $1"; }
 log_intelligent() { echo -e "${CYAN}[INTELLIGENT]${NC} $1"; }
 
+# --- Added runtime guards (Node version + Local AI API) ---
+REQUIRED_NODE_MIN=22
+REQUIRED_NODE_MAX=22
+
+check_node_version() {
+    if [ "${SKIP_NODE_CHECK}" = "1" ]; then
+        log_warn "Skipping Node version check (SKIP_NODE_CHECK=1)"; return 0; fi
+    if ! command -v node >/dev/null 2>&1; then
+        log_error "Node.js не знайдено. Встанови nvm та виконай: nvm install 22.17.1"; return 1; fi
+    local ver major
+    ver="$(node -v 2>/dev/null || echo v0.0.0)"; major="${ver#v}"; major="${major%%.*}"
+    if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt "$REQUIRED_NODE_MAX" ]; then
+        log_warn "Поточна Node версія $ver не у діапазоні ${REQUIRED_NODE_MIN}.x (<23). Спробую nvm .nvmrc...";
+        if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi
+        if command -v nvm >/dev/null 2>&1 && [ -f "frontend_new/orchestrator/.nvmrc" ]; then
+            local target; target="$(head -n1 frontend_new/orchestrator/.nvmrc | tr -d '\r')"
+            nvm install "$target" >/dev/null 2>&1 || true
+            nvm use "$target" >/dev/null 2>&1 || true
+            ver="$(node -v 2>/dev/null || echo v0.0.0)"; major="${ver#v}"; major="${major%%.*}"
+        fi
+    fi
+    if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt "$REQUIRED_NODE_MAX" ]; then
+        log_error "Несумісна Node версія: $ver. Потрібно 22.x (наприклад 22.17.1)."; return 1; fi
+    log_info "✔ Node.js $ver OK"
+}
+
+check_local_ai_api() {
+    if curl -s --max-time 3 http://127.0.0.1:3010/v1/models >/dev/null 2>&1; then
+        log_info "✔ Local AI API (3010) доступний"; return 0; fi
+    log_warn "⚠️ Local AI API (3010) недоступний – Atlas LLM маршрути можуть деградувати";
+    [ "${ALLOW_NO_LOCAL_AI}" = "1" ] && return 0 || return 1
+}
+
 # Функція перевірки сервісу
 check_service() {
     local name="$1"
@@ -333,6 +366,8 @@ main() {
 
     case "$MODE" in
         legacy)
+            check_node_version || exit 1
+            check_local_ai_api || { log_warn "Продовжуємо без Local AI API"; [ "${ALLOW_NO_LOCAL_AI}" = "1" ] || exit 1; }
             check_macos_requirements; echo "";
             # Optional services just for awareness
             check_optional_services; echo "";
@@ -345,6 +380,8 @@ main() {
             log_intelligent "  🛑 Stop: ./stop_stack.sh"
             ;;
         intelligent|*)
+            check_node_version || exit 1
+            check_local_ai_api || { log_warn "Продовжуємо без Local AI API"; [ "${ALLOW_NO_LOCAL_AI}" = "1" ] || exit 1; }
             # Перевірки
             check_macos_requirements; echo "";
             check_critical_services; echo "";
