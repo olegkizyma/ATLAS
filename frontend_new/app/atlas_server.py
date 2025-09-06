@@ -1002,6 +1002,53 @@ def stt_models():
         logger.error(f"/api/stt/models error: {e}")
         return jsonify({'error': 'Failed to get models info'}), 500
 
+@app.route('/api/intent', methods=['POST'])
+def intent_classification():
+    """Intent router proxy endpoint for orchestrator integration."""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON body required'}), 400
+            
+        text = data.get('text', '').strip()
+        if not text:
+            return jsonify({'error': 'text field is required'}), 400
+            
+        atlas_context = data.get('atlas', '')
+        
+        # Import here to avoid circular dependencies
+        try:
+            from intent_router import classify_intent, generate_casual_reply
+            
+            intent = classify_intent(text)
+            reply = ''
+            
+            # Generate casual reply for chat intents
+            if intent == 'chat':
+                reply = generate_casual_reply(text)
+                
+            return jsonify({
+                'success': True,
+                'intent': intent,
+                'reply': reply,
+                'source': 'intent_router'
+            })
+            
+        except ImportError as e:
+            logger.warning(f"intent_router.py not available: {e}")
+            # Fallback to simple heuristic
+            intent = 'task' if any(word in text.lower() for word in ['зроби', 'створи', 'напиши', 'виконай', 'знайди']) else 'chat'
+            return jsonify({
+                'success': True,
+                'intent': intent,
+                'reply': '',
+                'source': 'fallback'
+            })
+            
+    except Exception as e:
+        logger.error(f"/api/intent error: {e}")
+        return jsonify({'error': 'Intent classification failed', 'details': str(e)}), 500
+
 if __name__ == '__main__':
     logger.info(f"Starting ATLAS Frontend Server on port {FRONTEND_PORT}")
     logger.info(f"Orchestrator URL: {ORCHESTRATOR_URL}")

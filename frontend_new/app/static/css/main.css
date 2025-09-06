@@ -1194,3 +1194,127 @@ model-viewer::part(default-progress-bar) {
     pointer-events: none; /* даже если покажется — не блокировать скролл */
 }
 .loading-overlay .loading-content { pointer-events: none; }
+
+/* Evidence Display (Phase 2 completion) */
+.evidence-container {
+    margin-top: 8px;
+    padding: 8px;
+    background: rgba(0, 20, 10, 0.6);
+    border: 1px solid rgba(0, 255, 100, 0.3);
+    border-radius: 4px;
+    font-size: 10px;
+    backdrop-filter: blur(2px);
+}
+
+.evidence-section {
+    margin-bottom: 6px;
+}
+
+.evidence-section:last-child {
+    margin-bottom: 0;
+}
+
+.evidence-header {
+    color: #00ff7f;
+    font-weight: bold;
+    margin-bottom: 4px;
+    opacity: 0.9;
+    font-size: 10px;
+}
+
+.evidence-items {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    margin-left: 12px;
+}
+
+.evidence-file {
+    background: rgba(0, 100, 50, 0.3);
+    color: #66ff99;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    border: 1px solid rgba(0, 255, 100, 0.2);
+    cursor: default;
+}
+
+.evidence-command {
+    background: rgba(100, 50, 0, 0.3);
+    color: #ffcc66;
+    padding: 2px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    border: 1px solid rgba(255, 200, 50, 0.2);
+    font-family: 'Courier New', monospace;
+    cursor: default;
+}
+
+.evidence-output {
+    background: rgba(50, 50, 100, 0.3);
+    color: #99ccff;
+    padding: 4px 6px;
+    border-radius: 3px;
+    font-size: 9px;
+    border: 1px solid rgba(100, 150, 255, 0.2);
+    font-family: 'Courier New', monospace;
+    white-space: pre-wrap;
+    margin: 2px 0;
+    max-width: 100%;
+    overflow-x: auto;
+    cursor: default;
+}
+
+.evidence-score {
+    margin-top: 6px;
+    color: #ffff66;
+    font-size: 9px;
+    opacity: 0.8;
+    text-align: right;
+}
+
+.message-phase {
+    margin-top: 4px;
+    font-size: 9px;
+    color: #ff9966;
+    opacity: 0.7;
+    font-style: italic;
+}
+
+/* Evidence hover effects */
+.evidence-file:hover {
+    background: rgba(0, 150, 75, 0.5);
+    border-color: rgba(0, 255, 100, 0.4);
+}
+
+.evidence-command:hover {
+    background: rgba(150, 75, 0, 0.5);
+    border-color: rgba(255, 200, 50, 0.4);
+}
+
+.evidence-output:hover {
+    background: rgba(75, 75, 150, 0.5);
+    border-color: rgba(100, 150, 255, 0.4);
+}
+
+/* Mobile responsive evidence */
+@media (max-width: 768px) {
+    .evidence-container {
+        padding: 6px;
+        font-size: 9px;
+    }
+    
+    .evidence-items {
+        gap: 3px;
+    }
+    
+    .evidence-file, .evidence-command {
+        font-size: 8px;
+        padding: 1px 4px;
+    }
+    
+    .evidence-output {
+        font-size: 8px;
+        padding: 3px 4px;
+    }
+}

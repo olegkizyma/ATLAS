@@ -90,29 +90,220 @@ async function callSSE(baseUrl, message, sessionId, { enableTools, systemInstruc
 
 const ts = () => Math.floor(Date.now()/1000);
 
-// Enhanced evidence extractor (Phase 2)
+// Enhanced evidence extractor (Phase 2) with weighting and structured parsing
 export function extractEvidence(rawText) {
-  if (!rawText) return { files: [], commands: [], outputs: [], summary: '' };
+  if (!rawText) return { files: [], commands: [], outputs: [], summary: '', score: 0 };
+  
   const text = String(rawText);
-  // File path heuristics (absolute or relative with extension)
-  const fileRe = /(?:^|\s)([A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,8})(?=\b)/g;
-  const files = Array.from(new Set(Array.from(text.matchAll(fileRe)).map(m => m[1])).values()).slice(0,8);
-  // Commands inside backticks or lines starting with $ or >
-  const inlineCmd = /`([^`\n]{2,120})`/g;
-  const lineCmd = /^(?:\s*[>$] )([^\n]{2,160})$/gm;
-  const commands = Array.from(new Set([
-    ...Array.from(text.matchAll(inlineCmd)).map(m=>m[1].trim()),
-    ...Array.from(text.matchAll(lineCmd)).map(m=>m[1].trim())
-  ].filter(Boolean))).slice(0,8);
-  // Outputs = fenced code blocks content (truncate)
-  const fence = /```[a-zA-Z0-9]*\n([\s\S]*?)```/g;
-  const outputs = Array.from(text.matchAll(fence)).map(m => m[1].trim().slice(0,500)).slice(0,5);
-  // Summary: first РЕЗЮМЕ section or first 2 sentences
+  let evidenceScore = 0;
+  
+  // Weighted evidence extraction with priority markers
+  
+  // 1. Structured evidence markers (highest weight)
+  const structuredEvidence = extractStructuredEvidence(text);
+  evidenceScore += structuredEvidence.score;
+  
+  // 2. File paths with different weights
+  const fileEvidence = extractFileEvidence(text);
+  evidenceScore += fileEvidence.score;
+  
+  // 3. Commands with execution indicators  
+  const commandEvidence = extractCommandEvidence(text);
+  evidenceScore += commandEvidence.score;
+  
+  // 4. Outputs and results
+  const outputEvidence = extractOutputEvidence(text);
+  evidenceScore += outputEvidence.score;
+  
+  // 5. Summary extraction with priority
+  const summary = extractSummary(text);
+  evidenceScore += summary.score;
+  
+  // Combine and deduplicate
+  const files = deduplicateArray([
+    ...structuredEvidence.files,
+    ...fileEvidence.files
+  ]).slice(0, 8);
+  
+  const commands = deduplicateArray([
+    ...structuredEvidence.commands,
+    ...commandEvidence.commands
+  ]).slice(0, 8);
+  
+  const outputs = deduplicateArray([
+    ...structuredEvidence.outputs,
+    ...outputEvidence.outputs
+  ]).slice(0, 6);
+  
+  return { 
+    files, 
+    commands, 
+    outputs, 
+    summary: summary.text,
+    score: Math.min(100, Math.round(evidenceScore))
+  };
+}
+
+function extractStructuredEvidence(text) {
+  let score = 0;
+  const files = [];
+  const commands = [];
+  const outputs = [];
+  
+  // Look for structured markers (ФАЙЛИ:, КОМАНДИ:, РЕЗУЛЬТАТИ:, etc.)
+  const structuredMarkers = [
+    { re: /(?:ФАЙЛИ|FILES|СТВОРЕНО|ЗМІНЕНО)[:\-]?\s*([^\n\r]+)/gi, type: 'files', weight: 10 },
+    { re: /(?:КОМАНДИ|COMMANDS|ВИКОНАНО)[:\-]?\s*([^\n\r]+)/gi, type: 'commands', weight: 8 },
+    { re: /(?:РЕЗУЛЬТАТИ|RESULTS|OUTPUTS|ВИВІД)[:\-]?\s*([\s\S]{1,300}?)(?:\n\n|\n[А-ЯЇІЄ]|$)/gi, type: 'outputs', weight: 6 }
+  ];
+  
+  structuredMarkers.forEach(({ re, type, weight }) => {
+    const matches = Array.from(text.matchAll(re));
+    matches.forEach(match => {
+      score += weight;
+      const content = match[1].trim();
+      
+      if (type === 'files') {
+        const fileMatches = content.match(/[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,8}/g) || [];
+        files.push(...fileMatches);
+      } else if (type === 'commands') {
+        const cmdMatches = content.split(/[,;]/).map(s => s.trim()).filter(Boolean);
+        commands.push(...cmdMatches);
+      } else if (type === 'outputs') {
+        outputs.push(content.slice(0, 400));
+      }
+    });
+  });
+  
+  return { files, commands, outputs, score };
+}
+
+function extractFileEvidence(text) {
+  let score = 0;
+  const files = [];
+  
+  // High confidence: full paths and common project files
+  const highConfidenceFiles = text.match(/(?:\/[A-Za-z0-9_./-]+|src\/|app\/|config\/|\.\/)[A-Za-z0-9_./-]*\.[A-Za-z0-9]{1,8}/g) || [];
+  files.push(...highConfidenceFiles);
+  score += highConfidenceFiles.length * 5;
+  
+  // Medium confidence: relative paths
+  const mediumConfidenceFiles = text.match(/[A-Za-z0-9_-]+\/[A-Za-z0-9_./-]+\.[A-Za-z0-9]{1,8}/g) || [];
+  files.push(...mediumConfidenceFiles);
+  score += mediumConfidenceFiles.length * 3;
+  
+  // Low confidence: simple filenames
+  const lowConfidenceFiles = text.match(/\b[A-Za-z0-9_-]+\.[A-Za-z0-9]{1,8}\b/g) || [];
+  files.push(...lowConfidenceFiles.filter(f => !f.includes('http') && f.length > 3));
+  score += Math.min(lowConfidenceFiles.length, 3) * 1;
+  
+  return { files: Array.from(new Set(files)), score };
+}
+
+function extractCommandEvidence(text) {
+  let score = 0;
+  const commands = [];
+  
+  // Commands in backticks (high confidence)
+  const backtickCommands = text.match(/`([^`\n]{2,120})`/g) || [];
+  backtickCommands.forEach(cmd => {
+    const clean = cmd.slice(1, -1).trim();
+    commands.push(clean);
+    score += 4;
+  });
+  
+  // Command lines with $ or > prefix (medium confidence)
+  const prefixCommands = text.match(/^(?:\s*[>$] )([^\n]{2,160})$/gm) || [];
+  prefixCommands.forEach(line => {
+    const clean = line.replace(/^\s*[>$]\s*/, '').trim();
+    commands.push(clean);
+    score += 3;
+  });
+  
+  // Common CLI patterns (lower confidence)
+  const cliPatterns = text.match(/\b(?:npm|pip|git|node|python|curl|wget|chmod|mkdir)\s+[^\n]{1,100}/gi) || [];
+  cliPatterns.forEach(cmd => {
+    commands.push(cmd.trim());
+    score += 2;
+  });
+  
+  return { commands: Array.from(new Set(commands)), score };
+}
+
+function extractOutputEvidence(text) {
+  let score = 0;
+  const outputs = [];
+  
+  // Fenced code blocks (high confidence)
+  const fencedBlocks = text.match(/```[a-zA-Z0-9]*\n([\s\S]*?)```/g) || [];
+  fencedBlocks.forEach(block => {
+    const content = block.replace(/```[a-zA-Z0-9]*\n?/, '').replace(/```$/, '').trim();
+    if (content.length > 10) {
+      outputs.push(content.slice(0, 500));
+      score += 6;
+    }
+  });
+  
+  // Output indicators (medium confidence)
+  const outputIndicators = text.match(/(?:Output|Result|Вивід|Результат)[:\-]?\s*([\s\S]{1,200}?)(?:\n\n|\n[А-ЯЇІЄ]|$)/gi) || [];
+  outputIndicators.forEach(match => {
+    const content = match.replace(/^[^:]+[:\-]?\s*/, '').trim();
+    outputs.push(content);
+    score += 4;
+  });
+  
+  // Status indicators (lower confidence)
+  const statusIndicators = text.match(/(?:Status|Статус|Success|Error|Failed)[:\-]?\s*([^\n]{1,100})/gi) || [];
+  statusIndicators.forEach(match => {
+    const content = match.replace(/^[^:]+[:\-]?\s*/, '').trim();
+    outputs.push(content);
+    score += 2;
+  });
+  
+  return { outputs: Array.from(new Set(outputs)), score };
+}
+
+function extractSummary(text) {
+  let score = 0;
   let summary = '';
-  const resumeMatch = text.match(/РЕЗЮМЕ[:\-]?\s*([\s\S]{0,400}?)(?:\n\n|КРОКИ:|$)/i);
-  if (resumeMatch) summary = resumeMatch[1].trim();
-  if (!summary) summary = text.split(/\n+/).slice(0,3).join(' ').slice(0,300);
-  return { files, commands, outputs, summary };
+  
+  // Priority 1: РЕЗЮМЕ section
+  const resumeMatch = text.match(/РЕЗЮМЕ[:\-]?\s*([\s\S]{1,400}?)(?:\n\n|КРОКИ:|РЕЗУЛЬТАТИ:|$)/i);
+  if (resumeMatch) {
+    summary = resumeMatch[1].trim();
+    score += 10;
+  }
+  
+  // Priority 2: First paragraph with action indicators  
+  if (!summary) {
+    const actionParagraph = text.match(/^[^\n]*(?:створ|виконав|встанов|запуск|тестув|розроб|імплемент)[^\n]*$/mi);
+    if (actionParagraph) {
+      summary = actionParagraph[0].trim().slice(0, 300);
+      score += 6;
+    }
+  }
+  
+  // Priority 3: First substantial paragraph
+  if (!summary) {
+    const paragraphs = text.split(/\n\s*\n/).filter(p => p.trim().length > 20);
+    if (paragraphs.length > 0) {
+      summary = paragraphs[0].trim().slice(0, 300);
+      score += 3;
+    }
+  }
+  
+  // Fallback: first few sentences
+  if (!summary) {
+    const sentences = text.split(/[.!?]+/).slice(0, 3).join('. ').slice(0, 200);
+    summary = sentences;
+    score += 1;
+  }
+  
+  return { text: summary, score };
+}
+
+function deduplicateArray(arr) {
+  return Array.from(new Set(arr.filter(Boolean)));
 }
 
 export default { runExecution, extractEvidence };

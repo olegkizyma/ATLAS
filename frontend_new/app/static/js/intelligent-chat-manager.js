@@ -480,12 +480,21 @@ class AtlasIntelligentChatManager {
         
         const responseText = data.response;
         
+        // Extract metadata for evidence and phase display (Phase 2 completion)
+        const metadata = {
+            evidence: data.evidence,
+            phase: data.phase,
+            provider: data.provider,
+            model: data.model,
+            agent: data.agent
+        };
+        
         if (this.voiceSystem.enabled) {
             // Використовуємо розумну систему визначення агента
-            await this.processVoiceResponse(responseText);
+            await this.processVoiceResponse(responseText, metadata);
         } else {
-            // Відображаємо звичайну відповідь
-            this.addMessage(responseText, 'assistant');
+            // Відображаємо звичайну відповідь з metadata
+            this.addMessage(responseText, 'assistant', metadata);
         }
     }
     
@@ -692,7 +701,7 @@ class AtlasIntelligentChatManager {
     this.scrollToBottomIfNeeded();
     }
 
-    async processVoiceResponse(responseText) {
+    async processVoiceResponse(responseText, metadata = {}) {
         try {
             // Визначаємо агента та підготовляємо відповідь
             const prepareResponse = await fetch(`${this.frontendBase}/api/voice/prepare_response`, {
@@ -701,18 +710,21 @@ class AtlasIntelligentChatManager {
                     'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({
-                    text: responseText
+                    text: responseText,
+                    metadata: metadata
                 })
             });
             
             if (prepareResponse.ok) {
                 const prepData = await prepareResponse.json();
                 if (prepData.success) {
-                    // Відображаємо ТІЛЬКИ зміст без лейблу на початку
+                    // Відображаємо ТІЛЬКИ зміст без лейблу на початку з metadata
                     this.addVoiceMessage(
                         prepData.text,
                         prepData.agent,
-                        prepData.signature
+                        prepData.signature,
+                        metadata.phase,
+                        metadata
                     );
                     
                     // Синтезуємо голос якщо потрібно
@@ -735,8 +747,8 @@ class AtlasIntelligentChatManager {
             }
         } catch (error) {
             this.log(`[VOICE] Error processing voice response: ${error.message}`);
-            // Fallback на звичайне відображення
-            this.addMessage(responseText, 'assistant');
+            // Fallback на звичайне відображення з metadata
+            this.addMessage(responseText, 'assistant', metadata);
         }
     }
     
@@ -1345,22 +1357,22 @@ class AtlasIntelligentChatManager {
         }
     }
     
-    addVoiceMessage(text, agent, signature, phase = null) {
+    addVoiceMessage(text, agent, signature, phase = null, metadata = {}) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message assistant agent-${agent}`;
         
         const agentConfig = this.voiceSystem.agents[agent];
         const color = agentConfig ? agentConfig.color : '#00ff00';
-    const displaySignature = signature || (agentConfig && agentConfig.signature) || `[${agent.toUpperCase()}]`;
+        const displaySignature = signature || (agentConfig && agentConfig.signature) || `[${agent.toUpperCase()}]`;
         
-    // Видимий лейбл спікера
-    const labelDiv = document.createElement('div');
-    labelDiv.className = 'agent-label';
-    labelDiv.textContent = displaySignature;
-    labelDiv.style.fontWeight = '600';
-    labelDiv.style.fontFamily = 'monospace';
-    labelDiv.style.color = color;
-    labelDiv.style.marginBottom = '4px';
+        // Видимий лейбл спікера
+        const labelDiv = document.createElement('div');
+        labelDiv.className = 'agent-label';
+        labelDiv.textContent = displaySignature;
+        labelDiv.style.fontWeight = '600';
+        labelDiv.style.fontFamily = 'monospace';
+        labelDiv.style.color = color;
+        labelDiv.style.marginBottom = '4px';
         
         // Inject confidence for verdict if backend provided verification object in recent raw message set
         let effectiveText = text;
@@ -1378,21 +1390,27 @@ class AtlasIntelligentChatManager {
         const textDiv = document.createElement('div');
         textDiv.className = 'message-text';
         textDiv.innerHTML = this.formatMessage(effectiveText);
-    // Убираем инлайн-линию: вертикальная линия уже рисуется через CSS ::before
         
-    // Phase badge
-    if (phase && this.phaseMeta[phase]) {
-        const badge = document.createElement('span');
-        badge.className = 'phase-badge';
-        badge.textContent = this.phaseMeta[phase].label;
-        badge.style.cssText = `display:inline-block;margin-left:8px;padding:2px 6px;border-radius:6px;font-size:10px;letter-spacing:.5px;vertical-align:middle;background:${this.phaseMeta[phase].color};color:#052012;font-weight:600;box-shadow:0 0 4px ${this.phaseMeta[phase].color}55;`;
-        labelDiv.appendChild(badge);
-    }
+        messageDiv.appendChild(labelDiv);
+        messageDiv.appendChild(textDiv);
+        
+        // Add evidence display if available (Phase 2 completion)
+        if (metadata.evidence && this.shouldShowEvidence(metadata.evidence)) {
+            const evidenceDiv = this.createEvidenceDisplay(metadata.evidence);
+            messageDiv.appendChild(evidenceDiv);
+        }
+        
+        // Phase badge
+        if (phase && this.phaseMeta[phase]) {
+            const badge = document.createElement('span');
+            badge.className = 'phase-badge';
+            badge.textContent = this.phaseMeta[phase].label;
+            badge.style.cssText = `display:inline-block;margin-left:8px;padding:2px 6px;border-radius:6px;font-size:10px;letter-spacing:.5px;vertical-align:middle;background:${this.phaseMeta[phase].color};color:#052012;font-weight:600;box-shadow:0 0 4px ${this.phaseMeta[phase].color}55;`;
+            labelDiv.appendChild(badge);
+        }
 
-    messageDiv.appendChild(labelDiv);
-    messageDiv.appendChild(textDiv);
-    this.chatContainer.appendChild(messageDiv);
-    this.scrollToBottomIfNeeded(false); // agent messages always scroll to bottom
+        this.chatContainer.appendChild(messageDiv);
+        this.scrollToBottomIfNeeded(false); // agent messages always scroll to bottom
         
         // Додаємо до списку повідомлень
         this.messages.push({
@@ -1401,7 +1419,8 @@ class AtlasIntelligentChatManager {
             agent: agent,
             signature: signature,
             timestamp: new Date(),
-            phase: phase || null
+            phase: phase || null,
+            metadata: metadata
         });
 
         if (phase) {
@@ -1502,7 +1521,7 @@ class AtlasIntelligentChatManager {
         }
     }
     
-    addMessage(text, type = 'user') {
+    addMessage(text, type = 'user', metadata = {}) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
         
@@ -1511,14 +1530,121 @@ class AtlasIntelligentChatManager {
         textDiv.innerHTML = this.formatMessage(text);
         
         messageDiv.appendChild(textDiv);
-    this.chatContainer.appendChild(messageDiv);
-    this.scrollToBottomIfNeeded();
+        
+        // Add evidence display if available (Phase 2 completion)
+        if (metadata.evidence && this.shouldShowEvidence(metadata.evidence)) {
+            const evidenceDiv = this.createEvidenceDisplay(metadata.evidence);
+            messageDiv.appendChild(evidenceDiv);
+        }
+        
+        // Add phase indicator if available
+        if (metadata.phase) {
+            const phaseDiv = document.createElement('div');
+            phaseDiv.className = 'message-phase';
+            phaseDiv.textContent = this.formatPhase(metadata.phase);
+            messageDiv.appendChild(phaseDiv);
+        }
+        
+        this.chatContainer.appendChild(messageDiv);
+        this.scrollToBottomIfNeeded();
         
         this.messages.push({
             text: text,
             type: type,
-            timestamp: new Date()
+            timestamp: new Date(),
+            metadata: metadata
         });
+    }
+
+    shouldShowEvidence(evidence) {
+        if (!evidence) return false;
+        return evidence.files?.length > 0 || 
+               evidence.commands?.length > 0 || 
+               evidence.outputs?.length > 0 ||
+               (evidence.score && evidence.score > 10);
+    }
+
+    createEvidenceDisplay(evidence) {
+        const container = document.createElement('div');
+        container.className = 'evidence-container';
+        
+        let hasContent = false;
+        
+        // Files
+        if (evidence.files?.length > 0) {
+            const filesDiv = document.createElement('div');
+            filesDiv.className = 'evidence-section';
+            filesDiv.innerHTML = `
+                <div class="evidence-header">📁 Files (${evidence.files.length})</div>
+                <div class="evidence-items">
+                    ${evidence.files.map(file => `<span class="evidence-file">${this.escapeHtml(file)}</span>`).join('')}
+                </div>
+            `;
+            container.appendChild(filesDiv);
+            hasContent = true;
+        }
+        
+        // Commands
+        if (evidence.commands?.length > 0) {
+            const commandsDiv = document.createElement('div');
+            commandsDiv.className = 'evidence-section';
+            commandsDiv.innerHTML = `
+                <div class="evidence-header">⚡ Commands (${evidence.commands.length})</div>
+                <div class="evidence-items">
+                    ${evidence.commands.map(cmd => `<code class="evidence-command">${this.escapeHtml(cmd)}</code>`).join('')}
+                </div>
+            `;
+            container.appendChild(commandsDiv);
+            hasContent = true;
+        }
+        
+        // Outputs
+        if (evidence.outputs?.length > 0) {
+            const outputsDiv = document.createElement('div');
+            outputsDiv.className = 'evidence-section';
+            outputsDiv.innerHTML = `
+                <div class="evidence-header">📤 Results (${evidence.outputs.length})</div>
+                <div class="evidence-items">
+                    ${evidence.outputs.map(output => {
+                        const truncated = output.length > 200 ? output.substring(0, 200) + '...' : output;
+                        return `<pre class="evidence-output">${this.escapeHtml(truncated)}</pre>`;
+                    }).join('')}
+                </div>
+            `;
+            container.appendChild(outputsDiv);
+            hasContent = true;
+        }
+        
+        // Evidence score
+        if (evidence.score && evidence.score > 0) {
+            const scoreDiv = document.createElement('div');
+            scoreDiv.className = 'evidence-score';
+            scoreDiv.innerHTML = `📊 Evidence Score: ${evidence.score}/100`;
+            container.appendChild(scoreDiv);
+        }
+        
+        if (!hasContent) {
+            container.style.display = 'none';
+        }
+        
+        return container;
+    }
+
+    formatPhase(phase) {
+        const phaseNames = {
+            'atlas_plan': '📋 Planning',
+            'grisha_precheck': '🔍 Pre-check',
+            'execution': '⚡ Execution',
+            'grisha_verdict': '✅ Verdict',
+            'grisha_followup': '❓ Follow-up'
+        };
+        return phaseNames[phase] || phase;
+    }
+
+    escapeHtml(text) {
+        const div = document.createElement('div');
+        div.textContent = text;
+        return div.innerHTML;
     }
     
     updateCurrentAgent(agent) {

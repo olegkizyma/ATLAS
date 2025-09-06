@@ -13,6 +13,7 @@ import os from 'os';
 import ModelRegistry from './model_registry.js';
 import { PHASE, initSession, startActionablePipeline, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
+import { IntentCache } from './intent_cache.js';
 
 // In-memory pipeline metrics (ephemeral – resets on orchestrator restart)
 const PIPELINE_METRICS = {
@@ -25,13 +26,25 @@ const PIPELINE_METRICS = {
     verdicts: 0,                 // verdict messages emitted
     verificationIterations: 0,   // cumulative verification iterations (all loops)
     verificationConfidenceSum: 0,// sum of final confidence values (for avg)
-    mockExecutions: 0            // fallback simulated executions (if any)
+    mockExecutions: 0,           // fallback simulated executions (if any)
+    circuitBreaker: {            // circuit breaker state and metrics
+        failuresTotal: 0,        // total failure count since start
+        cooldownRemaining: 0,    // milliseconds until circuit closes
+        isOpen: false,           // current circuit state
+        consecutiveFailures: 0,  // consecutive failures without success
+        lastFailureTime: 0       // timestamp of last failure
+    }
 };
 
 const app = express();
 const PORT = process.env.ORCH_PORT || 5101;
 const GRISHA_CONFIDENCE_THRESHOLD = Math.max(0, Math.min(1, parseFloat(process.env.GRISHA_CONFIDENCE_THRESHOLD || '0.8')));
 const GRISHA_MAX_VERIFY_ITER = Math.max(1, parseInt(process.env.GRISHA_MAX_VERIFY_ITER || '3', 10));
+
+// Intent router integration (feature flag)
+const INTENT_ROUTER_ENABLED = String(process.env.INTENT_ROUTER || '0') === '1';
+const INTENT_ROUTER_URL = process.env.INTENT_ROUTER_URL || 'http://localhost:5001/api/intent';
+const intentCache = new IntentCache(64, 300000); // 64 items, 5min TTL
 
 app.use(cors({
     origin: '*',
@@ -117,6 +130,46 @@ const generateMessageId = () => `msg_${Date.now()}_${++messageCounter}`;
 const logMessage = (level, message) => {
     console.log(`[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`);
 };
+
+// Circuit breaker management (Phase 2 completion)
+const CIRCUIT_BREAKER_THRESHOLD = 3; // failures before opening
+const CIRCUIT_BREAKER_COOLDOWN = 30000; // 30 seconds
+
+function recordCircuitBreakerFailure() {
+    PIPELINE_METRICS.circuitBreaker.failuresTotal++;
+    PIPELINE_METRICS.circuitBreaker.consecutiveFailures++;
+    PIPELINE_METRICS.circuitBreaker.lastFailureTime = Date.now();
+    
+    if (PIPELINE_METRICS.circuitBreaker.consecutiveFailures >= CIRCUIT_BREAKER_THRESHOLD) {
+        PIPELINE_METRICS.circuitBreaker.isOpen = true;
+        PIPELINE_METRICS.circuitBreaker.cooldownRemaining = CIRCUIT_BREAKER_COOLDOWN;
+        logMessage('warn', `[CIRCUIT_BREAKER] Opened after ${CIRCUIT_BREAKER_THRESHOLD} consecutive failures`);
+    }
+}
+
+function recordCircuitBreakerSuccess() {
+    PIPELINE_METRICS.circuitBreaker.consecutiveFailures = 0;
+    PIPELINE_METRICS.circuitBreaker.isOpen = false;
+    PIPELINE_METRICS.circuitBreaker.cooldownRemaining = 0;
+}
+
+function updateCircuitBreakerCooldown() {
+    if (PIPELINE_METRICS.circuitBreaker.isOpen) {
+        const elapsed = Date.now() - PIPELINE_METRICS.circuitBreaker.lastFailureTime;
+        PIPELINE_METRICS.circuitBreaker.cooldownRemaining = Math.max(0, CIRCUIT_BREAKER_COOLDOWN - elapsed);
+        
+        if (PIPELINE_METRICS.circuitBreaker.cooldownRemaining === 0) {
+            PIPELINE_METRICS.circuitBreaker.isOpen = false;
+            PIPELINE_METRICS.circuitBreaker.consecutiveFailures = 0;
+            logMessage('info', '[CIRCUIT_BREAKER] Closed after cooldown period');
+        }
+    }
+}
+
+function isCircuitBreakerOpen() {
+    updateCircuitBreakerCooldown();
+    return PIPELINE_METRICS.circuitBreaker.isOpen;
+}
 
 
 // Tetyana structured report helpers
@@ -241,49 +294,46 @@ const dialogueManager = new AgentDialogueManager();
 
 // -----------------------------
 // Intent LRU cache (Phase 2 optional /intent endpoint)
-// -----------------------------
-const INTENT_CACHE_CAPACITY = 64;
-const INTENT_CACHE_TTL_MS = 5 * 60 * 1000; // 5 minutes
-const intentCache = new Map(); // key => { intent, ts }
-
-function intentCacheGet(key) {
-    const rec = intentCache.get(key);
-    if (!rec) return null;
-    if (Date.now() - rec.ts > INTENT_CACHE_TTL_MS) { intentCache.delete(key); return null; }
-    return rec.intent;
-}
-
-function intentCacheSet(key, intent) {
-    if (intentCache.has(key)) intentCache.delete(key); // refresh order
-    intentCache.set(key, { intent, ts: Date.now() });
-    while (intentCache.size > INTENT_CACHE_CAPACITY) {
-        const oldestKey = intentCache.keys().next().value;
-        intentCache.delete(oldestKey);
-    }
-}
+// Intent cache replaced with IntentCache class
 
 async function classifyIntentWithRouter(text, atlasContext) {
-    // If external INTENT_ROUTER enabled (future hook), try it; otherwise fallback to smart classifier
-    if (process.env.INTENT_ROUTER === '1') {
+    // If external INTENT_ROUTER enabled, try it; otherwise fallback to smart classifier
+    if (INTENT_ROUTER_ENABLED) {
         try {
-            const url = (process.env.INTENT_ROUTER_URL || '').trim();
-            if (url) {
-                const resp = await axios.post(url, { text, atlas: atlasContext }, { timeout: 1200, validateStatus: () => true });
-                const maybe = String(resp.data?.intent || '').toLowerCase();
-                if (['actionable','planning','qa','smalltalk'].includes(maybe)) return maybe;
+            const resp = await axios.post(INTENT_ROUTER_URL, { 
+                text, 
+                atlas: atlasContext 
+            }, { 
+                timeout: 1200, 
+                validateStatus: () => true 
+            });
+            
+            if (resp.status === 200 && resp.data) {
+                const intent = String(resp.data?.intent || '').toLowerCase();
+                const reply = String(resp.data?.reply || '').trim();
+                
+                if (['actionable','planning','qa','smalltalk','chat','task'].includes(intent)) {
+                    return { intent, reply };
+                }
             }
-        } catch (_) { /* swallow and fallback */ }
+        } catch (err) {
+            console.warn('[INTENT_ROUTER] Error calling external router:', err.message);
+        }
     }
-    return await classifyIntentSmart(text, atlasContext || '');
+    
+    // Fallback to smart classifier
+    const intent = await classifyIntentSmart(text, atlasContext || '');
+    return { intent, reply: '' };
 }
 
 async function getIntentCached(text, atlasContext) {
-    const key = text.trim().toLowerCase();
-    const cached = intentCacheGet(key);
-    if (cached) return { intent: cached, cached: true };
-    const intent = await classifyIntentWithRouter(text, atlasContext);
-    intentCacheSet(key, intent);
-    return { intent, cached: false };
+    const message = text.trim();
+    const cached = intentCache.get(message);
+    if (cached) return { intent: cached.intent, reply: cached.reply, cached: true };
+    
+    const result = await classifyIntentWithRouter(message, atlasContext);
+    intentCache.set(message, result.intent, result.reply || '');
+    return { intent: result.intent, reply: result.reply, cached: false };
 }
 
 // Routes
@@ -328,7 +378,80 @@ app.post('/providers/check', async (req, res) => {
     }
 });
 
-// Main chat processing endpoint
+// Pipeline metrics endpoint (Phase 2 completion)
+app.get('/metrics/pipeline', (req, res) => {
+    try {
+        const includeProviders = req.query.providers === 'true';
+        
+        const metrics = {
+            timestamp: new Date().toISOString(),
+            pipeline: {
+                ...PIPELINE_METRICS,
+                avgVerificationConfidence: PIPELINE_METRICS.verificationIterations > 0 
+                    ? (PIPELINE_METRICS.verificationConfidenceSum / PIPELINE_METRICS.verificationIterations).toFixed(3)
+                    : 0,
+                fallbackRate: PIPELINE_METRICS.messagesTotal > 0 
+                    ? (PIPELINE_METRICS.mockExecutions / PIPELINE_METRICS.messagesTotal * 100).toFixed(1) + '%'
+                    : '0%'
+            }
+        };
+
+        if (includeProviders) {
+            metrics.providers = registry.getState();
+        }
+
+        res.json(metrics);
+    } catch (e) {
+        res.status(500).json({ error: 'metrics_failed', details: e.message });
+    }
+});
+
+// Intent classification endpoint (Phase 2 /intent proxy)
+app.post('/intent', async (req, res) => {
+    try {
+        const { message } = req.body;
+        
+        if (!message || typeof message !== 'string') {
+            return res.status(400).json({ error: 'message_required', message: 'Message text is required' });
+        }
+
+        if (!INTENT_ROUTER_ENABLED) {
+            return res.json({ classification: 'actionable', confidence: 0.95, cached: false });
+        }
+
+        // Check cache first
+        const cacheKey = intentCache.normalizeKey(message);
+        let result = intentCache.get(cacheKey);
+        
+        if (result) {
+            return res.json({ ...result, cached: true });
+        }
+
+        // Call intent router service
+        const response = await fetch(INTENT_ROUTER_URL, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ message })
+        });
+
+        if (!response.ok) {
+            // Fallback to actionable on intent router error
+            result = { classification: 'actionable', confidence: 0.95 };
+        } else {
+            result = await response.json();
+        }
+
+        // Cache the result
+        intentCache.set(cacheKey, result);
+        
+        res.json({ ...result, cached: false });
+    } catch (error) {
+        console.error('Intent classification error:', error);
+        // Fallback to actionable on any error
+        res.json({ classification: 'actionable', confidence: 0.95, cached: false });
+    }
+});
+
 // Direct Tetyana endpoint
 app.post('/agent/tetyana', async (req, res) => {
     try {
@@ -866,16 +989,31 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     const agent = AGENTS[agentName];
     const messageId = generateMessageId();
     
+    // Check circuit breaker state before execution
+    if (isCircuitBreakerOpen()) {
+        logMessage('warn', `[CIRCUIT_BREAKER] Request blocked for ${agentName}, cooldown: ${PIPELINE_METRICS.circuitBreaker.cooldownRemaining}ms`);
+        const fallbackContent = `[${agent.signature}] Система тимчасово недоступна. Спробуйте через ${Math.ceil(PIPELINE_METRICS.circuitBreaker.cooldownRemaining / 1000)} секунд.`;
+        return {
+            id: messageId,
+            agentName,
+            content: fallbackContent,
+            provider: 'circuit_breaker',
+            model: 'fallback',
+            timestamp: new Date().toISOString()
+        };
+    }
+    
     // Create role-based prompt
     let prompt = createAgentPrompt(agentName, inputMessage, session);
     
     let content;
     let provider = undefined;
     let model = undefined;
+    let executionSuccessful = false;
     
     if (agentName === 'tetyana') {
         // Execution via Goose only (no provider fallbacks for execution)
-    const execNotes = await runExecution(prompt, session.id, {
+        const execNotes = await runExecution(prompt, session.id, {
             enableTools: options.enableTools === true,
             systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true })
         });
@@ -886,6 +1024,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             content = enforceTetianaStructure(blocked);
             provider = 'goose';
             model = 'github_copilot';
+            recordCircuitBreakerFailure();
         } else {
             // Short structured report via openai-compat using configured 58-model list
             const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
@@ -903,6 +1042,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                         registry.reportSuccess(route, Date.now() - started);
                         provider = 'openai_compat';
                         model = route.model;
+                        executionSuccessful = true;
                         break;
                     }
                     registry.reportFailure(route);
@@ -932,6 +1072,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                         provider = 'goose';
                         model = route.model || 'github_copilot';
                         registry.reportSuccess(route, Date.now() - started);
+                        executionSuccessful = true;
                         break;
                     }
                     registry.reportFailure(route);
@@ -942,6 +1083,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                         provider = 'openai_compat';
                         model = route.model;
                         registry.reportSuccess(route, Date.now() - started);
+                        executionSuccessful = true;
                         break;
                     }
                     registry.reportFailure(route);
@@ -955,6 +1097,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         if (!content) {
             // Deterministic minimal fallback (single structured notice)
             PIPELINE_METRICS.mockExecutions++;
+            recordCircuitBreakerFailure();
             if (agentName === 'atlas') {
                 content = 'План тимчасово недоступний через провайдерів. Мінімальний fallback: сформулюйте кроки: 1) Аналіз 2) Виконання 3) Перевірка.';
             } else if (agentName === 'grisha') {
@@ -962,12 +1105,20 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             } else {
                 content = 'Резервна відповідь агента.';
             }
+        } else {
+            // Successful execution
+            executionSuccessful = true;
         }
+    }
+    
+    // Record circuit breaker state based on execution result
+    if (executionSuccessful) {
+        recordCircuitBreakerSuccess();
     }
     
     return {
         role: 'assistant',
-    content: `${agent.signature} ${content.replace(/^\[ТЕТЯНА\]\s*/i, '')}`,
+        content: `${agent.signature} ${content.replace(/^\[ТЕТЯНА\]\s*/i, '')}`,
         agent: agentName,
         messageId: messageId,
         timestamp: Date.now(),
