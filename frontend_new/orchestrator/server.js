@@ -27,6 +27,9 @@ const PIPELINE_METRICS = {
     verificationIterations: 0,   // cumulative verification iterations (all loops)
     verificationConfidenceSum: 0,// sum of final confidence values (for avg)
     mockExecutions: 0,           // fallback simulated executions (if any)
+    clarifications: 0,           // clarification escalations (Atlas asking for Stage 0 data)
+    planningPromotions: 0,       // planning -> actionable promotions
+    planningStallClarifications: 0, // clarifications due to repeated planning loop
     circuitBreaker: {            // circuit breaker state and metrics
         failuresTotal: 0,        // total failure count since start
         cooldownRemaining: 0,    // milliseconds until circuit closes
@@ -727,6 +730,18 @@ app.post('/chat/stream', async (req, res) => {
 
     // Check for user commands
     const messageText = message.toLowerCase().trim();
+
+    // Якщо користувач відповів після запиту уточнення — знімаємо прапор та фіксуємо резолюцію
+    if (session.awaitingClarification) {
+        session.awaitingClarification = false;
+        session.clarificationResolvedAt = Date.now();
+        session.history.push({
+            role: 'system',
+            content: '[clarification_resolved] Користувач надав додатковий контекст',
+            timestamp: Date.now(),
+            type: 'clarification_resolved'
+        });
+    }
     
     // Check for authority command "наказую"
     if (messageText.includes('наказую') || messageText.includes('command')) {
@@ -784,7 +799,9 @@ app.post('/chat/stream', async (req, res) => {
                 id: sessionId,
                 currentAgent: session.currentAgent,
                 requiresUserCommand: dialogueManager.requiresUserCommand(),
-                nextAction: session.nextAction || null
+                nextAction: session.nextAction || null,
+                awaitingClarification: !!session.awaitingClarification,
+                clarificationJustResolved: !!session.clarificationResolvedAt && (Date.now() - session.clarificationResolvedAt) < 2000
             },
             endOfConversation: ended === true
         });
@@ -859,6 +876,8 @@ async function processAgentCycle(userMessage, session) {
         timestamp: Date.now()
     });
 
+    // Колишня доменна логіка виявлення артефактів видалена — все керується через рольові промпти.
+
     // Phase 1: Atlas creates primary reply/plan (use heuristic intent to bias model choice)
     const preIntent = classifyIntentHeuristic(userMessage, '');
     const atlasResponseRaw = await generateAgentResponse('atlas', userMessage, session, { intentHint: preIntent });
@@ -895,6 +914,33 @@ async function processAgentCycle(userMessage, session) {
         const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
         responses.push(grishaPre);
         session.history.push(grishaPre);
+
+        // Універсальна ескалація уточнення без доменних хардкодів:
+        // Якщо відповідь Гриші містить явні індикатори інформаційного дефіциту ("уточн", "потрібні дані", "надайте", "які саме"),
+        // і в сесії ще не зафіксовано, що користувач щось додатково надав після останньої відповіді Atlas — Atlas формує запит на уточнення.
+        try {
+            const lowerGrisha = (grishaPre.content || '').toLowerCase();
+            const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
+            if (shortage && !session.awaitingClarification) {
+                const atlasClarPrompt = [
+                    'Ти — Atlas. Сформуй короткий структурований ЕТАП 0: що потрібно отримати від користувача для продовження.',
+                    'Не вигадуй доменних полів. Лише перефразуй задачу, підкресли, що потрібні уточнення, і наведи список пунктів як маркери (по суті, які дані / контекст / обмеження / початковий стан / очікувані критерії).',
+                    'Закінчи інструкцією: «Надайте ці дані однією відповіддю — після цього я згенерую план виконання.»',
+                    'Українською. Мінімізуй декоративний текст.'
+                ].join('\n');
+                const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
+                const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN);
+                atlasClar.clarification = true;
+                atlasClar.phase = 'atlas_clarify'; // спеціальна фаза для фронтенду
+                responses.push(atlasClar);
+                session.history.push(atlasClar);
+                session.awaitingClarification = true;
+                PIPELINE_METRICS.clarifications++;
+                // Ставимо стан що потрібно більше даних (узагальнені):
+                markNeedsMore(session, ['additional_context'], grishaPre.content);
+                return responses;
+            }
+        } catch (e) { logMessage('warn', 'Generic clarification escalation skipped: ' + e.message); }
 
         startActionablePipeline(session, userMessage, atlasResponse.content, grishaPre.content);
 
@@ -958,14 +1004,41 @@ async function processAgentCycle(userMessage, session) {
     }
 
     // Planning intent handled below; other intents will fall through
-    if (intent === 'planning' && shouldTriggerDiscussion(atlasResponse.content)) {
+    if (intent === 'planning') {
         const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
         const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
         responses.push(grishaResponse);
         session.history.push(grishaResponse);
-        if (detectDisagreement([atlasResponse, grishaResponse])) {
-            dialogueManager.startDiscussion('Task execution approach', ['atlas', 'grisha', 'tetyana']);
-        }
+
+        // Clarification escalation for planning (avoid stalls)
+        try {
+            const lowerGrisha = (grishaResponse.content || '').toLowerCase();
+            const shortage = /(уточн|потрібн|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
+            const planningSig = `${(atlasResponse.content||'').slice(0,400)}||${(grishaResponse.content||'').slice(0,400)}`;
+            const repeated = session.lastPlanningSignature && session.lastPlanningSignature === planningSig;
+            session.lastPlanningSignature = planningSig;
+            if (!session.awaitingClarification && (shortage || repeated)) {
+                const atlasClarPrompt = [
+                    'Ти — Atlas. Користувач сформулював задачу, але потрібні уточнення для переходу до виконання.',
+                    '1) Коротко перефразуй задачу одним реченням.',
+                    '2) Дай список «Надайте:» (контекст, початковий стан, моделі/пристрої, цільові критерії, обмеження, бажані інструменти).',
+                    '3) Заверши: «Надайте ці дані однією відповіддю — після цього я згенерую виконуваний план.»',
+                    'Жодних зайвих прикрас.'
+                ].join('\n');
+                const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
+                const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN);
+                atlasClar.clarification = true;
+                atlasClar.phase = 'atlas_clarify';
+                responses.push(atlasClar);
+                session.history.push(atlasClar);
+                session.awaitingClarification = true;
+                PIPELINE_METRICS.clarifications++;
+                if (repeated) PIPELINE_METRICS.planningStallClarifications++;
+                logMessage('info', `[PLANNING] Clarification escalated (shortage=${shortage} repeated=${repeated})`);
+                return responses;
+            }
+        } catch (e) { logMessage('warn', 'Planning escalation error: ' + e.message); }
+    // Disagreement heuristic removed
         try { logMessage('debug', 'Returning planning responses phases=' + responses.map(r => r.phase).join(',')); } catch {}
         return responses;
     }
@@ -976,27 +1049,9 @@ async function processAgentCycle(userMessage, session) {
 
 // Lightweight intent classifier for routing
 // Returns: 'actionable' | 'planning' | 'qa' | 'smalltalk'
-function classifyIntentHeuristic(userText, atlasText) {
-    const t = String(userText || '').toLowerCase();
-    const a = String(atlasText || '').toLowerCase();
-
-    // Actionable if explicit commands present
-    if (isActionableTask(t)) return 'actionable';
-
-    // Small talk
-    const smallTalkRe = /(привіт|вітаю|добр(ий|ого)|хай|як справи|дякую|будь ласка|гарного дня|на добраніч|салют|hello|hi|thanks|thank you)/i;
-    if (smallTalkRe.test(t)) return 'smalltalk';
-
-    // Q&A indicators
-    const qaRe = /(\?|що таке|як зробити|як налаштувати|поясни|explain|how to|why|що робити)/i;
-    if (qaRe.test(t)) return 'qa';
-
-    // Planning if plan/strategy is the focus without direct action
-    const planningRe = /(план|стратегія|кроки|етапи|ризик|безпека)/i;
-    if (planningRe.test(a) || planningRe.test(t)) return 'planning';
-
-    // Default fallback
-    return /(^що\b|^як\b|^чому\b)/i.test(t) ? 'qa' : 'smalltalk';
+function classifyIntentHeuristic(_userText, _atlasText) {
+    // Heuristic intent removed: default neutral fallback (planning)
+    return 'planning';
 }
 
 // LLM-based intent classification via openai_compat (3010) with fallback to heuristic
@@ -1163,19 +1218,8 @@ app.post('/chat/continue', async (req, res) => {
 // Expose pipeline metrics (ephemeral, resets on restart)
 // (Removed duplicate /metrics/pipeline handler and unified logic above)
 
-// Heuristics: detect actionable tasks that require an executor (Tetyana)
-function isActionableTask(text) {
-    const t = (text || '').toLowerCase();
-    const verbs = [
-        'відкрий', 'запусти', 'виконай', 'виконати', 'обчисли', 'порахуй', 'корінь', 'sqrt',
-        'збережи', 'зберегти', 'створи', 'створити', 'на пк', 'на робочому столі', 'на робочий стіл',
-        'відкрий калькулятор', 'калькулятор', 'редактор', 'текстовий файл', 'txt',
-        'передай тетяні', 'передати тетяні', 'для тетяни', 'тетяна',
-        'передай гріші', 'передати гріші', 'для гриші', 'гриша', 'перевірку', 'перевірити'
-    ];
-    if (!verbs.some(v => t.includes(v))) return false;
-    return true;
-}
+// Heuristic actionable detection removed — rely on LLM intent classification only.
+function isActionableTask(_text) { return false; }
 
 // Legacy static plan removed: dynamic routing handled by ModelRegistry
 
@@ -1364,17 +1408,7 @@ function createAgentPrompt(agentName, message, session) {
 // simulateAgentThinking removed (deterministic fallback inlined above)
 
 // Helper functions
-function shouldTriggerDiscussion(message) {
-    const discussionTriggers = ['план', 'стратегія', 'безпека', 'ризик', 'проблема'];
-    return discussionTriggers.some(trigger => message.toLowerCase().includes(trigger));
-}
-
-function detectDisagreement(responses) {
-    const disagreementWords = ['не згоден', 'проти', 'ризикo', 'небезпечно', 'неправильно'];
-    return responses.some(response => 
-        disagreementWords.some(word => response.content.toLowerCase().includes(word))
-    );
-}
+// Discussion / disagreement heuristics removed (model-driven reasoning only)
 
 function getRecentHistory(session, count = 3) {
     return session.history

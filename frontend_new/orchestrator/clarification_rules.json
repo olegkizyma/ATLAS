@@ -1,0 +1,82 @@
+{
+  "_meta": {
+    "version": 2,
+    "description": "Повністю узагальнені правила уточнення без доменних категорій чи ключових слів. Служать схемою для LLM, а не джерелом евристик.",
+    "principles": [
+      "Жодних фіксованих domain-категорій — лише абстрактні інформаційні слоти (artifacts).",
+      "Перехід до уточнення базується на відсутності обов'язкових слотів, а не на ключових словах.",
+      "LLM саме мапить запит користувача у потрібні слоти через семантику формулювання.",
+      "Повторні уточнення звужуються дифом: запитується лише те, чого ще бракує.",
+      "Артефакти зберігаються структуровано для наступних етапів планування / виконання / верифікації.",
+      "Немає regex-патернів всередині — тільки описові назви слотів і інструкції для моделі.",
+      "Вся логіка прийняття рішень переноситься в LLM prompt orchestration (server)."
+    ]
+  },
+  "artifactSlots": {
+    "problem_summary": {"requiredCore": true, "description": "Стисле перефразування задачі одним реченням."},
+    "initial_state": {"requiredCore": true, "description": "Що вже є / поточний стан системи / середовища."},
+    "desired_state": {"requiredCore": true, "description": "Чого потрібно досягти у кінцевому вигляді."},
+    "success_criteria": {"requiredCore": true, "description": "Об'єктивні критерії готовності / метрики."},
+    "constraints": {"optional": true, "description": "Обмеження (безпека, політики, ресурси, заборони)."},
+    "risks": {"optional": true, "description": "Відомі ризики / можливі негативні сценарії."},
+    "prior_attempts": {"optional": true, "description": "Що вже пробували / чому не спрацювало."},
+    "resources_available": {"optional": true, "description": "Які інструменти / доступи / дані доступні."},
+    "data_sources": {"optional": true, "description": "Посилання на дані, файли, URI, сховища."},
+    "output_spec": {"optional": true, "description": "Бажаний формат/структура результату (напр. json, звіт)."},
+    "verification_method": {"optional": true, "description": "Як буде перевірено що результат коректний."},
+    "time_bounds": {"optional": true, "description": "Дедлайни, SLA, часові вікна."},
+    "environment": {"optional": true, "description": "OS / версії / топологія / контекст виконання."},
+    "scaling_requirements": {"optional": true, "description": "Вимоги до продуктивності / масштабування."},
+    "followup_intent": {"optional": true, "description": "Чи очікуються наступні кроки після первинного результату."}
+  },
+  "clarificationFlow": {
+    "selection": {
+      "method": "LLM класифікує семантично, які слоти доречні; ядро: problem_summary, initial_state, desired_state, success_criteria завжди мають бути заповнені.",
+      "autoSatisfyFromHistory": true,
+      "mergeStrategy": "Нові значення доповнюють / уточнюють; оригінал зберігається в history з версіонуванням." },
+    "trigger": {
+      "condition": "Якщо будь-який requiredCore слот порожній або позначений low_confidence.",
+      "lowConfidenceThreshold": 0.4
+    },
+    "llmPromptTemplate": {
+      "system": "Ти — Atlas Clarifier. Отримуєш user_input + відомі заповнені слоти. Маєш повернути JSON з 'filled' і 'missing'. Нічого більше.",
+      "user": "USER_INPUT: {{message}}\nKNOWN_SLOTS: {{known_slots_json}}\nREQUIRED_CORE: [problem_summary, initial_state, desired_state, success_criteria]\nІнструкція: заповни/уточни максимально. Якщо недостатньо даних — познач у 'missing'."
+    },
+    "responseSchema": {
+      "filled": {"type": "object", "description": "Ключ=slot, value=текст користувача узагальнений/очищений."},
+      "missing": {"type": "array", "items": "string", "description": "Слоти, які треба запитати."},
+      "confidence": {"type": "object", "description": "0..1 оцінка по кожному слоту (ключ)."}
+    },
+    "askTemplate": {
+      "prelude": "Потрібні уточнення для точного планування.",
+      "perSlotFormat": "- {{slot}}: коротко надайте / уточніть",
+      "finalCue": "Відповідайте одним повідомленням — я інтегрую і перейду до плану."
+    },
+    "deltaBehaviour": {
+      "strategy": "Питаємо лише missing + слоти з low_confidence.",
+      "confidenceReuse": true
+    }
+  },
+  "validationLogic": {
+    "coreCompleteCondition": "problem_summary && initial_state && desired_state && success_criteria all present AND each confidence >= 0.4",
+    "postClarification": "Після отримання користувацької відповіді — повторити extraction; якщо still missing core -> повторити зменшений запит (макс 2 цикли).",
+    "maxClarificationCycles": 2,
+    "fallback": "Якщо після циклів core не заповнено — повернути користувачу структурований перелік невизначеностей і завершити без виконання."
+  },
+  "executionBridge": {
+    "handoff": "Коли coreCompleteCondition=true, формується execution_plan_prompt з інлайном усіх filled слотів.",
+    "slotInjectionOrder": ["problem_summary", "desired_state", "success_criteria", "constraints", "risks", "prior_attempts", "resources_available", "data_sources", "output_spec", "verification_method", "time_bounds", "environment", "scaling_requirements", "followup_intent"]
+  },
+  "examples": {
+    "minimal": {
+      "user": "Зроби скрипт що чистить тимчасові файли.",
+      "extracted": {"problem_summary": "Очистити тимчасові файли", "desired_state": null, "initial_state": null, "success_criteria": null},
+      "missing": ["initial_state", "desired_state", "success_criteria"],
+      "ask": "Потрібні уточнення:\n- initial_state: що вже існує / шляхи?\n- desired_state: який стан очікується після?\n- success_criteria: як міряємо успіх?\nВідповідайте одним повідомленням — я продовжу." },
+    "complete": {
+      "user": "Потрібно: автоматично щодня очищати /var/tmp і ~/cache якщо >500MB, успіх якщо в кінці <200MB.",
+      "extracted": {"problem_summary": "Автоочистка тимчасових директорій", "initial_state": ">500MB змішаних файлів", "desired_state": "<200MB після очистки", "success_criteria": "Розмір кожної директорії <200MB", "constraints": "Не чіпати *.lock"},
+      "missing": []
+    }
+  }
+}

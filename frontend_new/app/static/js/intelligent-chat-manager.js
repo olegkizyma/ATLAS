@@ -253,13 +253,15 @@ class AtlasIntelligentChatManager {
         // Phase tracking (pipeline visualization)
         this.phaseMeta = {
             atlas_plan: { label: 'PLAN', color: '#1e90ff' },
+            atlas_clarify: { label: 'CLARIFY', color: '#ff66ff' },
             grisha_precheck: { label: 'PRECHECK', color: '#ffd700' },
             execution: { label: 'EXEC', color: '#00ffa5' },
             grisha_verdict: { label: 'VERDICT', color: '#ff8c00' },
             grisha_followup: { label: 'FOLLOW-UP', color: '#ff4d4d' }
         };
         this.lastAgentPhaseKey = new Map();
-        this.pipelineState = { order: ['atlas_plan','grisha_precheck','execution','grisha_verdict','grisha_followup'], active: null, seen: new Set() };
+        this.pipelineState = { order: ['atlas_plan','atlas_clarify','grisha_precheck','execution','grisha_verdict','grisha_followup'], active: null, seen: new Set() };
+    this._clarificationFreeze = false;
         this.buildPipelineHUD();
     }
 
@@ -570,7 +572,8 @@ class AtlasIntelligentChatManager {
                     const agent = agentResponse.agent || 'atlas';
                     const content = agentResponse.content || '';
                     const signature = agentResponse.signature || this.voiceSystem.agents[agent]?.signature;
-                    const phase = agentResponse.phase || null;
+                    let phase = agentResponse.phase || null;
+                    if (agentResponse.clarification === true) phase = 'atlas_clarify';
                     if (phase === 'grisha_verdict' && agentResponse.verification) {
                         this._lastVerdictVerification = agentResponse.verification;
                     }
@@ -618,6 +621,13 @@ class AtlasIntelligentChatManager {
                         this.log(`[CHAT] Next action scheduled: ${data.session.nextAction}. Voice off → immediate continue.`);
                     }
                     await this.continuePipeline(data.session.id, 0);
+                } else if (data.session && data.session.awaitingClarification) {
+                    this.showClarificationBanner();
+                    this._clarificationFreeze = true;
+                    try { this.updatePipelineHUD('atlas_clarify'); } catch(_) {}
+                } else if (data.session && data.session.clarificationJustResolved) {
+                    this.hideClarificationBanner();
+                    this._clarificationFreeze = false;
                 } else if (data.endOfConversation === true) {
                     // No follow-up actions and orchestrator signaled end
                     this.log('[CHAT] Conversation ended by orchestrator');
@@ -679,7 +689,8 @@ class AtlasIntelligentChatManager {
                 const agent = agentResponse.agent || 'atlas';
                 const content = agentResponse.content || '';
                 const signature = agentResponse.signature || this.voiceSystem.agents[agent]?.signature;
-                const phase = agentResponse.phase || null;
+                let phase = agentResponse.phase || null;
+                if (agentResponse.clarification === true) phase = 'atlas_clarify';
                 if (phase === 'grisha_verdict' && agentResponse.verification) {
                     this._lastVerdictVerification = agentResponse.verification;
                 }
@@ -719,6 +730,13 @@ class AtlasIntelligentChatManager {
                     await this.waitForTTSIdle(20000).catch(()=>{});
                 }
                 return await this.continuePipeline(data.session.id, depth + 1);
+            } else if (data.session && data.session.awaitingClarification) {
+                this.showClarificationBanner();
+                this._clarificationFreeze = true;
+                try { this.updatePipelineHUD('atlas_clarify'); } catch(_) {}
+            } else if (data.session && data.session.clarificationJustResolved) {
+                this.hideClarificationBanner();
+                this._clarificationFreeze = false;
             } else if (data.endOfConversation === true) {
                 this.log('[CHAT] Conversation ended by orchestrator (continue)');
                 try { this.addMessage('— розмову завершено —', 'system'); } catch (_) {}
@@ -1460,6 +1478,27 @@ class AtlasIntelligentChatManager {
         }
     }
 
+    showClarificationBanner() {
+        try {
+            if (document.getElementById('clarification-banner')) return;
+            const wrap = document.createElement('div');
+            wrap.id = 'clarification-banner';
+            wrap.style.cssText = 'position:fixed;top:58px;left:50%;transform:translateX(-50%);background:#ff66ff1a;border:1px solid #ff66ff80;color:#ffdfff;padding:8px 14px;font:13px/1.4 system-ui,Segoe UI,Arial;border-radius:10px;z-index:9998;backdrop-filter:blur(4px);box-shadow:0 0 12px #ff66ff55;max-width:70vw;';
+            wrap.innerHTML = '<strong>Потрібні уточнення</strong>: надайте додатковий контекст в одному повідомленні (дані, обмеження, очікуваний результат, критерії).';
+            const closeBtn = document.createElement('button');
+            closeBtn.textContent = '×';
+            closeBtn.style.cssText = 'margin-left:12px;background:#ff66ff33;color:#fff;border:0;padding:2px 8px;border-radius:6px;cursor:pointer;font-weight:600;';
+            closeBtn.onclick = () => wrap.remove();
+            wrap.appendChild(closeBtn);
+            document.body.appendChild(wrap);
+            setTimeout(()=>{ try { wrap.remove(); } catch(_){} }, 45000);
+        } catch(e) { this.log('Clarification banner failed: '+e.message); }
+    }
+
+    hideClarificationBanner() {
+        try { const el = document.getElementById('clarification-banner'); if (el) el.remove(); } catch(_) {}
+    }
+
     shouldSkipDuplicatePhase(agent, phase, content) {
         if (!phase) return false;
         // Only suppress for Grisha precheck duplicates & identical follow-ups
@@ -1519,6 +1558,7 @@ class AtlasIntelligentChatManager {
     updatePipelineHUD(phase) {
         if (!phase) return;
         if (!this.pipelineState.order.includes(phase)) return;
+    if (this._clarificationFreeze && phase !== 'atlas_clarify') return; // freeze progress while awaiting clarification
         this.pipelineState.active = phase;
         this.pipelineState.seen.add(phase);
         const hud = document.getElementById('pipeline-hud');
@@ -1535,7 +1575,9 @@ class AtlasIntelligentChatManager {
         const total = this.pipelineState.order.length;
         const pct = Math.max(0, Math.min(100, Math.round(((idx+1)/ total)*100)));
         const bar = document.getElementById('pipeline-progress-bar');
-        if (bar) bar.style.width = pct + '%';
+        if (bar) {
+            if (!this._clarificationFreeze || phase === 'atlas_clarify') bar.style.width = pct + '%';
+        }
         // If verdict has verification info in latest messages – update mini tag
         if (phase === 'grisha_verdict') {
             try {
