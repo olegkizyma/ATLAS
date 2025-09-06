@@ -1,3 +1,9 @@
+GOOSE_RECIPE_GITHUB_REPO: https://github.com/olegkizyma/ATLAS.git
+GOOSE_CLI_MIN_PRIORITY: 0.0
+GITHUB_COPILOT_TOKEN: null
+GOOSE_MODE: auto
+GOOSE_PROVIDER: github_copilot
+GOOSE_ENABLE_ROUTER: 'true'
 extensions:
   autovisualiser:
     available_tools: []
@@ -35,15 +41,6 @@ extensions:
     name: filesystem
     timeout: 300
     type: builtin
-  jetbrains:
-    available_tools: []
-    bundled: true
-    description: null
-    display_name: JetBrains
-    enabled: false
-    name: jetbrains
-    timeout: 300
-    type: builtin
   memory:
     available_tools: []
     bundled: true
@@ -75,11 +72,5 @@ extensions:
     name: tutorial
     timeout: 300
     type: builtin
-GOOSE_MODE: auto
-GOOSE_PROVIDER: github_copilot
 GOOSE_SCHEDULER_TYPE: temporal
-GOOSE_CLI_MIN_PRIORITY: 0.0
-GOOSE_ENABLE_ROUTER: 'true'
-GOOSE_RECIPE_GITHUB_REPO: https://github.com/olegkizyma/ATLAS.git
-GITHUB_COPILOT_TOKEN: null
 GOOSE_MODEL: gpt-4o

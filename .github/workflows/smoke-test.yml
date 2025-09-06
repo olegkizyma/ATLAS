@@ -1,0 +1,86 @@
+name: Smoke Test
+
+on:
+  push:
+    branches: [ ATLAS3 ]
+  pull_request:
+    branches: [ ATLAS3 ]
+  workflow_dispatch: {}
+
+jobs:
+  smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+            python-version: '3.11'
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+            node-version: '20'
+            cache: 'npm'
+            cache-dependency-path: frontend_new/orchestrator/package-lock.json
+
+      - name: Install Python deps (frontend)
+        working-directory: frontend_new
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Node deps (orchestrator)
+        working-directory: frontend_new/orchestrator
+        run: npm ci --no-audit --no-fund
+
+      - name: Start Orchestrator
+        working-directory: frontend_new/orchestrator
+        run: |
+          nohup node server.js > ../../logs/orchestrator_ci.log 2>&1 &
+          echo $! > orchestrator.pid
+
+      - name: Start Frontend
+        working-directory: frontend_new
+        env:
+          FRONTEND_PORT: 5001
+          ORCHESTRATOR_URL: http://127.0.0.1:5101
+          TTS_SERVER_URL: http://127.0.0.1:3999  # non-existent stub (will fallback)
+        run: |
+          nohup python app/atlas_server.py > logs/frontend_ci.log 2>&1 &
+          echo $! > frontend.pid
+          sleep 5
+
+      - name: Show partial logs (debug)
+        if: always()
+        run: |
+          echo '--- Orchestrator (last 40 lines) ---'
+          tail -40 frontend_new/logs/orchestrator_ci.log || true
+          echo '--- Frontend (last 40 lines) ---'
+            tail -40 frontend_new/logs/frontend_ci.log || true
+
+      - name: Prepare smoke script
+        run: chmod +x scripts/smoke_test.sh
+
+      - name: Run smoke test
+        env:
+          BASE_FRONTEND: http://127.0.0.1:5001
+        run: ./scripts/smoke_test.sh
+
+      - name: Upload logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: smoke-logs
+          path: |
+            frontend_new/logs/*.log
+            frontend_new/orchestrator/*.pid
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f frontend_new/orchestrator/server.js || true
+          pkill -f atlas_server.py || true

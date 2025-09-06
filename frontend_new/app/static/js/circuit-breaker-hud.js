@@ -1,7 +1,9 @@
 // Circuit Breaker Metrics HUD (Phase 2 completion)
 class CircuitBreakerHUD {
     constructor() {
-        this.metricsEndpoint = window.CONFIG?.ORCHESTRATOR_URL + '/metrics/pipeline' || 'http://localhost:5101/metrics/pipeline';
+        // Build metrics endpoint safely: prefer configured ORCHESTRATOR_URL, fall back to localhost
+        const base = (window.CONFIG?.ORCHESTRATOR_URL ?? '').replace(/\/$/, '');
+        this.metricsEndpoint = base ? `${base}/metrics/pipeline` : 'http://localhost:5101/metrics/pipeline';
         this.updateInterval = 5000; // 5 seconds
         this.isVisible = false;
         this.metrics = null;

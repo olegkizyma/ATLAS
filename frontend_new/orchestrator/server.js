@@ -166,11 +166,12 @@ function updateCircuitBreakerCooldown() {
     }
 }
 
+// Missing helper caused ReferenceError -> 500 responses
 function isCircuitBreakerOpen() {
+    // Ensure cooldown timers are updated before reporting state
     updateCircuitBreakerCooldown();
-    return PIPELINE_METRICS.circuitBreaker.isOpen;
+    return PIPELINE_METRICS.circuitBreaker.isOpen === true;
 }
-
 
 // Tetyana structured report helpers
 function tetianaSystemInstruction({ enableTools } = { enableTools: false }) {
@@ -180,6 +181,9 @@ function tetianaSystemInstruction({ enableTools } = { enableTools: false }) {
         '',
         'Формат звіту:',
         '1) РЕЗЮМЕ (1-2 речення): коротко що зроблено і статус.',
+        '2) КРОКИ: нумерований список виконаних кроків.',
+        '3) РЕЗУЛЬТАТИ: ключові результати з конкретикою (шляхи файлів, команди, посилання).',
+        '4) ДОКАЗИ: мапа criterion -> evidence (мінімум 2 критерії) у вигляді списку.',
         '5) ПЕРЕВІРКА: як ти перевірила результат (що саме і яким способом).',
         '6) СТАТУС: Done | Blocked (з причиною) | Needs Clarification (з конкретним питанням).',
         '',
@@ -382,25 +386,47 @@ app.post('/providers/check', async (req, res) => {
 app.get('/metrics/pipeline', (req, res) => {
     try {
         const includeProviders = req.query.providers === 'true';
-        
-        const metrics = {
-            timestamp: new Date().toISOString(),
+
+        // Derived metrics (keep backwards compatibility + richer snapshot)
+        const avgVerificationConfidence = PIPELINE_METRICS.verificationIterations > 0
+            ? (PIPELINE_METRICS.verificationConfidenceSum / PIPELINE_METRICS.verificationIterations)
+            : 0;
+        const fallbackRate = PIPELINE_METRICS.messagesTotal > 0
+            ? (PIPELINE_METRICS.mockExecutions / PIPELINE_METRICS.messagesTotal)
+            : 0;
+        const avgConfidenceLegacy = PIPELINE_METRICS.verdicts > 0
+            ? (PIPELINE_METRICS.verificationConfidenceSum / PIPELINE_METRICS.verdicts)
+            : 0; // legacy equivalent from second handler
+        const avgVerificationIterations = PIPELINE_METRICS.verdicts > 0
+            ? (PIPELINE_METRICS.verificationIterations / PIPELINE_METRICS.verdicts)
+            : 0;
+
+        const response = {
+            success: true,
+            timestamp: Date.now(),
             pipeline: {
                 ...PIPELINE_METRICS,
-                avgVerificationConfidence: PIPELINE_METRICS.verificationIterations > 0 
-                    ? (PIPELINE_METRICS.verificationConfidenceSum / PIPELINE_METRICS.verificationIterations).toFixed(3)
-                    : 0,
-                fallbackRate: PIPELINE_METRICS.messagesTotal > 0 
-                    ? (PIPELINE_METRICS.mockExecutions / PIPELINE_METRICS.messagesTotal * 100).toFixed(1) + '%'
-                    : '0%'
+                avgVerificationConfidence: Number(avgVerificationConfidence.toFixed(3)),
+                avgConfidence: Number(avgConfidenceLegacy.toFixed(3)), // alias for compatibility
+                avgVerificationIterations: Number(avgVerificationIterations.toFixed(2)),
+                fallbackRatePercent: Number((fallbackRate * 100).toFixed(1)),
+                fallbackRate: `${(fallbackRate * 100).toFixed(1)}%`
             }
         };
 
         if (includeProviders) {
-            metrics.providers = registry.getState();
+            // Provider state snapshot (flattened concise form)
+            const state = registry.getState();
+            response.providers = Object.values(state.providers || {}).map(p => ({
+                name: p.name,
+                healthy: p.healthy,
+                consecutiveFailures: p.consecutiveFailures,
+                failuresTotal: p.failuresTotal || 0,
+                cooldownRemainingMs: p.cooldownUntil && Date.now() < p.cooldownUntil ? (p.cooldownUntil - Date.now()) : 0
+            }));
         }
 
-        res.json(metrics);
+        res.json(response);
     } catch (e) {
         res.status(500).json({ error: 'metrics_failed', details: e.message });
     }
@@ -464,7 +490,8 @@ app.post('/agent/tetyana', async (req, res) => {
 
         // 1) Виконання: Тетяна працює ТІЛЬКИ через Goose (без провайдерних фолбеків)
         const sys = tetianaSystemInstruction({ enableTools: true });
-        const gooseExec = await callGooseAgent(message, sessionId, { enableTools: true, systemInstruction: sys });
+    // Replaced undefined callGooseAgent with runExecution (same pattern as generateAgentResponse for Tetyana)
+    const gooseExec = await runExecution(message, sessionId, { enableTools: true, systemInstruction: sys });
         if (!gooseExec) {
             return res.status(502).json({ error: 'Goose is unavailable for Tetiana' });
         }
@@ -746,25 +773,20 @@ async function processAgentCycle(userMessage, session) {
         return responses;
     }
 
-        try {
-            logMessage('debug', 'Returning actionable responses phases=' + responses.map(r => r.phase).join(','));
-        } catch {}
-        return responses;
+    // Planning intent handled below; other intents will fall through
     if (intent === 'planning' && shouldTriggerDiscussion(atlasResponse.content)) {
-    const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
-    const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
-    responses.push(grishaResponse);
-    session.history.push(grishaResponse);
-
-    try {
-        logMessage('debug', 'Returning non-actionable responses phases=' + responses.map(r => r.phase).join(','));
-    } catch {}
-    return responses;
+        const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
+        const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
+        responses.push(grishaResponse);
+        session.history.push(grishaResponse);
         if (detectDisagreement([atlasResponse, grishaResponse])) {
             dialogueManager.startDiscussion('Task execution approach', ['atlas', 'grisha', 'tetyana']);
         }
+        try { logMessage('debug', 'Returning planning responses phases=' + responses.map(r => r.phase).join(',')); } catch {}
+        return responses;
     }
 
+    try { logMessage('debug', 'Returning simple responses phases=' + responses.map(r => r.phase).join(',')); } catch {}
     return responses;
 }
 
@@ -940,33 +962,7 @@ app.post('/chat/continue', async (req, res) => {
 });
 
 // Expose pipeline metrics (ephemeral, resets on restart)
-app.get('/metrics/pipeline', (req, res) => {
-    try {
-        const avgConfidence = PIPELINE_METRICS.verdicts > 0 ? (PIPELINE_METRICS.verificationConfidenceSum / PIPELINE_METRICS.verdicts) : 0;
-        const avgVerificationIterations = PIPELINE_METRICS.verdicts > 0 ? (PIPELINE_METRICS.verificationIterations / PIPELINE_METRICS.verdicts) : 0;
-        // Provider circuit breaker snapshot
-        const state = registry.getState();
-        const providers = Object.values(state.providers).map(p => ({
-            name: p.name,
-            healthy: p.healthy,
-            consecutiveFailures: p.consecutiveFailures,
-            failuresTotal: p.failuresTotal || 0,
-            cooldownRemainingMs: p.cooldownUntil && Date.now() < p.cooldownUntil ? (p.cooldownUntil - Date.now()) : 0
-        }));
-        return res.json({
-            success: true,
-            metrics: {
-                ...PIPELINE_METRICS,
-                avgConfidence: Number(avgConfidence.toFixed(3)),
-                avgVerificationIterations: Number(avgVerificationIterations.toFixed(2)),
-                providers
-            },
-            timestamp: Date.now()
-        });
-    } catch (e) {
-        return res.status(500).json({ error: 'failed_to_collect_metrics', details: e.message });
-    }
-});
+// (Removed duplicate /metrics/pipeline handler and unified logic above)
 
 // Heuristics: detect actionable tasks that require an executor (Tetyana)
 function isActionableTask(text) {

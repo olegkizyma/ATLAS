@@ -22,6 +22,10 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_debug() { echo -e "${BLUE}[DEBUG]${NC} $1"; }
 log_restart() { echo -e "${CYAN}[RESTART]${NC} $1"; }
 
+# Repository root and unified logs directory (repo-local)
+REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
+LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
+
 # Graceful stop процесу
 graceful_stop() {
     local pid=$1
@@ -97,7 +101,7 @@ stop_all_services() {
     fi
     
     # Cleanup PID files
-    rm -f logs/atlas.pid logs/frontend.pid logs/orchestrator.pid 2>/dev/null || true
+    rm -f "$LOG_DIR/atlas.pid" "$LOG_DIR/frontend.pid" "$LOG_DIR/orchestrator.pid" 2>/dev/null || true
     
     log_restart "✅ All services stopped"
 }
@@ -106,8 +110,8 @@ stop_all_services() {
 start_services() {
     log_restart "🚀 Starting ATLAS services..."
     
-    # Створюємо директорію логів
-    mkdir -p logs
+    # Створюємо директорію логів (repo-local)
+    mkdir -p "$LOG_DIR"
     
     # Перевіряємо наявність Python віртуального середовища
     if [ ! -d "frontend_new/venv" ]; then
@@ -131,8 +135,8 @@ start_services() {
     log_info "🐍 Starting Flask frontend (port 5001)..."
     cd frontend_new
     source venv/bin/activate
-    nohup python app/atlas_server.py > ../logs/frontend.log 2>&1 &
-    echo $! > ../logs/frontend.pid
+    nohup python app/atlas_server.py > "$LOG_DIR/frontend.log" 2>&1 &
+    echo $! > "$LOG_DIR/frontend.pid"
     cd ..
     
     # Даємо час Flask запуститися
@@ -141,20 +145,31 @@ start_services() {
     # Запускаємо Node.js orchestrator
     log_info "🟢 Starting Node.js orchestrator (port 5101)..."
     cd frontend_new/orchestrator
-    nohup node server.js > ../../logs/orchestrator.log 2>&1 &
-    echo $! > ../../logs/orchestrator.pid
+    nohup node server.js > "$LOG_DIR/orchestrator.log" 2>&1 &
+    echo $! > "$LOG_DIR/orchestrator.pid"
     cd ../..
     
     # Даємо час orchestrator запуститися
     sleep 2
     
-    # Запускаємо recovery bridge
+    # Запускаємо recovery bridge (canonical path)
     log_info "🌉 Starting recovery bridge (port 5102)..."
-    cd frontend_new/config
-    nohup python recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
-    echo $! > ../../logs/recovery_bridge.pid
-    cd ../..
+    if [ -f "$REPO_ROOT/frontend_new/config/recovery_bridge.py" ]; then
+        RB_DIR="$REPO_ROOT/frontend_new/config"
+        log_info "Found recovery_bridge.py at $RB_DIR/recovery_bridge.py — launching"
+        (cd "$RB_DIR" && nohup python recovery_bridge.py > "$LOG_DIR/recovery_bridge.log" 2>&1 & echo $! > "$LOG_DIR/recovery_bridge.pid")
+    else
+        log_warn "recovery_bridge.py not found at frontend_new/config — skipping recovery bridge start"
+    fi
     
+    # Start Goose web + Ukrainian TTS (repo-local logs)
+    if [ -x "$REPO_ROOT/scripts/start_tts_and_goose.sh" ]; then
+        log_info "💻 Starting Goose web and Ukrainian TTS (logs: $LOG_DIR)"
+        LOG_DIR="$LOG_DIR" "$REPO_ROOT/scripts/start_tts_and_goose.sh" || log_warn "Failed to start Goose/TTS helper"
+    else
+        log_warn "start_tts_and_goose.sh missing or not executable"
+    fi
+
     log_restart "✅ All services started"
 }
 
@@ -194,7 +209,7 @@ check_services() {
         log_restart "🔧 Orchestrator API: http://localhost:5101"
         log_restart "🌉 Recovery Bridge: http://localhost:5102"
         echo ""
-        log_restart "📄 Logs available in: logs/"
+    log_restart "📄 Logs available in: $LOG_DIR"
     else
         log_error "❌ Some services failed to start. Check logs for details."
         return 1

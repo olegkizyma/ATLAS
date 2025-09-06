@@ -1,14 +1,28 @@
 """
-Intent Router: prompt-based intent classification and casual reply generation
-No keyword heuristics; uses LLM role/system prompts only.
+Intent Router (LEGACY / OPTIONAL)
+---------------------------------
+Цей модуль залишено для fallback-класифікації / генерації короткої відповіді
+на фронтенді (ендпоінт /api/intent у Flask), якщо основна smart/heuristic
+класифікація в оркестраторі недоступна або потрібно локально тестувати LLM.
+
+Поточний статус:
+ - Основний маршрут намірів виконується в orchestrator/server.js (classifyIntentSmart).
+ - Цей файл НЕ задіяний у Node-оркестраторі, імпортується тільки Flask-сервером
+     динамічно й без жорсткої залежності (try/except ImportError).
+ - Без налаштованих змінних середовища повертає intent='chat'.
+
+План подальшого видалення:
+ 1) Підтвердити відсутність звернень до /api/intent із фронтенд JS.
+ 2) Видалити endpoint у Flask.
+ 3) Видалити цей модуль.
 
 Environment variables (optional):
 - INTENT_LLM_BASE: OpenAI-compatible base URL (e.g., http://127.0.0.1:3010/v1)
 - INTENT_LLM_MODEL: Model name (e.g., gpt-4o-mini). Default: 'gpt-4o-mini'
 - INTENT_LLM_API_KEY: API key if required by the endpoint
 
-If not configured or request errors happen, we default to intent='chat' and a
-simple safe reply stub to avoid blocking the UX.
+If not configured or request errors happen, defaults to intent='chat' and a
+minimal safe reply stub (non-blocking UX).
 """
 from __future__ import annotations
 

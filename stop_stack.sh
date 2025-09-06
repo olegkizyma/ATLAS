@@ -245,6 +245,31 @@ show_post_shutdown_info() {
     else
         log_info "❌ Ukrainian TTS (port 3001) - Not running"
     fi
+
+    # Also attempt to stop Goose and Ukrainian TTS via helper script if present
+    if [ -x "scripts/stop_tts_and_goose.sh" ]; then
+        log_info "🔧 Running scripts/stop_tts_and_goose.sh to stop Goose/TTS"
+        scripts/stop_tts_and_goose.sh || log_warn "scripts/stop_tts_and_goose.sh returned non-zero"
+    fi
+
+    # Stop Recovery Bridge if canonical file exists
+    if [ -f "frontend_new/config/recovery_bridge.py" ]; then
+        if [ -f "logs/recovery_bridge.pid" ]; then
+            rbpid=$(cat logs/recovery_bridge.pid 2>/dev/null || true)
+            if [ -n "$rbpid" ] && kill -0 "$rbpid" 2>/dev/null; then
+                graceful_stop "$rbpid" "Recovery Bridge" 5 || true
+                rm -f logs/recovery_bridge.pid
+            else
+                log_debug "Recovery bridge pid file exists but process not running"
+                rm -f logs/recovery_bridge.pid
+            fi
+        else
+            # Try to stop by name as fallback
+            pkill -f "recovery_bridge.py" || true
+        fi
+    else
+        log_debug "frontend_new/config/recovery_bridge.py not found — skipping recovery bridge stop"
+    fi
 }
 
 # Головна функція

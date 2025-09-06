@@ -58,15 +58,24 @@ app = Flask(__name__,
 if CORS:
     CORS(app)
 
-# Initialize Goose client
-goose_client = GooseClient(base_url="http://localhost:3000", secret_key="test")
+# Load .env if present (for local development) without failing in prod
+try:  # optional dependency
+    from dotenv import load_dotenv  # type: ignore
+    load_dotenv()
+except Exception:
+    pass
+
+# Initialize Goose client (configurable)
+GOOSE_BASE_URL = os.environ.get('GOOSE_BASE_URL', 'http://localhost:3000')
+GOOSE_SECRET_KEY = os.environ.get('GOOSE_SECRET_KEY', 'test')
+goose_client = GooseClient(base_url=GOOSE_BASE_URL, secret_key=GOOSE_SECRET_KEY)
 
 # Configuration
 FRONTEND_PORT = int(os.environ.get('FRONTEND_PORT', 5001))
-ORCHESTRATOR_URL = os.environ.get('ORCHESTRATOR_URL', 'http://localhost:5101')
+ORCHESTRATOR_URL = os.environ.get('ORCHESTRATOR_URL', os.environ.get('ATLAS_ORCHESTRATOR_URL', 'http://localhost:5101'))
 # Default TTS points to Ukrainian TTS server on port 3001 (can be overridden via env)
-TTS_SERVER_URL = os.environ.get('TTS_SERVER_URL', 'http://127.0.0.1:3001')
-# Optional: comma-separated list of TTS endpoints for round-robin failover, e.g. "http://127.0.0.1:3001,http://127.0.0.1:3002"
+TTS_SERVER_URL = os.environ.get('TTS_SERVER_URL', os.environ.get('ATLAS_TTS_URL', 'http://127.0.0.1:3001'))
+# Optional: comma-separated list of TTS endpoints for round-robin failover
 TTS_SERVER_URLS = os.environ.get('TTS_SERVER_URLS', '')
 
 # Agent voice configuration
