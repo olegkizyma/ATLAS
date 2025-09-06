@@ -32,6 +32,7 @@ from time import monotonic
 import re
 import time
 import math
+import uuid
 
 try:
     # Optional: robust retry adapter if available
@@ -41,7 +42,31 @@ except Exception:
     HTTPAdapter = None
     Retry = None
 
-# Setup logging
+# Setup logging with unified timezone format
+def setup_unified_logging():
+    class UTCOffsetFormatter(logging.Formatter):
+        def formatTime(self, record, datefmt=None):
+            from datetime import datetime, timezone
+            import time
+            dt = datetime.fromtimestamp(record.created, tz=timezone.utc)
+            local_offset = time.timezone if time.daylight == 0 else time.altzone
+            offset_hours = -local_offset // 3600
+            offset_minutes = (-local_offset % 3600) // 60
+            offset_sign = '+' if offset_hours >= 0 else '-'
+            offset_str = f"{offset_sign}{abs(offset_hours):02d}:{abs(offset_minutes):02d}"
+            return f"{dt.strftime('%Y-%m-%d %H:%M:%S,%f')[:-3]}{offset_str}"
+        
+        def format(self, record):
+            record.asctime = self.formatTime(record)
+            return super().format(record)
+    
+    # Apply unified formatter to all handlers
+    formatter = UTCOffsetFormatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s')
+    for handler in logging.root.handlers:
+        handler.setFormatter(formatter)
+
+setup_unified_logging()
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
@@ -533,6 +558,7 @@ def chat():
         message = data.get('message', '')
         session_id = data.get('sessionId', 'default')
         user_id = data.get('userId', 'user')
+        ack_mode = data.get('ackMode', False) or request.headers.get('X-Atlas-Ack') == 'immediate'
 
         if not message.strip():
             return jsonify({'error': 'Message cannot be empty'}), 400
@@ -540,14 +566,40 @@ def chat():
         if not requests:
             return jsonify({'error': 'Requests module unavailable'}), 500
 
+        # ACK mode: return immediate acceptance, then process async
+        if ack_mode:
+            client_message_id = data.get('clientMessageId') or f"py_ack_{uuid.uuid4().hex}"
+            
+            # Try immediate ACK from orchestrator
+            try:
+                ack_response = requests.post(
+                    f'{ORCHESTRATOR_URL}/chat/stream',
+                    json={'message': message, 'sessionId': session_id, 'userId': user_id, 'clientMessageId': client_message_id},
+                    headers={'X-Atlas-Ack': 'immediate'},
+                    timeout=5
+                )
+                if ack_response.status_code == 200:
+                    ack_data = ack_response.json()
+                    if ack_data.get('accepted'):
+                        return jsonify({
+                            'success': True,
+                            'accepted': True,
+                            'clientMessageId': client_message_id,
+                            'session': {'id': session_id},
+                            'message': 'Processing started. Use /api/chat/status or SSE to monitor progress.',
+                            'ackMode': True
+                        })
+            except Exception as e:
+                logger.warning(f"ACK mode failed, falling back to sync: {e}")
+
         # Use a longer timeout and a small retry loop for local orchestrator which may be busy
         post_url = f'{ORCHESTRATOR_URL}/chat/stream'
         last_exc = None
         response = None
         # Dynamic timeout logic: compute needed time based on message complexity instead of fixed large timeout
         def compute_orchestrator_timeout(msg: str) -> int:
-            base_s = int(os.environ.get('ORCH_POST_BASE_TIMEOUT', '12'))  # smaller base
-            max_s = int(os.environ.get('ORCH_POST_MAX_TIMEOUT', os.environ.get('ORCH_POST_TIMEOUT', '45')))
+            base_s = int(os.environ.get('ORCH_POST_BASE_TIMEOUT', '15'))  # increased base for better reliability
+            max_s = int(os.environ.get('ORCH_POST_MAX_TIMEOUT', os.environ.get('ORCH_POST_TIMEOUT', '60')))
             per_char_ms = float(os.environ.get('ORCH_POST_PER_CHAR_MS', '6'))  # ms per char heuristic
             # Complexity boosts
             length = len(msg)
@@ -561,21 +613,20 @@ def chat():
 
         orch_timeout = compute_orchestrator_timeout(message)
         max_attempts = int(os.environ.get('ORCH_POST_RETRIES', '2'))
+        client_message_id = data.get('clientMessageId') or f"py_{uuid.uuid4().hex}"
         for attempt in range(1, max_attempts + 1):
             try:
                 response = requests.post(
                     post_url,
-                    json={'message': message, 'sessionId': session_id, 'userId': user_id},
+                    json={'message': message, 'sessionId': session_id, 'userId': user_id, 'clientMessageId': client_message_id},
                     timeout=orch_timeout
                 )
                 break
             except Exception as e:
                 last_exc = e
                 logger.warning(f"Orchestrator POST attempt {attempt} failed after timeout={orch_timeout}s: {e}")
-                # exponential backoff (capped) unless last attempt
                 if attempt < max_attempts:
                     time.sleep(min(2 ** attempt, 6))
-                    # Recompute timeout adaptively (e.g. second attempt gets +25% but within max cap)
                     orch_timeout = min(int(orch_timeout * 1.25), int(os.environ.get('ORCH_POST_MAX_TIMEOUT', '60')))
 
         if response is None:
@@ -593,6 +644,32 @@ def chat():
         else:
             logger.error(f"Chat processing error: {e}")
             return jsonify({'error': 'Internal error'}), 500
+
+@app.route('/api/chat/status/<session_id>')
+def chat_status(session_id):
+    """Get processing status for ACK mode requests"""
+    try:
+        if not requests:
+            return jsonify({'error': 'Requests module unavailable'}), 500
+            
+        # Forward to orchestrator for session status
+        response = requests.get(f'{ORCHESTRATOR_URL}/session/{session_id}/status', timeout=10)
+        if response.status_code == 200:
+            return jsonify(response.json())
+        else:
+            return jsonify({
+                'sessionId': session_id,
+                'status': 'unknown',
+                'message': 'Could not retrieve status from orchestrator'
+            }), response.status_code
+            
+    except Exception as e:
+        logger.error(f"Chat status error: {e}")
+        return jsonify({
+            'sessionId': session_id, 
+            'status': 'error',
+            'error': str(e)
+        }), 500
 
 @app.route('/api/voice/synthesize', methods=['POST'])
 def synthesize_voice():

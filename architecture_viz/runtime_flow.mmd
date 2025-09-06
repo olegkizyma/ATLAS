@@ -1,4 +1,4 @@
-%% Detailed request lifecycle sequence
+%% Detailed request lifecycle sequence with timing, ACK mode, and duplicate handling
 sequenceDiagram
     autonumber
     participant U as User/UI
@@ -8,33 +8,64 @@ sequenceDiagram
     participant G as Grisha Validator
     participant T as Tetyana Executor
     participant DB as SQLite Memory
+    participant C as Duplicate Cache
 
-    U->>F: chat message
-    F->>O: REST /chat
-    O->>DB: fetch ranked memory (Atlas & Grisha)
-    O->>A: prompt + memory context
-    A-->>O: plan draft
-    O->>G: plan validation
-    G-->>O: precheck verdict (ok/clarify)
-    alt needs probe
-        O->>T: probe request
-        T-->>O: probe artifacts
-        O->>G: probe review
-        G-->>O: probe assessment
-        O->>A: feasibility synthesis
-        A-->>O: ADVANCE / CLARIFY decision
+    note over U,DB: Timing starts: cycleStart = Date.now()
+    
+    U->>F: chat message + clientMessageId
+    F->>C: check duplicate cache
+    alt duplicate found
+        C-->>F: duplicate=true, suppressed metric++
+        F-->>U: cached response, no processing
+    else new request
+        C->>C: cache clientMessageId
+        alt ACK mode requested
+            F->>O: immediate ACK check (header X-Atlas-Ack)
+            O-->>F: accepted=true
+            F-->>U: processing accepted, poll for status
+            note over U: User can poll /api/chat/status/:sessionId
+        end
+        
+        F->>O: REST /chat + clientMessageId + timing
+        note over O: agentStartTime = Date.now()
+        O->>DB: fetch ranked memory (Atlas & Grisha)
+        O->>A: prompt + memory context + timing start
+        note over A: [TIMING] agent=atlas route=... ms=...
+        A-->>O: plan draft + timing info
+        O->>G: plan validation + timing start
+        note over G: [TIMING] agent=grisha route=... ms=...
+        G-->>O: precheck verdict (ok/clarify) + timing
+        
+        alt needs probe
+            note over O: PROBE cycle start
+            O->>T: probe request + timing start
+            note over T: [TIMING] agent=tetyana phase=execution ms=...
+            T-->>O: probe artifacts + timing
+            O->>G: probe review + timing start
+            note over G: [TIMING] agent=grisha phase=probe_review ms=...
+            G-->>O: probe assessment + timing
+            O->>A: feasibility synthesis + timing start
+            note over A: [TIMING] agent=atlas phase=feasibility ms=...
+            A-->>O: ADVANCE / CLARIFY decision + timing
+            note over O: PROBE cycle complete, latency recorded
+        end
+        
+        alt proceed execution
+            O->>T: execution instructions + timing start
+            note over T: [TIMING] agent=tetyana phase=execution ms=... routes_tried=...
+            T-->>O: execution result + timing + evidence score
+        else clarify
+            O-->>F: clarification request + timing
+            F-->>U: ask user + timing.totalMs
+        end
+        
+        O->>G: final validation + timing start
+        note over G: [TIMING] agent=grisha phase=verdict ms=...
+        G-->>O: verdict + followup + confidence + timing
+        O->>DB: rememberSafe (key facts)
+        note over DB: prune(): capacity & TTL (DEFAULT_TTL_MS) after each write
+        note over O: Cycle finished: durationMs = Date.now() - cycleStart
+        O-->>F: response payload + timing.totalMs
+        F-->>U: UI update + stream + timing info
+        note over O,DB: memory_context_tokens & injections & duplicates_suppressed metrics updated
     end
-    alt proceed execution
-        O->>T: execution instructions
-        T-->>O: execution result
-    else clarify
-        O-->>F: clarification request
-        F-->>U: ask user
-    end
-    O->>G: final validation
-    G-->>O: verdict + followup
-    O->>DB: rememberSafe (key facts)
-    Note over DB: prune(): capacity & TTL (DEFAULT_TTL_MS) after each write
-    O-->>F: response payload
-    F-->>U: UI update + stream
-    Note over O,DB: memory_context_tokens & injections metrics updated

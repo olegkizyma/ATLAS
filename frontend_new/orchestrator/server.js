@@ -31,6 +31,7 @@ const PIPELINE_METRICS = {
     clarifications: 0,           // clarification escalations (Atlas asking for Stage 0 data)
     planningPromotions: 0,       // planning -> actionable promotions
     planningStallClarifications: 0, // clarifications due to repeated planning loop
+    duplicatesSuppressed: 0,     // clientMessageId based duplicate user messages ignored
     // Probe metrics
     probesStarted: 0,            // initiated internal probe cycles
     probesAdvanced: 0,           // probes that led to ADVANCE (self-sufficient)
@@ -199,11 +200,27 @@ let messageCounter = 0;
 const generateMessageId = () => `msg_${Date.now()}_${++messageCounter}`;
 
 const logMessage = (level, message) => {
-    console.log(`[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`);
+    const now = new Date();
+    const utcTime = now.toISOString();
+    const localOffset = now.getTimezoneOffset();
+    const offsetHours = Math.floor(Math.abs(localOffset) / 60);
+    const offsetMinutes = Math.abs(localOffset) % 60;
+    const offsetSign = localOffset <= 0 ? '+' : '-';
+    const offsetStr = `${offsetSign}${offsetHours.toString().padStart(2, '0')}:${offsetMinutes.toString().padStart(2, '0')}`;
+    
+    console.log(`[${utcTime}${offsetStr}] [${level.toUpperCase()}] ${message}`);
 };
 
 function logProbe(message) {
-    console.log(`[${new Date().toISOString()}] [PROBE] ${message}`);
+    const now = new Date();
+    const utcTime = now.toISOString();
+    const localOffset = now.getTimezoneOffset();
+    const offsetHours = Math.floor(Math.abs(localOffset) / 60);
+    const offsetMinutes = Math.abs(localOffset) % 60;
+    const offsetSign = localOffset <= 0 ? '+' : '-';
+    const offsetStr = `${offsetSign}${offsetHours.toString().padStart(2, '0')}:${offsetMinutes.toString().padStart(2, '0')}`;
+    
+    console.log(`[${utcTime}${offsetStr}] [PROBE] ${message}`);
 }
 
 // Shared memory propagation: ensure Atlas & Grisha both remember relevant dialogue involving Tetiana or mutual addressing
@@ -269,6 +286,7 @@ function buildPrometheusMetrics() {
     gauge('atlas_memory_facts_pruned_total','Facts pruned from memory', m.memoryFactsPruned);
     gauge('atlas_memory_context_injections_total','Memory context blocks injected into prompts', m.memoryContextInjections||0);
     gauge('atlas_memory_context_tokens_total','Estimated tokens injected from memory', m.memoryContextTokens||0);
+    gauge('atlas_duplicates_suppressed_total','Duplicate user messages suppressed', m.duplicatesSuppressed||0);
     // circuit breaker
     gauge('atlas_cb_failures_total','Circuit breaker total failures', m.circuitBreaker.failuresTotal);
     gauge('atlas_cb_consecutive_failures','Circuit breaker consecutive failures', m.circuitBreaker.consecutiveFailures);
@@ -616,6 +634,60 @@ async function getIntentCached(text, atlasContext) {
     return { intent: result.intent, reply: result.reply, cached: false };
 }
 
+// Session status endpoint for ACK mode
+app.get('/session/:sessionId/status', (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const session = sessions.get(sessionId);
+        
+        if (!session) {
+            return res.json({
+                sessionId,
+                status: 'not_found',
+                message: 'Session not found'
+            });
+        }
+        
+        let status = 'idle';
+        let message = 'Session is idle';
+        
+        if (session.awaitingClarification) {
+            status = 'awaiting_clarification';
+            message = 'Waiting for user clarification';
+        } else if (session.pipeline) {
+            status = 'processing';
+            message = `Pipeline active: ${session.pipeline.type} stage ${session.pipeline.stage || 'unknown'}`;
+        } else if (session.ttsGate?.pendingPhase) {
+            status = 'tts_pending';
+            message = `Waiting for TTS completion: ${session.ttsGate.pendingPhase}`;
+        } else if (session.nextAction) {
+            status = 'next_action_pending';
+            message = `Next action: ${session.nextAction}`;
+        }
+        
+        res.json({
+            sessionId,
+            status,
+            message,
+            lastInteraction: session.lastInteraction,
+            currentAgent: session.currentAgent,
+            historyLength: session.history?.length || 0,
+            metadata: {
+                intent: session.intent,
+                awaitingClarification: !!session.awaitingClarification,
+                hasPipeline: !!session.pipeline,
+                hasNextAction: !!session.nextAction
+            }
+        });
+    } catch (error) {
+        res.status(500).json({
+            sessionId: req.params.sessionId,
+            status: 'error',
+            message: error.message
+        });
+    }
+});
+
 // Routes
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
@@ -853,6 +925,7 @@ app.post('/agent/tetyana', async (req, res) => {
 });
 
 app.post('/chat/stream', async (req, res) => {
+    const startedAt = Date.now();
     const { message, sessionId, userId, clientMessageId } = req.body;
     
     if (!message) {
@@ -899,8 +972,9 @@ app.post('/chat/stream', async (req, res) => {
     if (clientMessageId) {
         const key = `${sid}::${clientMessageId}`;
         if (cache.map.has(key)) {
-            // Duplicate → миттєва відповідь без повторної обробки
-            return res.json({ success: true, duplicate: true, response: [], session: { id: sid, currentAgent: 'atlas' } });
+            PIPELINE_METRICS.duplicatesSuppressed++;
+            logMessage('info', `Duplicate clientMessageId suppressed key=${key}`);
+            return res.json({ success: true, duplicate: true, response: [], session: { id: sid, currentAgent: 'atlas' }, metrics: { suppressed: true } });
         }
         cache.map.set(key, { ts: NOW, sessionId: sid });
         touch(key);
@@ -987,6 +1061,7 @@ app.post('/chat/stream', async (req, res) => {
     // Автозакриття тільки якщо немає пайплайну/наступної дії і це НЕ smalltalk
     const ended = !session.pipeline && !session.nextAction && session.intent !== 'smalltalk';
 
+        const durationMs = Date.now() - startedAt;
         res.json({
             success: true,
             response: response,
@@ -998,14 +1073,17 @@ app.post('/chat/stream', async (req, res) => {
                 awaitingClarification: !!session.awaitingClarification,
                 clarificationJustResolved: !!session.clarificationResolvedAt && (Date.now() - session.clarificationResolvedAt) < 2000
             },
-            endOfConversation: ended === true
+            endOfConversation: ended === true,
+            timing: { totalMs: durationMs }
         });
 
     } catch (error) {
         logMessage('error', `Chat processing failed: ${error.message}`);
+        const durationMs = Date.now() - startedAt;
         res.status(500).json({
             error: 'Processing failed',
-            details: error.message
+            details: error.message,
+            timing: { totalMs: durationMs }
         });
     }
 });
@@ -1061,6 +1139,7 @@ app.post('/chat', async (req, res) => {
 
 // Agent processing cycle
 async function processAgentCycle(userMessage, session) {
+    const cycleStart = Date.now();
     const responses = [];
     PIPELINE_METRICS.messagesTotal++;
     
@@ -1284,7 +1363,8 @@ async function processAgentCycle(userMessage, session) {
             // staged pipeline (will be continued later)
             PIPELINE_METRICS.stagedPipelines++;
         }
-        return responses;
+    logMessage('info', `Cycle finished intent=${intent} durationMs=${Date.now()-cycleStart}`);
+    return responses;
     }
 
     // Planning intent handled below; other intents will fall through
@@ -1328,6 +1408,7 @@ async function processAgentCycle(userMessage, session) {
     }
 
     try { logMessage('debug', 'Returning simple responses phases=' + responses.map(r => r.phase).join(',')); } catch {}
+    logMessage('info', `Cycle finished intent=${intent} durationMs=${Date.now()-cycleStart}`);
     return responses;
 }
 
@@ -1653,6 +1734,7 @@ function isActionableTask(_text) { return false; }
 
 // Real agent integration
 async function generateAgentResponse(agentName, inputMessage, session, options = {}) {
+    const agentStartTime = Date.now();
     const agent = AGENTS[agentName];
     const messageId = generateMessageId();
     
@@ -1666,7 +1748,8 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             content: fallbackContent,
             provider: 'circuit_breaker',
             model: 'fallback',
-            timestamp: new Date().toISOString()
+            timestamp: new Date().toISOString(),
+            timing: { agentMs: Date.now() - agentStartTime, route: 'circuit_breaker' }
         };
     }
     
@@ -1680,10 +1763,13 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     
     if (agentName === 'tetyana') {
         // Execution via Goose only (no provider fallbacks for execution)
+        const execStartTime = Date.now();
         const execNotes = await runExecution(prompt, session.id, {
             enableTools: options.enableTools === true,
             systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true })
         });
+        const execDuration = Date.now() - execStartTime;
+        logMessage('info', `[TIMING] agent=tetyana phase=execution ms=${execDuration} success=${!!execNotes}`);
 
         if (!execNotes) {
             // Execution failed -> return blocked status without switching providers
@@ -1694,6 +1780,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             recordCircuitBreakerFailure();
         } else {
             // Short structured report via openai-compat using configured 58-model list
+            const reportStartTime = Date.now();
             const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
             const reportPrompt = [
                 'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
@@ -1701,22 +1788,30 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             ].join('\n');
             let reportText = null;
             for (const route of reportRoutes) {
+                const routeStartTime = Date.now();
                 try {
                     const started = Date.now();
                     const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, reportPrompt);
+                    const routeDuration = Date.now() - routeStartTime;
                     if (txt) {
                         reportText = txt;
                         registry.reportSuccess(route, Date.now() - started);
                         provider = 'openai_compat';
                         model = route.model;
                         executionSuccessful = true;
+                        logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=true`);
                         break;
                     }
                     registry.reportFailure(route);
-                } catch (_) {
+                    logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=false`);
+                } catch (err) {
+                    const routeDuration = Date.now() - routeStartTime;
                     registry.reportFailure(route);
+                    logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} error=${err.message}`);
                 }
             }
+            const reportDuration = Date.now() - reportStartTime;
+            logMessage('info', `[TIMING] agent=tetyana phase=report_total ms=${reportDuration} routes_tried=${reportRoutes.length}`);
             const base = reportText || execNotes;
             content = enforceTetianaStructure(base);
             if (!provider) { provider = 'goose'; model = 'github_copilot'; }
@@ -1730,33 +1825,42 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     // Отримати маршрути з урахуванням наміру (intent-aware пріоритет у ModelRegistry)
     const routes = registry.getRoutes(agentName, { intentHint: (options?.intentHint) || session.intent });
         for (const route of routes) {
+            const routeStartTime = Date.now();
             const started = Date.now();
             try {
                 if (route.provider === 'goose') {
                     const gooseText = await runExecution(prompt, session.id, { enableTools: false, systemInstruction: sysInstr });
+                    const routeDuration = Date.now() - routeStartTime;
                     if (gooseText) {
                         content = gooseText;
                         provider = 'goose';
                         model = route.model || 'github_copilot';
                         registry.reportSuccess(route, Date.now() - started);
                         executionSuccessful = true;
+                        logMessage('info', `[TIMING] agent=${agentName} route=goose model=${model} ms=${routeDuration} success=true`);
                         break;
                     }
                     registry.reportFailure(route);
+                    logMessage('info', `[TIMING] agent=${agentName} route=goose model=${model} ms=${routeDuration} success=false`);
                 } else if (route.provider === 'openai_compat') {
                     const text = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, prompt);
+                    const routeDuration = Date.now() - routeStartTime;
                     if (text) {
                         content = text;
                         provider = 'openai_compat';
                         model = route.model;
                         registry.reportSuccess(route, Date.now() - started);
                         executionSuccessful = true;
+                        logMessage('info', `[TIMING] agent=${agentName} route=openai_compat model=${model} ms=${routeDuration} success=true`);
                         break;
                     }
                     registry.reportFailure(route);
+                    logMessage('info', `[TIMING] agent=${agentName} route=openai_compat model=${model} ms=${routeDuration} success=false`);
                 }
             } catch (err) {
+                const routeDuration = Date.now() - routeStartTime;
                 registry.reportFailure(route);
+                logMessage('info', `[TIMING] agent=${agentName} route=${route.provider} model=${route.model} ms=${routeDuration} error=${err.message}`);
                 // keep trying next route
             }
         }
@@ -1765,6 +1869,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             // Deterministic minimal fallback (single structured notice)
             PIPELINE_METRICS.mockExecutions++;
             recordCircuitBreakerFailure();
+            logMessage('info', `[TIMING] agent=${agentName} fallback=true routes_tried=${routes.length} ms=${Date.now() - agentStartTime}`);
             if (agentName === 'atlas') {
                 content = 'План тимчасово недоступний через провайдерів. Мінімальний fallback: сформулюйте кроки: 1) Аналіз 2) Виконання 3) Перевірка.';
             } else if (agentName === 'grisha') {
@@ -1783,6 +1888,9 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         recordCircuitBreakerSuccess();
     }
     
+    const totalAgentTime = Date.now() - agentStartTime;
+    logMessage('info', `[TIMING] agent=${agentName} total_ms=${totalAgentTime} provider=${provider} model=${model} success=${executionSuccessful}`);
+    
     return {
         role: 'assistant',
         content: `${agent.signature} ${content.replace(/^\[ТЕТЯНА\]\s*/i, '')}`,
@@ -1792,7 +1900,8 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         voice: agent.voice,
         color: agent.color,
         provider,
-        model
+        model,
+        timing: { agentMs: totalAgentTime, provider, model }
     };
 }
 

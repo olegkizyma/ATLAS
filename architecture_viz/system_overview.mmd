@@ -1,17 +1,36 @@
-%% High-level multi-agent system overview
+%% High-level multi-agent system overview with timing, ACK mode, and duplicate handling
 flowchart TD
     subgraph Client[User / UI]
         UI[Web UI / Chat]
     end
 
-    UI --> API[Flask API 5001]
-    API --> Orchestrator[Node Orchestrator 5101]
+    UI -->|sync or ACK mode| API[Flask API 5001]
+    API -->|clientMessageId + timing| Orchestrator[Node Orchestrator 5101]
 
     subgraph Agents[Multi-Agent Core]
-        Atlas[Atlas\nPlanner]
-        Grisha[Grisha\nValidator]
-        Tetyana[Tetyana\nExecutor]
+        Atlas[Atlas\nPlanner\n+timing]
+        Grisha[Grisha\nValidator\n+timing]
+        Tetyana[Tetyana\nExecutor\n+timing]
     end
+
+    subgraph ACKFlow[ACK Mode Flow]
+        ACKReq[ACK Request]
+        ACKResp[Immediate Accept]
+        StatusPoll[Status Polling]
+    end
+
+    UI -->|ackMode=true| ACKReq
+    ACKReq --> ACKResp --> UI
+    UI -->|/api/chat/status| StatusPoll
+
+    subgraph DuplicateSuppress[Duplicate Suppression]
+        Cache[(clientMessageId Cache)]
+        Suppress[Suppress Duplicate]
+        Metric[duplicates_suppressed_total]
+    end
+
+    Orchestrator --> Cache
+    Cache -->|duplicate found| Suppress --> Metric
 
     Orchestrator --> Atlas
     Atlas --> Grisha
@@ -21,9 +40,9 @@ flowchart TD
     Orchestrator --> API --> UI
 
     subgraph ProbeCycle[Probe Cycle]
-        TP[Tetyana Probe]
-        GP[Grisha Probe Review]
-        AF[Atlas Feasibility]
+        TP[Tetyana Probe\n+timing]
+        GP[Grisha Probe Review\n+timing]
+        AF[Atlas Feasibility\n+timing]
     end
 
     Atlas -. initiate probe .-> TP
@@ -48,6 +67,10 @@ flowchart TD
         P1[pipeline_phase_*]
         P2[probe_*]
         P3[memory_context_tokens]
+        P4[agent_timing_ms]
+        P5[duplicates_suppressed_total]
+        P6[request_duration_ms]
+    end
         P4[memory_context_injections]
         P5[memory_facts_written]
         P6[memory_facts_pruned]
