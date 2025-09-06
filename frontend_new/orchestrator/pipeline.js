@@ -6,7 +6,10 @@ export const PHASE = {
   GRISHA_PRECHECK: 'grisha_precheck',
   EXECUTION: 'execution',
   GRISHA_VERDICT: 'grisha_verdict',
-  GRISHA_FOLLOWUP: 'grisha_followup'
+  GRISHA_FOLLOWUP: 'grisha_followup',
+  TETYANA_PROBE: 'tetyana_probe',
+  GRISHA_PROBE_REVIEW: 'grisha_probe_review',
+  ATLAS_FEASIBILITY: 'atlas_feasibility'
 };
 
 export function initSession(sessionId, sessions) {
@@ -33,6 +36,23 @@ export function startActionablePipeline(session, userMessage, atlasPlan, grishaP
     iter: 0
   };
   session.nextAction = 'tetyana_execute';
+}
+
+export function startProbePipeline(session, userMessage, atlasDraft, grishaShortage) {
+  session.probe = {
+    stage: 'pending_probe',
+    userMessage,
+    atlasDraft,
+    shortage: grishaShortage,
+    attempts: 0,
+    maxAttempts: 2
+  };
+  session.nextAction = 'tetyana_probe';
+}
+
+export function clearProbe(session) {
+  session.probe = null;
+  if (session.nextAction === 'tetyana_probe' || session.nextAction === 'probe_review') session.nextAction = null;
 }
 
 export function markNeedsMore(session, need, lastReport) {

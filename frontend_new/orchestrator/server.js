@@ -11,7 +11,8 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
 import ModelRegistry from './model_registry.js';
-import { PHASE, initSession, startActionablePipeline, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
+import { PHASE, initSession, startActionablePipeline, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
+import { initMemory, remember, recall, summarizeRecent, summarizeRanked } from './agent_memory.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
 import { IntentCache } from './intent_cache.js';
 
@@ -30,6 +31,17 @@ const PIPELINE_METRICS = {
     clarifications: 0,           // clarification escalations (Atlas asking for Stage 0 data)
     planningPromotions: 0,       // planning -> actionable promotions
     planningStallClarifications: 0, // clarifications due to repeated planning loop
+    // Probe metrics
+    probesStarted: 0,            // initiated internal probe cycles
+    probesAdvanced: 0,           // probes that led to ADVANCE (self-sufficient)
+    probesClarified: 0,          // probes that still required user clarification
+    probeAttempts: 0,            // total probe attempts (including retries)
+    probeLatencyMs: 0,           // cumulative latency for completed probe cycles
+    probeCycles: 0,              // number of probe cycles measured (for avg)
+    memoryFactsWritten: 0,
+    memoryFactsPruned: 0,
+    memoryContextInjections: 0,
+    memoryContextTokens: 0,
     circuitBreaker: {            // circuit breaker state and metrics
         failuresTotal: 0,        // total failure count since start
         cooldownRemaining: 0,    // milliseconds until circuit closes
@@ -38,8 +50,11 @@ const PIPELINE_METRICS = {
         lastFailureTime: 0       // timestamp of last failure
     }
 };
+// Expose globally for memory module side-effects
+globalThis.PIPELINE_METRICS = PIPELINE_METRICS;
 
 const app = express();
+initMemory();
 const PORT = process.env.ORCH_PORT || 5101;
 const GRISHA_CONFIDENCE_THRESHOLD = Math.max(0, Math.min(1, parseFloat(process.env.GRISHA_CONFIDENCE_THRESHOLD || '0.8')));
 const GRISHA_MAX_VERIFY_ITER = Math.max(1, parseInt(process.env.GRISHA_MAX_VERIFY_ITER || '3', 10));
@@ -123,6 +138,33 @@ const AGENTS = {
     }
 };
 
+// Probe prompts configuration (centralized for fine-tuning)
+const PROBE_PROMPTS = {
+    tetyanaProbe: ({ userMessage, atlasPlan, grishaShortage }) => [
+        'Ти — Тетяна. Виконай МІНІМАЛЬНИЙ пробний крок щоб здобути бракуючий артефакт.',
+        'Лише 1-2 дії. Не запускай повний план. Не пояснюй зайвого.',
+        'Формат строго:\nКРОКИ:\n1) ...\nАРТЕФАКТИ: (коротко)',
+        `Завдання користувача: ${userMessage}`,
+        `Поточний план Atlas: ${atlasPlan}`,
+        `Бракує (з Гриші): ${grishaShortage}`
+    ].join('\n'),
+    grishaReview: (probeContent) => [
+        'Ти — Гриша. Оціни пробу. Якщо вистачає даних для продовження без користувача — начни з FEASIBLE, інакше INFEASIBLE.',
+        'Після ключового слова дай коротко що отримано / чого бракує.',
+        `Пробний звіт: ${probeContent}`
+    ].join('\n'),
+    atlasFeasibility: (probeContent, reviewContent) => [
+        'Ти — Atlas. На основі проби і ревʼю напиши: ADVANCE або CLARIFY (первое слово).',
+        'Після слова — дуже короткий коментар.',
+        `Проба: ${probeContent}`,
+        `Ревʼю: ${reviewContent}`
+    ].join('\n'),
+    atlasClarificationFallback: () => [
+        'Ти — Atlas. Сформуй короткий структурований ЕТАП 0: які дані потрібні щоб продовжити.',
+        'Список пунктів, без води. Заверши: «Надайте ці дані однією відповіддю — після цього я згенерую план виконання.»'
+    ].join('\n')
+};
+
 // Session state management
 const sessions = new Map();
 let messageCounter = 0;
@@ -133,6 +175,89 @@ const generateMessageId = () => `msg_${Date.now()}_${++messageCounter}`;
 const logMessage = (level, message) => {
     console.log(`[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`);
 };
+
+function logProbe(message) {
+    console.log(`[${new Date().toISOString()}] [PROBE] ${message}`);
+}
+
+// Shared memory propagation: ensure Atlas & Grisha both remember relevant dialogue involving Tetiana or mutual addressing
+function recordSharedMemory(agent, content, phase) {
+    try {
+        if (!content) return;
+        const ts = Date.now();
+        const snippet = String(content).slice(0, 360);
+        // When Tetiana speaks -> both Atlas & Grisha remember her output (as execution artifact)
+        if (agent === 'tetyana') {
+            remember('atlas', `tetyana_exec_${ts}`, snippet);
+            remember('grisha', `tetyana_exec_${ts}`, snippet);
+            return;
+        }
+        // When Atlas produces plan that will guide Grisha (atlas_plan phase)
+        if (agent === 'atlas' && phase === PHASE.ATLAS_PLAN) {
+            // Already stored for atlas earlier; add mirror for grisha
+            remember('grisha', `atlas_plan_${ts}`, snippet);
+        }
+        // When Grisha precheck or follow-up instructs Tetiana -> mirror for atlas
+        if (agent === 'grisha' && (phase === PHASE.GRISHA_PRECHECK || phase === PHASE.GRISHA_FOLLOWUP)) {
+            remember('atlas', `grisha_req_${ts}`, snippet);
+        }
+        // Probe specific: share probe review & feasibility across both
+        if (phase === PHASE.GRISHA_PROBE_REVIEW) {
+            rememberSafe('atlas', `probe_review_${ts}`, snippet);
+        }
+        if (phase === PHASE.ATLAS_FEASIBILITY) {
+            remember('grisha', `feasibility_${ts}`, snippet);
+        }
+    } catch (e) {
+        // silent
+    }
+}
+
+// ---------------- Prometheus Metrics Export ----------------
+function buildPrometheusMetrics() {
+    const m = PIPELINE_METRICS;
+    const lines = [];
+    const gauge = (name, help, value) => {
+        lines.push(`# HELP ${name} ${help}`);
+        lines.push(`# TYPE ${name} gauge`);
+        lines.push(`${name} ${value}`);
+    };
+    const avgVerificationConfidence = m.verificationIterations ? (m.verificationConfidenceSum / m.verificationIterations) : 0;
+    const avgProbeLatency = m.probeCycles ? (m.probeLatencyMs / m.probeCycles) : 0;
+    gauge('atlas_messages_total','Total user messages processed', m.messagesTotal);
+    gauge('atlas_actionable_sessions','Sessions classified actionable', m.actionableSessions);
+    gauge('atlas_immediate_executions','Immediate executions performed', m.immediateExecutions);
+    gauge('atlas_staged_pipelines','Pipelines staged', m.stagedPipelines);
+    gauge('atlas_followups_total','Follow-up messages emitted', m.followups);
+    gauge('atlas_verdicts_total','Verdicts emitted', m.verdicts);
+    gauge('atlas_verification_iterations_total','Total verification iterations', m.verificationIterations);
+    gauge('atlas_avg_verification_confidence','Average verification confidence', avgVerificationConfidence.toFixed(4));
+    gauge('atlas_clarifications_total','Clarification escalations', m.clarifications);
+    gauge('atlas_planning_stall_clarifications_total','Planning stall clarifications', m.planningStallClarifications);
+    gauge('atlas_probes_started_total','Probes started', m.probesStarted);
+    gauge('atlas_probes_advanced_total','Probes advanced', m.probesAdvanced);
+    gauge('atlas_probes_clarified_total','Probes clarified', m.probesClarified);
+    gauge('atlas_probe_attempts_total','Probe attempts', m.probeAttempts);
+    gauge('atlas_probe_avg_latency_ms','Average probe cycle latency ms', avgProbeLatency.toFixed(2));
+    gauge('atlas_memory_facts_written_total','Facts written to memory', m.memoryFactsWritten);
+    gauge('atlas_memory_facts_pruned_total','Facts pruned from memory', m.memoryFactsPruned);
+    gauge('atlas_memory_context_injections_total','Memory context blocks injected into prompts', m.memoryContextInjections||0);
+    gauge('atlas_memory_context_tokens_total','Estimated tokens injected from memory', m.memoryContextTokens||0);
+    // circuit breaker
+    gauge('atlas_cb_failures_total','Circuit breaker total failures', m.circuitBreaker.failuresTotal);
+    gauge('atlas_cb_consecutive_failures','Circuit breaker consecutive failures', m.circuitBreaker.consecutiveFailures);
+    gauge('atlas_cb_open','Circuit breaker open state (1=open)', m.circuitBreaker.isOpen ? 1 : 0);
+    return lines.join('\n') + '\n';
+}
+
+app.get('/metrics/prometheus', (req, res) => {
+    try {
+        res.setHeader('Content-Type','text/plain; version=0.0.4');
+        res.send(buildPrometheusMetrics());
+    } catch (e) {
+        res.status(500).send(`# error ${e.message}`);
+    }
+});
 
 // Circuit breaker management (Phase 2 completion)
 const CIRCUIT_BREAKER_THRESHOLD = 3; // failures before opening
@@ -405,6 +530,22 @@ class AgentDialogueManager {
 
 const dialogueManager = new AgentDialogueManager();
 
+// Strict TTS gating (optional): if enabled, after generating Atlas response the server will pause
+// further agent processing until the client notifies that TTS playback finished.
+// Enable by setting env STRICT_TTS=1. Extension to later phases (Grisha, Tetyana) can reuse same pattern.
+const STRICT_TTS = String(process.env.STRICT_TTS || '0') === '1';
+
+// Generic TTS gating helper
+function applyTtsGate(session, phaseName) {
+    if (!STRICT_TTS) return false;
+    session.ttsGate = session.ttsGate || {};
+    const doneKey = `${phaseName}Done`;
+    if (session.ttsGate[doneKey]) return false;
+    session.ttsGate.pendingPhase = phaseName;
+    if (phaseName === 'atlas_plan') session.ttsGate.atlasDone = session.ttsGate.atlasDone || false;
+    return true;
+}
+
 // -----------------------------
 // Intent LRU cache (Phase 2 optional /intent endpoint)
 // Intent cache replaced with IntentCache class
@@ -457,6 +598,32 @@ app.get('/health', (req, res) => {
 app.get('/agents', (req, res) => {
     res.json(AGENTS);
 });
+
+// Memory inspection endpoint (read-only)
+app.get('/memory/:agent', (req, res) => {
+    try {
+        const { agent } = req.params;
+        if (!agent || !['atlas','grisha','tetyana'].includes(agent)) return res.status(400).json({ error: 'invalid_agent' });
+        const limit = Math.min(parseInt(req.query.limit||'30',10), 200);
+        const pattern = req.query.pattern ? String(req.query.pattern) : null;
+        const rows = recall(agent, pattern, limit);
+        res.json({ agent, count: rows.length, rows });
+    } catch (e) {
+        res.status(500).json({ error: 'memory_failed', details: e.message });
+    }
+});
+
+// Safe remember with naive deduplication (skip if same value for same key wrote very recently)
+const __recentMemoryCache = new Map(); // key -> {v, ts}
+function rememberSafe(agent, key, value) {
+    try {
+        const cacheKey = agent+':'+key;
+        const prev = __recentMemoryCache.get(cacheKey);
+        if (prev && prev.v === value && (Date.now()-prev.ts) < 60_000) return; // skip duplicate within 60s
+        remember(agent, key, value);
+        __recentMemoryCache.set(cacheKey, { v: value, ts: Date.now() });
+    } catch {}
+}
 
 // Lightweight intent classification endpoint
 app.all('/intent', async (req, res) => {
@@ -519,7 +686,10 @@ app.get('/metrics/pipeline', (req, res) => {
                 avgConfidence: Number(avgConfidenceLegacy.toFixed(3)), // alias for compatibility
                 avgVerificationIterations: Number(avgVerificationIterations.toFixed(2)),
                 fallbackRatePercent: Number((fallbackRate * 100).toFixed(1)),
-                fallbackRate: `${(fallbackRate * 100).toFixed(1)}%`
+                fallbackRate: `${(fallbackRate * 100).toFixed(1)}%`,
+                probeAdvanceRate: PIPELINE_METRICS.probesStarted ? Number((PIPELINE_METRICS.probesAdvanced / PIPELINE_METRICS.probesStarted * 100).toFixed(1)) : 0,
+                probeClarifyRate: PIPELINE_METRICS.probesStarted ? Number((PIPELINE_METRICS.probesClarified / PIPELINE_METRICS.probesStarted * 100).toFixed(1)) : 0,
+                avgProbeLatencyMs: PIPELINE_METRICS.probeCycles ? Math.round(PIPELINE_METRICS.probeLatencyMs / PIPELINE_METRICS.probeCycles) : 0
             }
         };
 
@@ -886,6 +1056,10 @@ async function processAgentCycle(userMessage, session) {
     const atlasResponse = tagResponse(atlasResponseRaw, PHASE.ATLAS_PLAN);
     responses.push(atlasResponse);
     session.history.push(atlasResponse);
+    try { rememberSafe('atlas', `plan_${Date.now()}`, (atlasResponse.content||'').slice(0,300)); } catch {}
+
+    // If strict TTS sync enabled and we haven't acknowledged Atlas TTS yet, pause here.
+    if (!session.intent && applyTtsGate(session, 'atlas_plan')) return responses;
 
     // Classify user intent to route the flow efficiently (LLM-first with fallback)
     let intent = await classifyIntentSmart(userMessage, atlasResponse.content || '');
@@ -918,9 +1092,13 @@ async function processAgentCycle(userMessage, session) {
             `План Atlas: ${atlasResponse.content}`
         ].join('\n');
         const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
-        const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
-        responses.push(grishaPre);
-        session.history.push(grishaPre);
+    const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
+    responses.push(grishaPre);
+    session.history.push(grishaPre);
+    try { rememberSafe('grisha', `precheck_${Date.now()}`, (grishaPre.content||'').slice(0,300)); } catch {}
+
+    // TTS gate after Grisha precheck
+    if (applyTtsGate(session, PHASE.GRISHA_PRECHECK)) return responses;
 
         // Універсальна ескалація уточнення без доменних хардкодів:
         // Якщо відповідь Гриші містить явні індикатори інформаційного дефіциту ("уточн", "потрібні дані", "надайте", "які саме"),
@@ -929,6 +1107,77 @@ async function processAgentCycle(userMessage, session) {
             const lowerGrisha = (grishaPre.content || '').toLowerCase();
             const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
             if (shortage && !session.awaitingClarification) {
+                // Attempt internal probe first (Tetiana) if the shortage looks executable (mentions code/run)
+                const probeCandidate = /(код|file|script|run|execute|запусти|створи файл|приклад)/i.test(lowerGrisha);
+                if (probeCandidate && (!session.probe || (session.probe && session.probe.attempts < (session.probe.maxAttempts||2)))) {
+                    logProbe(`Initiating probe (attempt=${(session.probe?.attempts||0)+1}) for session=${session.id}`);
+                    if (!session.probe) {
+                        PIPELINE_METRICS.probesStarted++;
+                        startProbePipeline(session, userMessage, atlasResponse.content, grishaPre.content);
+                        session.probe.startedAt = Date.now();
+                    }
+                    session.probe.attempts++;
+                    PIPELINE_METRICS.probeAttempts++;
+                    const atlasRecent = summarizeRecent('atlas', 5);
+                    const tetyanaRecent = summarizeRecent('tetyana', 5);
+                    const memoryBlock = [atlasRecent && `Попередній контекст Atlas:\n${atlasRecent}`, tetyanaRecent && `Попередні артефакти Тетяни:\n${tetyanaRecent}`].filter(Boolean).join('\n\n');
+                    const probePrompt = PROBE_PROMPTS.tetyanaProbe({ userMessage, atlasPlan: atlasResponse.content + (memoryBlock?`\n\n${memoryBlock}`:''), grishaShortage: grishaPre.content });
+                    const probeRaw = await generateAgentResponse('tetyana', probePrompt, session, { enableTools: true });
+                    logProbe(`Probe execution received (len=${(probeRaw.content||probeRaw||'').length})`);
+                    const probeResp = tagResponse(probeRaw, PHASE.TETYANA_PROBE);
+                    responses.push(probeResp); session.history.push(probeResp);
+                    if (applyTtsGate(session, PHASE.TETYANA_PROBE)) return responses;
+                    // Immediately have Grisha review probe
+                    const reviewPrompt = PROBE_PROMPTS.grishaReview(probeResp.content + (memoryBlock?`\n\n${memoryBlock}`:''));
+                    const reviewRaw = await generateAgentResponse('grisha', reviewPrompt, session);
+                    logProbe(`Probe review received (first50="${String(reviewRaw.content||reviewRaw||'').slice(0,50)}")`);
+                    const reviewResp = tagResponse(reviewRaw, PHASE.GRISHA_PROBE_REVIEW);
+                    responses.push(reviewResp); session.history.push(reviewResp);
+                    if (applyTtsGate(session, PHASE.GRISHA_PROBE_REVIEW)) return responses;
+                    // Atlas feasibility synthesis
+                    const feasPrompt = PROBE_PROMPTS.atlasFeasibility(probeResp.content, reviewResp.content + (atlasRecent?`\n\nІсторія контексту:\n${atlasRecent}`:''));
+                    const feasRaw = await generateAgentResponse('atlas', feasPrompt, session);
+                    logProbe(`Feasibility response: ${(feasRaw.content||feasRaw||'').slice(0,40)}`);
+                    const feasResp = tagResponse(feasRaw, PHASE.ATLAS_FEASIBILITY);
+                    responses.push(feasResp); session.history.push(feasResp);
+                    if (applyTtsGate(session, PHASE.ATLAS_FEASIBILITY)) return responses;
+                    const decision = (feasResp.content||'').trim().toUpperCase().startsWith('ADVANCE');
+                    if (decision) {
+                        PIPELINE_METRICS.probesAdvanced++;
+                        if (session.probe?.startedAt) { PIPELINE_METRICS.probeLatencyMs += (Date.now()-session.probe.startedAt); PIPELINE_METRICS.probeCycles++; }
+                        remember('atlas','last_probe_outcome','advance');
+                        rememberSafe('grisha',`probe_review_${Date.now()}`, (reviewResp.content||'').slice(0,280));
+                        clearProbe(session);
+                        // Continue as actionable pipeline and immediately perform Grisha precheck to avoid waiting a new cycle
+                        logProbe('Probe ADVANCE confirmed -> transitioning to actionable pipeline');
+                        startActionablePipeline(session, userMessage, atlasResponse.content, grishaPre.content);
+                        // Emit a synthesized confirmation message (Atlas) to show transition
+                        const synth = tagResponse({
+                            role: 'assistant',
+                            content: 'Пробний крок дав достатньо даних. Переходжу до стандартного виконання.',
+                            agent: 'atlas'
+                        }, PHASE.ATLAS_FEASIBILITY);
+                        responses.push(synth); session.history.push(synth);
+                    } else {
+                        PIPELINE_METRICS.probesClarified++;
+                        if (session.probe?.attempts < (session.probe?.maxAttempts||2)) {
+                            // Allow one more probe attempt instead of immediate clarification
+                            logProbe('Probe infeasible; scheduling second attempt (no clarification yet)');
+                            return responses; // next user / cycle triggers second attempt if shortage persists
+                        }
+                        if (session.probe?.startedAt) { PIPELINE_METRICS.probeLatencyMs += (Date.now()-session.probe.startedAt); PIPELINE_METRICS.probeCycles++; }
+                        remember('atlas','last_probe_outcome','clarify');
+                        clearProbe(session);
+                        // Fallback to clarification path
+                        const atlasClarPrompt = PROBE_PROMPTS.atlasClarificationFallback();
+                        const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
+                        logProbe('Probe failed after max attempts -> clarification escalated');
+                        const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN); atlasClar.clarification = true; atlasClar.phase = 'atlas_clarify';
+                        responses.push(atlasClar); session.history.push(atlasClar);
+                        session.awaitingClarification = true; PIPELINE_METRICS.clarifications++;
+                    }
+                    return responses;
+                }
                 const atlasClarPrompt = [
                     'Ти — Atlas. Сформуй короткий структурований ЕТАП 0: що потрібно отримати від користувача для продовження.',
                     'Не вигадуй доменних полів. Лише перефразуй задачу, підкресли, що потрібні уточнення, і наведи список пунктів як маркери (по суті, які дані / контекст / обмеження / початковий стан / очікувані критерії).',
@@ -965,6 +1214,9 @@ async function processAgentCycle(userMessage, session) {
             } catch {}
             responses.push(tetyanaExec);
             session.history.push(tetyanaExec);
+
+            // TTS gate after execution before verification chain
+            if (applyTtsGate(session, PHASE.EXECUTION)) { session.pipeline && (session.pipeline.stageAfterExecPending = true); return responses; }
             if (tetyanaExec.lowEvidence) {
                 // Force an augmentation request before verification if trivial placeholder content
                 const subtype = session.actionableSubtype || 'generic';
@@ -991,6 +1243,7 @@ async function processAgentCycle(userMessage, session) {
             PIPELINE_METRICS.verificationConfidenceSum += verify.confidence || 0;
             responses.push(grishaVerdict);
             session.history.push(grishaVerdict);
+            try { rememberSafe('grisha', `verdict_${Date.now()}`, `conf=${verify.confidence.toFixed(2)} ${confirmed?'ok':'retry'}`); } catch {}
             if (!confirmed) {
                 const missing = (verify.result?.criteria || []).filter(c => c && c.result === false).map(c => c.name);
                 const ask = `Потрібно надати додаткові докази по: ${missing.join(', ') || 'не визначено'}. Надати конкретні шляхи/вміст/виходи команд.`;
@@ -999,6 +1252,7 @@ async function processAgentCycle(userMessage, session) {
                 PIPELINE_METRICS.followups++;
                 responses.push(grishaFollow);
                 session.history.push(grishaFollow);
+                try { rememberSafe('grisha', `followup_${Date.now()}`, (grishaFollow.content||'').slice(0,260)); } catch {}
                 markNeedsMore(session, missing, tetyanaExec.content);
             } else {
                 clearPipeline(session);
@@ -1222,6 +1476,150 @@ app.post('/chat/continue', async (req, res) => {
     }
 });
 
+// Endpoint the frontend calls after finishing TTS playback for a phase (currently Atlas)
+app.post('/tts/done', async (req, res) => {
+    try {
+        const { sessionId, phase } = req.body || {};
+        if (!sessionId) return res.status(400).json({ error: 'sessionId is required' });
+        const session = sessions.get(sessionId);
+        if (!session) return res.status(404).json({ error: 'session not found' });
+        if (!STRICT_TTS) return res.json({ success: true, skipped: true, message: 'STRICT_TTS disabled' });
+
+        session.ttsGate = session.ttsGate || {};
+        // Mark current phase done (basic validation optional)
+        if (phase) session.ttsGate[`${phase}Done`] = true;
+        // Specifically handle atlas_plan gating
+        if (session.ttsGate.pendingPhase === 'atlas_plan' && session.ttsGate.atlas_planDone !== false) {
+            session.ttsGate.atlasDone = true;
+            delete session.ttsGate.pendingPhase;
+        }
+
+        // If there is a last user message we can resume processing from, re-run the remainder of cycle.
+        const lastUserMsg = [...session.history].reverse().find(m => m.role === 'user');
+        if (!lastUserMsg) return res.json({ success: true, resumed: false, message: 'No user message to resume from' });
+
+        // Continue only if we paused after Atlas (intent not yet classified)
+        if (!session.intent && session.ttsGate.atlasDone) {
+            const responses = await processAgentCycleResumeAfterAtlas(session, lastUserMsg.content);
+            return res.json({ success: true, resumed: true, response: responses, session: { id: session.id, currentAgent: session.currentAgent } });
+        }
+        // Resume after Grisha precheck gate (immediate path)
+        if (phase === PHASE.GRISHA_PRECHECK) {
+            const responses = await processAgentCycleResumeAfterGrishaPre(session);
+            if (responses.length) return res.json({ success: true, resumed: true, response: responses, session: { id: session.id } });
+        }
+        // Resume after probe phases (sequential: tetyana_probe -> grisha_probe_review -> atlas_feasibility handled inline in initial cycle; if gated, resume progression)
+        if (phase === PHASE.TETYANA_PROBE) {
+            // Find last probe response and continue with review + feasibility if not already present
+            const hasReview = session.history.some(m => m.phase === PHASE.GRISHA_PROBE_REVIEW);
+            if (!hasReview) {
+                const probeResp = [...session.history].reverse().find(m => m.phase === PHASE.TETYANA_PROBE);
+                if (probeResp) {
+                    const reviewPrompt = [
+                        'Ти — Гриша. Оціни чи пробний крок дав достатньо даних, щоб продовжити без користувача.',
+                        'Відповідь: FEASIBLE|INFEASIBLE на початку рядка, потім коротко що є/чого бракує.',
+                        `Пробний звіт Тетяни: ${probeResp.content}`
+                    ].join('\n');
+                    const reviewRaw = await generateAgentResponse('grisha', reviewPrompt, session);
+                    const reviewResp = tagResponse(reviewRaw, PHASE.GRISHA_PROBE_REVIEW);
+                    session.history.push(reviewResp);
+                    if (applyTtsGate(session, PHASE.GRISHA_PROBE_REVIEW)) return res.json({ success: true, resumed: true, response: [reviewResp], session: { id: session.id } });
+                    const feasPrompt = [
+                        'Ти — Atlas. На основі проби і ревʼю відповідай одним словом: ADVANCE або CLARIFY. Потім стислий коментар.',
+                        `Проба: ${probeResp.content}`,
+                        `Ревʼю: ${reviewResp.content}`
+                    ].join('\n');
+                    const feasRaw = await generateAgentResponse('atlas', feasPrompt, session);
+                    const feasResp = tagResponse(feasRaw, PHASE.ATLAS_FEASIBILITY);
+                    session.history.push(feasResp);
+                    const decision = (feasResp.content||'').trim().toUpperCase().startsWith('ADVANCE');
+                    if (decision) {
+                        PIPELINE_METRICS.probesAdvanced++;
+                        if (session.probe?.startedAt) { PIPELINE_METRICS.probeLatencyMs += (Date.now()-session.probe.startedAt); PIPELINE_METRICS.probeCycles++; }
+                        remember('atlas','last_probe_outcome','advance');
+                        clearProbe(session);
+                    } else {
+                        PIPELINE_METRICS.probesClarified++;
+                        if (session.probe?.startedAt) { PIPELINE_METRICS.probeLatencyMs += (Date.now()-session.probe.startedAt); PIPELINE_METRICS.probeCycles++; }
+                        remember('atlas','last_probe_outcome','clarify');
+                        clearProbe(session); session.awaitingClarification = true; PIPELINE_METRICS.clarifications++;
+                    }
+                    return res.json({ success: true, resumed: true, response: [reviewResp, feasResp], session: { id: session.id } });
+                }
+            }
+        }
+        // Resume after execution gate (immediate path)
+        if (phase === PHASE.EXECUTION) {
+            const responses = await processAgentCycleResumeAfterTetyanaExec(session);
+            if (responses.length) return res.json({ success: true, resumed: true, response: responses, session: { id: session.id } });
+        }
+        return res.json({ success: true, resumed: false, message: 'Nothing pending' });
+    } catch (e) {
+        logMessage('error', `/tts/done failed: ${e.message}`);
+        res.status(500).json({ error: 'tts done failed', details: e.message });
+    }
+});
+
+// Helper to finish cycle after Atlas TTS gate released
+async function processAgentCycleResumeAfterAtlas(session, userMessage) {
+    // We intentionally do not push the user message again.
+    const atlasResponse = [...session.history].reverse().find(m => m.phase === PHASE.ATLAS_PLAN);
+    if (!atlasResponse) return [];
+    const responses = [atlasResponse];
+    let intent = await classifyIntentSmart(userMessage, atlasResponse.content || '');
+    if (session.forceNewCycle) { intent = 'actionable'; session.forceNewCycle = false; }
+    session.intent = intent;
+    if (intent === 'actionable') {
+        try { session.actionableSubtype = await classifyActionableSubtypeSmart(userMessage, atlasResponse.content || ''); } catch { session.actionableSubtype = 'generic'; }
+        PIPELINE_METRICS.actionableSessions++;
+        const precheckPrompt = [
+            'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
+            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ», де кожен пункт — конкретне завдання з очікуваним артефактом.',
+            '',
+            `Завдання користувача: ${userMessage}`,
+            `План Atlas: ${atlasResponse.content}`
+        ].join('\n');
+        const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
+        const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
+        responses.push(grishaPre); session.history.push(grishaPre);
+    if (applyTtsGate(session, PHASE.GRISHA_PRECHECK)) return responses;
+        try {
+            const lowerGrisha = (grishaPre.content || '').toLowerCase();
+            const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
+            if (shortage && !session.awaitingClarification) {
+                const atlasClarPrompt = [
+                    'Ти — Atlas. Користувач сформулював задачу, але потрібні уточнення для переходу до виконання.',
+                    '1) Коротко перефразуй задачу одним реченням.',
+                    '2) Дай список «Надайте:» (контекст, початковий стан, моделі/пристрої, цільові критерії, обмеження, бажані інструменти).',
+                    '3) Заверши: «Надайте ці дані однією відповіддю — після цього я згенерую виконуваний план.»',
+                    'Жодних зайвих прикрас.'
+                ].join('\n');
+                const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
+                const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN);
+                atlasClar.clarification = true; atlasClar.phase = 'atlas_clarify';
+                responses.push(atlasClar); session.history.push(atlasClar);
+                session.awaitingClarification = true; PIPELINE_METRICS.clarifications++;
+                markNeedsMore(session, ['additional_context'], grishaPre.content);
+                return responses;
+            }
+        } catch {}
+        startActionablePipeline(session, userMessage, atlasResponse.content, responses.find(r=>r.phase===PHASE.GRISHA_PRECHECK)?.content || '');
+        if (shouldImmediateExecute(intent)) {
+            const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги Гриші: ${responses.find(r=>r.phase===PHASE.GRISHA_PRECHECK)?.content || ''}\n\nВиконай кроки та чітко звітуй.`;
+            const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+            const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION); responses.push(tetyanaExec); session.history.push(tetyanaExec);
+            if (applyTtsGate(session, PHASE.EXECUTION)) { session.pipeline && (session.pipeline.stageAfterExecPending = true); return responses; }
+        }
+        return responses;
+    }
+    if (intent === 'planning') {
+        const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
+        const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
+        responses.push(grishaResponse); session.history.push(grishaResponse);
+    }
+    return responses;
+}
+
 // Expose pipeline metrics (ephemeral, resets on restart)
 // (Removed duplicate /metrics/pipeline handler and unified logic above)
 
@@ -1381,10 +1779,30 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
 // Create prompts based on agent roles
 function createAgentPrompt(agentName, message, session) {
     const baseContext = `You are ${agentName.toUpperCase()}, a specialized AI agent in the ATLAS system.`;
+    // Lightweight memory integration (recent persisted facts). Only Atlas & Grisha use shared memory.
+    let memoryBlock = '';
+    try {
+        if (agentName === 'atlas' || agentName === 'grisha') {
+            const rankedAtlas = summarizeRanked('atlas', { limit: 6 });
+            const rankedGrisha = summarizeRanked('grisha', { limit: 6 });
+            const parts = [];
+            if (rankedAtlas) parts.push(`Ранжовані факти Atlas:\n${rankedAtlas}`);
+            if (rankedGrisha) parts.push(`Ранжовані факти Гриші:\n${rankedGrisha}`);
+            if (parts.length) {
+                memoryBlock = `\n\n[ПАМ'ЯТЬ]\n${parts.join('\n\n')}`;
+                // Rough token estimate (4 chars ≈ 1 токен)
+                const estTokens = Math.ceil(memoryBlock.length / 4);
+                try {
+                    PIPELINE_METRICS.memoryContextInjections = (PIPELINE_METRICS.memoryContextInjections||0)+1;
+                    PIPELINE_METRICS.memoryContextTokens = (PIPELINE_METRICS.memoryContextTokens||0)+estTokens;
+                } catch {}
+            }
+        }
+    } catch {}
     
     switch (agentName) {
         case 'atlas':
-            return `${baseContext} Ти — ATLAS, стратег. Твоє завдання: швидко перефразувати запит користувача українською зрозумілою мовою, окреслити суть і контекст, виділити ключові вимоги і ризики. Без детальної нумерації кроків — це робота Тетяни. Якщо бракує даних, сформулюй 1–2 точні питання до користувача або до Тетяни.
+            return `${baseContext} Ти — ATLAS, стратег. Твоє завдання: швидко перефразувати запит користувача українською зрозумілою мовою, окреслити суть і контекст, виділити ключові вимоги і ризики. Без детальної нумерації кроків — це робота Тетяни. Якщо бракує даних, сформулюй 1–2 точні питання до користувача або до Тетяни.${memoryBlock}
 
 Запит користувача: ${message}
 Нещодавній контекст: ${getRecentHistory(session, 3)}
@@ -1392,7 +1810,7 @@ function createAgentPrompt(agentName, message, session) {
 Стиль: стисло, по суті, дружньо, з легкими живими зверненнями за потреби (без заучених фраз).`;
 
         case 'grisha':
-            return `${baseContext} Ти — Гриша, валідаційний агент. Перша перевірка — одразу після перефразування від ATLAS: оцінка ризиків і безпеки, вкажи на слабкі місця. Друга перевірка — після звіту Тетяни: валідуй, що завдання справді виконано за критеріями. Якщо не виконано — чітко вкажи, що саме не так, і які докази потрібні.
+            return `${baseContext} Ти — Гриша, валідаційний агент. Перша перевірка — одразу після перефразування від ATLAS: оцінка ризиків і безпеки, вкажи на слабкі місця. Друга перевірка — після звіту Тетяни: валідуй, що завдання справді виконано за критеріями. Якщо не виконано — чітко вкажи, що саме не так, і які докази потрібні.${memoryBlock}
 
 Матеріал для перевірки: ${message}
 Сесійний контекст: ${getRecentHistory(session, 3)}

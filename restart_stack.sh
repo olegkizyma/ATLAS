@@ -26,6 +26,72 @@ log_restart() { echo -e "${CYAN}[RESTART]${NC} $1"; }
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
 
+# Required Node.js major version range (aligned with orchestrator /.nvmrc)
+REQUIRED_NODE_MIN=22
+REQUIRED_NODE_MAX=22 # inclusive for major; reject >=23
+
+check_node_version() {
+    if [ "${SKIP_NODE_CHECK}" = "1" ]; then
+        log_warn "Node version check skipped via SKIP_NODE_CHECK=1"
+        return 0
+    fi
+    if ! command -v node >/dev/null 2>&1; then
+        log_error "Node.js не знайдено. Встанови nvm та виконай: nvm install 22.17.1"
+        return 1
+    fi
+    local ver full major
+    ver="$(node -v 2>/dev/null || echo v0.0.0)"
+    full="${ver#v}"
+    major="${full%%.*}"
+    if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt "$REQUIRED_NODE_MAX" ]; then
+        log_warn "Поточна Node версія $ver (major=$major) не у підтримуваному діапазоні ${REQUIRED_NODE_MIN}.x (очікується <23).";
+        # Спроба автоматично активувати nvm та прочитати .nvmrc
+        if command -v nvm >/dev/null 2>&1; then
+            if [ -f "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" ]; then
+                local target
+                target="$(cat "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" | tr -d '\r' | head -n1)"
+                log_info "Спроба перемкнутися на Node $target через nvm..."
+                nvm install "$target" >/dev/null 2>&1 || true
+                nvm use "$target" >/dev/null 2>&1 || true
+                ver="$(node -v 2>/dev/null || echo v0.0.0)"; full="${ver#v}"; major="${full%%.*}";
+            fi
+        else
+            # Спроба завантаження nvm якщо директорія існує
+            if [ -s "$HOME/.nvm/nvm.sh" ]; then
+                # shellcheck disable=SC1090
+                . "$HOME/.nvm/nvm.sh"
+                if [ -f "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" ]; then
+                    local target
+                    target="$(cat "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" | tr -d '\r' | head -n1)"
+                    log_info "Спроба перемкнутися на Node $target через nvm (autoload)..."
+                    nvm install "$target" >/dev/null 2>&1 || true
+                    nvm use "$target" >/dev/null 2>&1 || true
+                    ver="$(node -v 2>/dev/null || echo v0.0.0)"; full="${ver#v}"; major="${full%%.*}";
+                fi
+            fi
+        fi
+    fi
+    if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt 22 ]; then
+        log_error "Несумісна Node версія після спроби виправлення: $ver. Використай nvm install 22.17.1 && nvm use 22.17.1"
+        return 1
+    fi
+    log_info "✔ Node.js версія $ver відповідає вимогам"
+}
+
+check_local_ai_api() {
+    if curl -s --max-time 3 "http://127.0.0.1:3010/v1/models" >/dev/null 2>&1; then
+        log_info "✔ Local AI API (3010) доступний"
+        return 0
+    fi
+    log_error "❌ Local AI API (порт 3010) недоступний — orchestrator працюватиме некоректно (LLM маршрути)."
+    log_warn  "Запусти локальний OpenAI-сумісний сервіс (наприклад, lm studio / localai / ollama proxy на 3010)."
+    if [ "${ALLOW_NO_LOCAL_AI}" = "1" ]; then
+        log_warn "ALLOW_NO_LOCAL_AI=1 -> продовжуємо попри відсутність сервісу."
+        return 0
+    fi
+    return 1
+}
+
 # Graceful stop процесу
 graceful_stop() {
     local pid=$1
@@ -109,6 +175,9 @@ stop_all_services() {
 # Запуск системи
 start_services() {
     log_restart "🚀 Starting ATLAS services..."
+    # Перевірки перед стартом
+    check_node_version || { log_error "Node version check failed"; return 1; }
+    check_local_ai_api || { log_error "Local AI API check failed"; return 1; }
     
     # Створюємо директорію логів (repo-local)
     mkdir -p "$LOG_DIR"
@@ -222,6 +291,10 @@ main() {
     log_restart "🔄 ATLAS System Restart Utility"
     log_restart "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
+    # Попередня перевірка Node (щоб не гаяти час на стоп/старт якщо версія невдала)
+    check_node_version || exit 1
+    # Попередня перевірка Local AI API (можна пропустити якщо змінна встановлена)
+    check_local_ai_api || { log_warn "Пропускаємо через відсутність Local AI API"; [ "${ALLOW_NO_LOCAL_AI}" = "1" ] || exit 1; }
     
     # Зупинка сервісів
     stop_all_services

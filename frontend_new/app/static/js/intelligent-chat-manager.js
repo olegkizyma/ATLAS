@@ -257,10 +257,13 @@ class AtlasIntelligentChatManager {
             grisha_precheck: { label: 'PRECHECK', color: '#ffd700' },
             execution: { label: 'EXEC', color: '#00ffa5' },
             grisha_verdict: { label: 'VERDICT', color: '#ff8c00' },
-            grisha_followup: { label: 'FOLLOW-UP', color: '#ff4d4d' }
+            grisha_followup: { label: 'FOLLOW-UP', color: '#ff4d4d' },
+            tetyana_probe: { label: 'PROBE', color: '#00b3b3' },
+            grisha_probe_review: { label: 'PROBE-REV', color: '#b3a500' },
+            atlas_feasibility: { label: 'FEASIBILITY', color: '#7d5fff' }
         };
         this.lastAgentPhaseKey = new Map();
-        this.pipelineState = { order: ['atlas_plan','atlas_clarify','grisha_precheck','execution','grisha_verdict','grisha_followup'], active: null, seen: new Set() };
+    this.pipelineState = { order: ['atlas_plan','atlas_clarify','tetyana_probe','grisha_probe_review','atlas_feasibility','grisha_precheck','execution','grisha_verdict','grisha_followup'], active: null, seen: new Set() };
     this._clarificationFreeze = false;
         this.buildPipelineHUD();
     }
@@ -1457,6 +1460,16 @@ class AtlasIntelligentChatManager {
             badge.textContent = this.phaseMeta[phase].label;
             badge.style.cssText = `display:inline-block;margin-left:8px;padding:2px 6px;border-radius:6px;font-size:10px;letter-spacing:.5px;vertical-align:middle;background:${this.phaseMeta[phase].color};color:#052012;font-weight:600;box-shadow:0 0 4px ${this.phaseMeta[phase].color}55;`;
             labelDiv.appendChild(badge);
+            if (phase === 'atlas_feasibility') {
+                const up = String(effectiveText||'').toUpperCase();
+                if (up.startsWith('ADVANCE')) {
+                    messageDiv.style.border = '2px solid #00b894';
+                    messageDiv.style.boxShadow = '0 0 10px #00b89466';
+                } else if (up.startsWith('CLARIFY')) {
+                    messageDiv.style.border = '2px solid #d63031';
+                    messageDiv.style.boxShadow = '0 0 10px #d6303166';
+                }
+            }
         }
 
         this.chatContainer.appendChild(messageDiv);
@@ -1593,6 +1606,29 @@ class AtlasIntelligentChatManager {
                 }
             } catch(_) {}
         }
+        if (phase === 'atlas_feasibility') {
+            try {
+                const recent = [...this.messages].reverse().find(m => m.phase === 'atlas_feasibility');
+                if (recent) {
+                    const up = recent.text.toUpperCase();
+                    let icon='◻'; let color='#7d5fff';
+                    if (up.startsWith('ADVANCE')) { icon='✔'; color='#00b894'; }
+                    else if (up.startsWith('CLARIFY')) { icon='✖'; color='#d63031'; }
+                    const step = hud.querySelector('.ph-step[data-phase="atlas_feasibility"]');
+                    if (step) {
+                        let mini = step.querySelector('.verdict-mini');
+                        if (!mini) {
+                            mini = document.createElement('span');
+                            mini.className='verdict-mini';
+                            mini.style.cssText='display:inline-block;margin-left:4px;font-weight:600;font-size:11px;';
+                            step.appendChild(mini);
+                        }
+                        mini.textContent = icon;
+                        mini.style.color = color;
+                    }
+                }
+            } catch(_){}
+        }
     }
     
     addMessage(text, type = 'user', metadata = {}) {
@@ -1708,6 +1744,9 @@ class AtlasIntelligentChatManager {
         const phaseNames = {
             'atlas_plan': '📋 Planning',
             'grisha_precheck': '🔍 Pre-check',
+            'tetyana_probe': '🧪 Внутрішній пробний запуск для збору даних без залучення користувача',
+            'grisha_probe_review': '🛂 Перевірка результатів проби Гришею',
+            'atlas_feasibility': '🧭 Оцінка Atlas: чи достатньо даних для повного плану',
             'execution': '⚡ Execution',
             'grisha_verdict': '✅ Verdict',
             'grisha_followup': '❓ Follow-up'
