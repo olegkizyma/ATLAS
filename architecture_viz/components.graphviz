@@ -2,7 +2,8 @@
 
 digraph ATLAS {
     rankdir=LR;
-    node [shape=rounded, style=filled, fillcolor="#f5f5f5", fontname="Inter"];
+    // shape=rounded is not a valid Graphviz shape warning; use box + rounded style
+    node [shape=box, style="rounded,filled", fillcolor="#f5f5f5", fontname="Inter"];
 
     subgraph cluster_client { label="Client"; UI [label="Web UI / Chat"] }
     subgraph cluster_api { label="Flask 5001"; API [label="Flask API"] }
@@ -30,6 +31,8 @@ digraph ATLAS {
         P2 [label="probe_*"];
         P3 [label="memory_context_tokens"];
         P4 [label="memory_context_injections"];
+        P5 [label="memory_facts_written"];
+        P6 [label="memory_facts_pruned"];
     }
 
     subgraph cluster_ext { label="Optional Services"; style=dashed; color="#ffe0b2";
@@ -44,6 +47,11 @@ digraph ATLAS {
 
     Atlas -> MAtlas; Grisha -> MGrisha;
     MAtlas -> MGrisha [dir=both, style=dashed, label="shared context"];
+
+    // Pruning / TTL conceptual node
+    Prune [label="TTL & Capacity Pruning", fillcolor="#ffecec", shape=box, style="rounded,filled,dashed"];
+    MAtlas -> Prune [style=dashed];
+    MGrisha -> Prune [style=dashed];
 
     ORCH -> P1; ORCH -> P2; ORCH -> P3; ORCH -> P4;
 

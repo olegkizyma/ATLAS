@@ -12,7 +12,7 @@ import path from 'path';
 import os from 'os';
 import ModelRegistry from './model_registry.js';
 import { PHASE, initSession, startActionablePipeline, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
-import { initMemory, remember, recall, summarizeRecent, summarizeRanked } from './agent_memory.js';
+import { initMemory, remember, recall, summarizeRecent, summarizeRanked, rememberSafe, summarizeForPrompt, memoryHealth, semanticContext, startMemoryMaintenance } from './agent_memory.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
 import { IntentCache } from './intent_cache.js';
 
@@ -55,6 +55,7 @@ globalThis.PIPELINE_METRICS = PIPELINE_METRICS;
 
 const app = express();
 initMemory();
+startMemoryMaintenance();
 const PORT = process.env.ORCH_PORT || 5101;
 const GRISHA_CONFIDENCE_THRESHOLD = Math.max(0, Math.min(1, parseFloat(process.env.GRISHA_CONFIDENCE_THRESHOLD || '0.8')));
 const GRISHA_MAX_VERIFY_ITER = Math.max(1, parseInt(process.env.GRISHA_MAX_VERIFY_ITER || '3', 10));
@@ -615,15 +616,7 @@ app.get('/memory/:agent', (req, res) => {
 
 // Safe remember with naive deduplication (skip if same value for same key wrote very recently)
 const __recentMemoryCache = new Map(); // key -> {v, ts}
-function rememberSafe(agent, key, value) {
-    try {
-        const cacheKey = agent+':'+key;
-        const prev = __recentMemoryCache.get(cacheKey);
-        if (prev && prev.v === value && (Date.now()-prev.ts) < 60_000) return; // skip duplicate within 60s
-        remember(agent, key, value);
-        __recentMemoryCache.set(cacheKey, { v: value, ts: Date.now() });
-    } catch {}
-}
+// rememberSafe now provided by agent_memory.js (hash + recency dedup)
 
 // Lightweight intent classification endpoint
 app.all('/intent', async (req, res) => {
@@ -638,6 +631,11 @@ app.all('/intent', async (req, res) => {
     } catch (e) {
         return res.status(500).json({ error: 'intent_failed', details: e.message });
     }
+});
+
+// Memory health endpoint
+app.get('/memory', (req, res) => {
+    try { return res.json(memoryHealth()); } catch (e) { return res.status(500).json({ error:'memory_health_failed', details:e.message }); }
 });
 
 // Providers/admin endpoints
@@ -1783,20 +1781,25 @@ function createAgentPrompt(agentName, message, session) {
     let memoryBlock = '';
     try {
         if (agentName === 'atlas' || agentName === 'grisha') {
-            const rankedAtlas = summarizeRanked('atlas', { limit: 6 });
-            const rankedGrisha = summarizeRanked('grisha', { limit: 6 });
+            const targetTokens = parseInt(process.env.ATLAS_MEMORY_TARGET_TOKENS || '320',10);
+            const atlasBlock = summarizeForPrompt('atlas', { targetTokens });
+            const grishaBlock = summarizeForPrompt('grisha', { targetTokens });
             const parts = [];
-            if (rankedAtlas) parts.push(`Ранжовані факти Atlas:\n${rankedAtlas}`);
-            if (rankedGrisha) parts.push(`Ранжовані факти Гриші:\n${rankedGrisha}`);
-            if (parts.length) {
-                memoryBlock = `\n\n[ПАМ'ЯТЬ]\n${parts.join('\n\n')}`;
-                // Rough token estimate (4 chars ≈ 1 токен)
-                const estTokens = Math.ceil(memoryBlock.length / 4);
-                try {
-                    PIPELINE_METRICS.memoryContextInjections = (PIPELINE_METRICS.memoryContextInjections||0)+1;
-                    PIPELINE_METRICS.memoryContextTokens = (PIPELINE_METRICS.memoryContextTokens||0)+estTokens;
-                } catch {}
-            }
+            if (atlasBlock) parts.push(`Ранжовані факти Atlas:\n${atlasBlock}`);
+            if (grishaBlock) parts.push(`Ранжовані факти Гриші:\n${grishaBlock}`);
+            // Optional semantic augmentation if enabled and query (last user message) exists
+            try {
+                if (process.env.ATLAS_MEMORY_EMBEDDINGS === '1' && session.messages?.length) {
+                    const lastUser = [...session.messages].reverse().find(m=>m.role==='user');
+                    if (lastUser) {
+                        const semA = semanticContext('atlas', lastUser.content||'', { topK:3, maxChars:400 });
+                        const semG = semanticContext('grisha', lastUser.content||'', { topK:3, maxChars:400 });
+                        if (semA) parts.push(`Семантичні факти Atlas:\n${semA}`);
+                        if (semG) parts.push(`Семантичні факти Гриші:\n${semG}`);
+                    }
+                }
+            } catch {}
+            if (parts.length) memoryBlock = `\n\n[ПАМ'ЯТЬ]\n${parts.join('\n\n')}`;
         }
     } catch {}
     

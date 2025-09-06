@@ -4,12 +4,14 @@ sequenceDiagram
     participant A as Atlas
     participant G as Grisha
     participant M as SQLite (better-sqlite3)
+    participant P as Pruner (TTL & Capacity)
     participant R as Summarizer (summarizeRanked)
     participant O as Orchestrator
     participant T as Token Metrics
 
     Note over O: Request arrives
     O->>M: recall recent entries (Atlas, Grisha)
+    Note over M,P: prune() on each write (capacity + TTL)
     O->>R: summarizeRanked(entries, half_life, max_tokens)
     R-->>O: ranked context block
     O->>T: estimate tokens(len/4)
@@ -17,8 +19,10 @@ sequenceDiagram
     O->>A: prompt + ranked context
     A-->>O: plan / output
     O->>M: rememberSafe(key facts)
+    M->>P: implicit prune (excess + stale)
     O->>T: increment memory_context_injections
     O->>T: add memory_context_tokens
+    Note over T: Also track memory_facts_written / pruned
     O->>G: validation with same or trimmed context
     G-->>O: verdict
     O-->>O: metrics pipeline_phase_* updated

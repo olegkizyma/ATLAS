@@ -23,6 +23,7 @@ flowchart TB
         Memory[(SQLite Memory)]
         Ranking[Ranked Summarizer]
         Dedup[rememberSafe Dedup]
+    Pruning[TTL & Capacity Pruning]
     end
 
     subgraph External[External / Optional]
@@ -38,6 +39,7 @@ flowchart TB
     Atlas --> Memory
     Grisha --> Memory
     Memory --> Ranking
+    Memory --> Pruning
     Ranking --> Node
     Node --> Metrics
     Node --> LLM

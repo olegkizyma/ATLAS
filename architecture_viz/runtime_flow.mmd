@@ -34,6 +34,7 @@ sequenceDiagram
     O->>G: final validation
     G-->>O: verdict + followup
     O->>DB: rememberSafe (key facts)
+    Note over DB: prune(): capacity & TTL (DEFAULT_TTL_MS) after each write
     O-->>F: response payload
     F-->>U: UI update + stream
     Note over O,DB: memory_context_tokens & injections metrics updated
