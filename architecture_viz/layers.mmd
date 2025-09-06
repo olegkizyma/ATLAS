@@ -1,0 +1,45 @@
+%% Layered architecture view
+flowchart TB
+    subgraph Presentation[Presentation Layer]
+        UI[Web UI / Chat]
+    end
+
+    subgraph API[API Layer]
+        Flask[Flask Server 5001]
+    end
+
+    subgraph Orchestrator[Orchestration Layer]
+        Node[Node Orchestrator 5101]
+        Metrics[Prometheus Export]
+    end
+
+    subgraph Agents[Agent Layer]
+        Atlas[Atlas Planner]
+        Grisha[Grisha Validator]
+        Tetyana[Tetyana Executor]
+    end
+
+    subgraph Intelligence[Intelligence Support]
+        Memory[(SQLite Memory)]
+        Ranking[Ranked Summarizer]
+        Dedup[rememberSafe Dedup]
+    end
+
+    subgraph External[External / Optional]
+        Goose[Goose Executor 3000]
+        TTS[TTS 3001]
+        LLM[Local AI API 3010]
+    end
+
+    UI --> Flask --> Node --> Atlas
+    Node --> Grisha
+    Grisha --> Tetyana
+    Tetyana --> Grisha
+    Atlas --> Memory
+    Grisha --> Memory
+    Memory --> Ranking
+    Ranking --> Node
+    Node --> Metrics
+    Node --> LLM
+    Tetyana --> Goose
+    Node --> TTS

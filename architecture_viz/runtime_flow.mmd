@@ -1,0 +1,39 @@
+%% Detailed request lifecycle sequence
+sequenceDiagram
+    autonumber
+    participant U as User/UI
+    participant F as Flask API (5001)
+    participant O as Orchestrator (Node 5101)
+    participant A as Atlas Planner
+    participant G as Grisha Validator
+    participant T as Tetyana Executor
+    participant DB as SQLite Memory
+
+    U->>F: chat message
+    F->>O: REST /chat
+    O->>DB: fetch ranked memory (Atlas & Grisha)
+    O->>A: prompt + memory context
+    A-->>O: plan draft
+    O->>G: plan validation
+    G-->>O: precheck verdict (ok/clarify)
+    alt needs probe
+        O->>T: probe request
+        T-->>O: probe artifacts
+        O->>G: probe review
+        G-->>O: probe assessment
+        O->>A: feasibility synthesis
+        A-->>O: ADVANCE / CLARIFY decision
+    end
+    alt proceed execution
+        O->>T: execution instructions
+        T-->>O: execution result
+    else clarify
+        O-->>F: clarification request
+        F-->>U: ask user
+    end
+    O->>G: final validation
+    G-->>O: verdict + followup
+    O->>DB: rememberSafe (key facts)
+    O-->>F: response payload
+    F-->>U: UI update + stream
+    Note over O,DB: memory_context_tokens & injections metrics updated

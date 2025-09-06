@@ -22,6 +22,39 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_debug() { echo -e "${BLUE}[DEBUG]${NC} $1"; }
 log_intelligent() { echo -e "${CYAN}[INTELLIGENT]${NC} $1"; }
 
+# --- Runtime Guards (Node.js version + Local AI API graceful degrade) ---
+REQUIRED_NODE_MIN=22
+REQUIRED_NODE_MAX=22
+
+check_node_version() {
+    if [ "${SKIP_NODE_CHECK}" = "1" ]; then
+        log_warn "Skipping Node version check (SKIP_NODE_CHECK=1)"; return 0; fi
+    if ! command -v node >/dev/null 2>&1; then
+        log_error "Node.js не знайдено. Встанови nvm і виконай: nvm install 22.17.1"; return 1; fi
+    local ver major
+    ver="$(node -v 2>/dev/null || echo v0.0.0)"; major="${ver#v}"; major="${major%%.*}"
+    if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt "$REQUIRED_NODE_MAX" ]; then
+        log_warn "Поточна Node версія $ver не у діапазоні ${REQUIRED_NODE_MIN}.x (<23). Пробую nvm .nvmrc...";
+        if [ -s "$HOME/.nvm/nvm.sh" ]; then . "$HOME/.nvm/nvm.sh"; fi
+        if command -v nvm >/dev/null 2>&1 && [ -f "frontend_new/orchestrator/.nvmrc" ]; then
+            local target; target="$(head -n1 frontend_new/orchestrator/.nvmrc | tr -d '\r')"
+            nvm install "$target" >/dev/null 2>&1 || true
+            nvm use "$target" >/dev/null 2>&1 || true
+            ver="$(node -v 2>/dev/null || echo v0.0.0)"; major="${ver#v}"; major="${major%%.*}"
+        fi
+    fi
+    if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt "$REQUIRED_NODE_MAX" ]; then
+        log_error "Несумісна Node версія: $ver. Потрібно 22.x (наприклад 22.17.1)."; return 1; fi
+    log_info "✔ Node.js $ver OK"
+}
+
+check_local_ai_api_guard() {
+    if curl -s --max-time 3 http://127.0.0.1:3010/v1/models >/dev/null 2>&1; then
+        log_info "✔ Local AI API (3010) доступний"; return 0; fi
+    log_warn "⚠️ Local AI API (3010) недоступний – LLM маршрути можуть деградувати";
+    [ "${ALLOW_NO_LOCAL_AI}" = "1" ] && return 0 || return 1
+}
+
 # Функція перевірки сервісу
 check_service() {
     local name="$1"
@@ -94,31 +127,22 @@ check_linux_requirements() {
 # Перевірка критичних сервісів
 check_critical_services() {
     log_info "🔍 Checking critical services..."
-    
-    local critical_failed=false
-    
-    # Local AI API (КРИТИЧНО ВАЖЛИВИЙ)
-    if check_service "Local AI API" "http://127.0.0.1:3010/v1/models" 3; then
+    if check_local_ai_api_guard; then
         log_info "✅ Local AI API (port 3010) - CRITICAL SERVICE AVAILABLE"
     else
         log_error "❌ Local AI API (port 3010) - CRITICAL SERVICE MISSING"
-        log_error "   This service is REQUIRED for ATLAS intelligent operation"
-        critical_failed=true
-    fi
-    
-    if [ "$critical_failed" = true ]; then
-        log_error ""
-        log_error "CRITICAL SERVICE MISSING:"
-        log_error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-        log_error "Local AI API (OpenAI-compatible) must be running on port 3010"
-        log_error ""
-        log_error "Linux setup examples:"
-        log_error "  • Ollama: 'curl -fsSL https://ollama.ai/install.sh | sh && ollama serve'"
-        log_error "  • LocalAI: './local-ai --port 3010'"
-        log_error "  • Goose with Rust: attempt building from goose/ directory"
-        log_error ""
-        log_error "ATLAS cannot operate without local AI API."
-        exit 1
+        if [ "${ALLOW_NO_LOCAL_AI}" = "1" ]; then
+            log_warn "ALLOW_NO_LOCAL_AI=1 -> Продовжуємо в деградованому режимі (обмежені можливості)"
+        else
+            log_error "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            log_error "Local AI API (OpenAI-compatible) повинен працювати на порті 3010"
+            log_error "Linux setup examples:"
+            log_error "  • Ollama: curl -fsSL https://ollama.ai/install.sh | sh && ollama serve"
+            log_error "  • LocalAI: ./local-ai --port 3010"
+            log_error "  • Goose (як джерело моделей): побудувати в goose/ (необов'язково)"
+            log_error "Встанови ALLOW_NO_LOCAL_AI=1 щоб примусово продовжити без нього."
+            exit 1
+        fi
     fi
 }
 
@@ -275,7 +299,11 @@ main() {
     log_intelligent "🧠 ATLAS Pure Intelligent System - Linux Startup"
     log_intelligent "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
     echo ""
-    
+    # Node версія перед усіма діями
+    check_node_version || exit 1
+    # Швидкий guard (мʼякий) до формальної критичної перевірки
+    check_local_ai_api_guard || log_warn "Local AI API недоступний на ранньому етапі (буде повторна критична перевірка)"
+
     # Перевірки
     check_linux_requirements
     echo ""

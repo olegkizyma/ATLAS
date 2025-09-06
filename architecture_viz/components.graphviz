@@ -1,0 +1,53 @@
+// Graphviz DOT representation of ATLAS components
+
+digraph ATLAS {
+    rankdir=LR;
+    node [shape=rounded, style=filled, fillcolor="#f5f5f5", fontname="Inter"];
+
+    subgraph cluster_client { label="Client"; UI [label="Web UI / Chat"] }
+    subgraph cluster_api { label="Flask 5001"; API [label="Flask API"] }
+    subgraph cluster_node { label="Node Orchestrator 5101"; ORCH [label="Orchestrator"] }
+
+    subgraph cluster_agents { label="Agents"; style=filled; color="#e0f7fa"; 
+        Atlas [label="Atlas\nPlanner", fillcolor="#e3f2fd"];
+        Grisha [label="Grisha\nValidator", fillcolor="#e8f5e9"];
+        Tetyana [label="Tetyana\nExecutor", fillcolor="#fff8e1"];
+    }
+
+    subgraph cluster_probe { label="Probe Cycle"; style=dashed; color="#c5cae9";
+        TP [label="Tetyana Probe"];
+        GP [label="Grisha Review"];
+        AF [label="Atlas Feasibility"];
+    }
+
+    subgraph cluster_memory { label="SQLite Memory"; style=filled; color="#ede7f6";
+        MAtlas [label="Atlas Memory"];
+        MGrisha [label="Grisha Memory"];
+    }
+
+    subgraph cluster_metrics { label="Prometheus Metrics"; style=dotted; color="#ffecb3";
+        P1 [label="pipeline_phase_*"];
+        P2 [label="probe_*"];
+        P3 [label="memory_context_tokens"];
+        P4 [label="memory_context_injections"];
+    }
+
+    subgraph cluster_ext { label="Optional Services"; style=dashed; color="#ffe0b2";
+        Goose [label="Goose 3000"];
+        TTS [label="TTS 3001"];
+        LLM [label="Local AI API 3010", fillcolor="#e1f5fe"];
+    }
+
+    UI -> API -> ORCH -> Atlas -> Grisha -> Tetyana;
+    Tetyana -> Grisha -> ORCH;
+    Atlas -> TP -> GP -> AF -> Atlas;
+
+    Atlas -> MAtlas; Grisha -> MGrisha;
+    MAtlas -> MGrisha [dir=both, style=dashed, label="shared context"];
+
+    ORCH -> P1; ORCH -> P2; ORCH -> P3; ORCH -> P4;
+
+    Tetyana -> Goose;
+    ORCH -> LLM;
+    ORCH -> TTS;
+}

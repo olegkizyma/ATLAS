@@ -1,0 +1,58 @@
+%% High-level multi-agent system overview
+flowchart TD
+    subgraph Client[User / UI]
+        UI[Web UI / Chat]
+    end
+
+    UI --> API[Flask API 5001]
+    API --> Orchestrator[Node Orchestrator 5101]
+
+    subgraph Agents[Multi-Agent Core]
+        Atlas[Atlas\nPlanner]
+        Grisha[Grisha\nValidator]
+        Tetyana[Tetyana\nExecutor]
+    end
+
+    Orchestrator --> Atlas
+    Atlas --> Grisha
+    Grisha -->|approve/adjust| Tetyana
+    Tetyana -->|execution result| Grisha
+    Grisha -->|verdict & followup| Orchestrator
+    Orchestrator --> API --> UI
+
+    subgraph ProbeCycle[Probe Cycle]
+        TP[Tetyana Probe]
+        GP[Grisha Probe Review]
+        AF[Atlas Feasibility]
+    end
+
+    Atlas -. initiate probe .-> TP
+    TP --> GP --> AF --> Atlas
+
+    subgraph Memory[Shared Memory (SQLite)]
+        MAtlas[(Atlas Memory)]
+        MGrisha[(Grisha Memory)]
+    end
+
+    Atlas <--> MAtlas
+    Grisha <--> MGrisha
+    MAtlas <-. shared context .-> MGrisha
+
+    subgraph Metrics[Prometheus Metrics]
+        P1[pipeline_phase_*]
+        P2[probe_*]
+        P3[memory_context_tokens]
+        P4[memory_context_injections]
+    end
+
+    Orchestrator --> Metrics
+
+    subgraph External[Optional Services]
+        G[Goose Executor 3000]
+        TTS[Ukrainian TTS 3001]
+        LLM[Local AI API 3010]
+    end
+
+    Tetyana -->|task exec| G
+    Orchestrator -->|LLM calls| LLM
+    Orchestrator -->|voice gating| TTS

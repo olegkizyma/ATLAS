@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="uk">
+<head>
+  <meta charset="UTF-8" />
+  <title>ATLAS Architecture Visualization</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <style>
+    body { font-family: Inter, system-ui, Arial, sans-serif; margin: 0; padding: 1.2rem 2rem; background:#0f1115; color:#eee; }
+    h1,h2 { font-weight:600; letter-spacing:.5px; }
+    section { margin-bottom:3rem; }
+    .panel { background:#1b1f27; padding:1rem 1.2rem; border:1px solid #2b313d; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.4); }
+    pre { overflow-x:auto; background:#10141a; padding:1rem; border-radius:8px; }
+    img { max-width:100%; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.6); }
+    .grid { display:grid; gap:1.5rem; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); }
+    .badge { display:inline-block; padding:2px 8px; font-size:.7rem; background:#2f81f7; color:#fff; border-radius:14px; letter-spacing:.5px; vertical-align:middle; }
+    footer { opacity:.6; font-size:.75rem; margin-top:4rem; }
+    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+  </style>
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
+</head>
+<body>
+  <h1>ATLAS Architecture <span class="badge">LIVE</span></h1>
+  <p>Сукупний огляд системи: multi-agent pipeline (Atlas, Grisha, Tetyana), probe цикл, памʼять (ранжування), метрики.</p>
+
+  <section class="panel">
+    <h2>1. High-Level System Overview (Mermaid)</h2>
+    <div class="mermaid">
+      %% Embedded from system_overview.mmd (sync manually if changed)
+      flowchart TD
+        subgraph Client[User / UI]
+          UI[Web UI / Chat]
+        end
+        UI --> API[Flask API 5001]
+        API --> Orchestrator[Node Orchestrator 5101]
+        subgraph Agents[Multi-Agent Core]
+          Atlas[Atlas\nPlanner]
+          Grisha[Grisha\nValidator]
+          Tetyana[Tetyana\nExecutor]
+        end
+        Orchestrator --> Atlas
+        Atlas --> Grisha
+        Grisha -->|approve/adjust| Tetyana
+        Tetyana -->|execution result| Grisha
+        Grisha -->|verdict & followup| Orchestrator
+        Orchestrator --> API --> UI
+        subgraph ProbeCycle[Probe Cycle]
+          TP[Tetyana Probe]
+          GP[Grisha Probe Review]
+          AF[Atlas Feasibility]
+        end
+        Atlas -. initiate probe .-> TP
+        TP --> GP --> AF --> Atlas
+        subgraph Memory[Shared Memory (SQLite)]
+          MAtlas[(Atlas Memory)]
+          MGrisha[(Grisha Memory)]
+        end
+        Atlas <--> MAtlas
+        Grisha <--> MGrisha
+        MAtlas <-. shared context .-> MGrisha
+        subgraph Metrics[Prometheus Metrics]
+          P1[pipeline_phase_*]
+          P2[probe_*]
+          P3[memory_context_tokens]
+          P4[memory_context_injections]
+        end
+        Orchestrator --> Metrics
+        subgraph External[Optional Services]
+          G[Goose Executor 3000]
+          TTS[Ukrainian TTS 3001]
+          LLM[Local AI API 3010]
+        end
+        Tetyana -->|task exec| G
+        Orchestrator -->|LLM calls| LLM
+        Orchestrator -->|voice gating| TTS
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>2. Runtime Request Flow (Sequence)</h2>
+    <div class="mermaid">
+      sequenceDiagram
+        autonumber
+        participant U as User/UI
+        participant F as Flask API (5001)
+        participant O as Orchestrator (5101)
+        participant A as Atlas
+        participant G as Grisha
+        participant T as Tetyana
+        participant DB as SQLite Memory
+        U->>F: chat message
+        F->>O: /chat
+        O->>DB: recall ranked memory
+        O->>A: plan prompt + memory
+        A-->>O: plan
+        O->>G: validation
+        G-->>O: precheck
+        alt probe needed
+          O->>T: probe request
+          T-->>O: artifacts
+          O->>G: probe review
+          G-->>O: assessment
+          O->>A: feasibility
+          A-->>O: ADVANCE/CLARIFY
+        end
+        alt execute
+          O->>T: instructions
+          T-->>O: result
+        else clarify
+          O-->>F: clarification payload
+          F-->>U: ask user
+        end
+        O->>G: final validation
+        G-->>O: verdict
+        O->>DB: rememberSafe facts
+        O-->>F: response
+        F-->>U: stream
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>3. Graphviz Component Map (Exported)</h2>
+    <p>PNG/SVG генерується з <code>components.graphviz</code>. Якщо вже згенеровано – відобразиться нижче.</p>
+    <div class="grid">
+      <div>
+        <h3>PNG</h3>
+        <img src="components.png" alt="Components PNG" onerror="this.replaceWith('PNG ще не згенеровано');" />
+      </div>
+      <div>
+        <h3>SVG</h3>
+        <img src="components.svg" alt="Components SVG" onerror="this.replaceWith('SVG ще не згенеровано');" />
+      </div>
+    </div>
+  </section>
+
+  <section class="panel">
+    <h2>4. Memory Ranking Flow</h2>
+    <div class="mermaid">
+      sequenceDiagram
+        autonumber
+        participant O as Orchestrator
+        participant M as SQLite
+        participant R as Ranked Summarizer
+        participant A as Atlas
+        participant G as Grisha
+        O->>M: fetch entries
+        O->>R: summarizeRanked
+        R-->>O: ranked context
+        O->>A: planning prompt
+        A-->>O: plan
+        O->>M: rememberSafe
+        O->>G: validation
+        G-->>O: verdict
+    </div>
+  </section>
+
+  <footer>
+    Generated static visualization page. Онови Mermaid / Graphviz файли та перегенеруй образи при змінах.
+  </footer>
+</body>
+</html>
