@@ -221,14 +221,26 @@ function validateTetianaReport(text) {
 }
 
 function enforceTetianaStructure(text) {
-    let out = String(text || '').trim();
-    if (!out.startsWith('[ТЕТЯНА]')) {
-        out = `[ТЕТЯНА] ${out}`;
-    }
-    const v = validateTetianaReport(out);
-    if (v.ok) return out;
+    let raw = String(text || '').trim();
+    if (!raw.startsWith('[ТЕТЯНА]')) raw = `[ТЕТЯНА] ${raw}`;
+    const v = validateTetianaReport(raw);
+
+    // Detect placeholder / empty style content
+    const placeholderPatterns = [
+        /критерій\s*:\s*…/i,
+        /РЕЗЮМЕ:\s*—/i,
+        /ПЕРЕВІРКА:\s*—/i,
+        /СТАТУС:\s*Needs Clarification/i
+    ];
+    const onlyBullets = raw.split('\n').filter(l => l.trim()).every(l => /^(?:\[ТЕТЯНА]|РЕЗЮМЕ|КРОКИ|РЕЗУЛЬТАТИ|ДОКАЗИ|ПЕРЕВІРКА|СТАТУС|[0-9]+\.|•|критерій)/i.test(l.trim()));
+    const isPlaceholder = placeholderPatterns.some(r => r.test(raw)) || raw.length < 120 || onlyBullets;
+
+    if (v.ok && !isPlaceholder) return raw;
+
+    // Append diagnostic marker for Grisha to treat as non-evidence
+    const missingNote = v.ok ? 'PLACEHOLDER_CONTENT' : ('Missing sections: ' + v.missing.join(', '));
     const template = [
-        out,
+        raw,
         '',
         'РЕЗЮМЕ: —',
         'КРОКИ:',
@@ -239,9 +251,103 @@ function enforceTetianaStructure(text) {
         'ДОКАЗИ (criterion -> evidence):',
         '• критерій: … -> доказ: …',
         'ПЕРЕВІРКА: —',
-        'СТАТУС: Needs Clarification — доповнити відсутні частини: ' + v.missing.join(', ')
+        `СТАТУС: Needs Clarification — доповнити відсутні частини: ${v.missing.join(', ') || 'зміст/докази'}`,
+        `<!-- TETYANA_REPORT_DIAGNOSTIC: ${missingNote} -->`
     ];
     return template.join('\n');
+}
+
+// Intelligent subtype classification (no hard-coded language rules inside code)
+// Strategy:
+// 1) Optional LLM classification (if ACTIONABLE_SUBTYPE_LLM=1) -> one token from allowed list
+// 2) Configurable pattern rules via ACTIONABLE_SUBTYPE_RULES env var (JSON), e.g.:
+//    {
+//      "gui_app": ["калькулятор", "calculator", "open calc"],
+//      "computation": ["sqrt", "обчисли"],
+//      "file_op": ["створи файл", "txt", "folder"]
+//    }
+// 3) Fallback: 'generic'
+// Results cached in-memory to avoid repeated LLM calls.
+const ACTIONABLE_SUBTYPE_LLM = String(process.env.ACTIONABLE_SUBTYPE_LLM || '1') === '1';
+const SUBTYPE_LABELS = ['gui_app','computation','file_op','generic'];
+let SUBTYPE_RULES = {};
+try {
+    if (process.env.ACTIONABLE_SUBTYPE_RULES) {
+        const parsed = JSON.parse(process.env.ACTIONABLE_SUBTYPE_RULES);
+        if (parsed && typeof parsed === 'object') SUBTYPE_RULES = parsed;
+    }
+} catch (e) { console.warn('[SUBTYPE_RULES] Failed to parse ACTIONABLE_SUBTYPE_RULES:', e.message); }
+
+// Precompile regexes from rules for faster evaluation
+const SUBTYPE_RULES_REGEX = Object.fromEntries(
+    Object.entries(SUBTYPE_RULES).map(([k, arr]) => {
+        if (!Array.isArray(arr) || !arr.length) return [k, null];
+        const escaped = arr.map(s => String(s).trim()).filter(Boolean).map(s => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'));
+        if (!escaped.length) return [k, null];
+        return [k, new RegExp(`(${escaped.join('|')})`, 'i')];
+    })
+);
+
+const subtypeCache = new Map(); // key: text -> subtype
+
+async function classifyActionableSubtypeSmart(t, atlasCtx='') {
+    const text = (t || '').trim();
+    if (!text) return 'generic';
+    const norm = text.toLowerCase();
+    const cacheHit = subtypeCache.get(norm);
+    if (cacheHit) return cacheHit;
+
+    // 1) LLM classification (fast timeout) if enabled
+    if (ACTIONABLE_SUBTYPE_LLM) {
+        try {
+            const routes = (registry.getRoutes('atlas') || []).filter(r => r.provider === 'openai_compat');
+            if (routes.length) {
+                const prompt = [
+                    'Класифікуй підтип задачі (лише одне слово) серед: gui_app | computation | file_op | generic.',
+                    'gui_app: запуск або взаємодія з GUI / додатком / програмою користувача.',
+                    'computation: математичне обчислення / формула / розрахунок.',
+                    'file_op: створення/зміна/читання файлів чи папок.',
+                    'generic: інше або невідомо.',
+                    '',
+                    `Запит користувача: ${text.slice(0, 800)}`,
+                    atlasCtx ? `Контекст Atlas: ${String(atlasCtx).slice(0,400)}` : '' ,
+                    '',
+                    'Відповідь: (тільки один токен без пояснень)'
+                ].join('\n');
+                for (const route of routes) {
+                    try {
+                        const out = await callOpenAICompatChatWithTimeout(route.baseUrl || FALLBACK_API_BASE, route.model, prompt, 1200);
+                        if (out) {
+                            const token = out.trim().toLowerCase();
+                            if (SUBTYPE_LABELS.includes(token)) {
+                                subtypeCache.set(norm, token);
+                                return token;
+                            }
+                            // Try to salvage token inside text
+                            const inner = token.split(/\s|\W/).find(x => SUBTYPE_LABELS.includes(x));
+                            if (inner) {
+                                subtypeCache.set(norm, inner);
+                                return inner;
+                            }
+                        }
+                    } catch (_) { /* ignore individual model failure */ }
+                }
+            }
+        } catch (e) { console.warn('[SUBTYPE_LLM] classification failed:', e.message); }
+    }
+
+    // 2) Pattern rules (configurable)
+    for (const label of SUBTYPE_LABELS) {
+        const re = SUBTYPE_RULES_REGEX[label];
+        if (re && re.test(text)) {
+            subtypeCache.set(norm, label);
+            return label;
+        }
+    }
+
+    // 3) Default
+    subtypeCache.set(norm, 'generic');
+    return 'generic';
 }
 
 // Agent dialogue system
@@ -711,6 +817,15 @@ async function processAgentCycle(userMessage, session) {
     // Classify user intent to route the flow efficiently (LLM-first with fallback)
     const intent = await classifyIntentSmart(userMessage, atlasResponse.content || '');
     session.intent = intent;
+    if (intent === 'actionable') {
+        try {
+            session.actionableSubtype = await classifyActionableSubtypeSmart(userMessage, atlasResponse.content || '');
+        } catch (e) {
+            session.actionableSubtype = 'generic';
+        }
+    } else {
+        delete session.actionableSubtype;
+    }
     logMessage('info', `Intent classified as: ${intent}`);
 
     // If actionable -> staged pipeline with TTS pacing
@@ -737,9 +852,26 @@ async function processAgentCycle(userMessage, session) {
             const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги Гриші: ${grishaPre.content}\n\nВиконай кроки та чітко звітуй.`;
             const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
             const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
-            try { tetyanaExec.evidence = extractEvidence(tetyanaExec.content); } catch {}
+            try { 
+                tetyanaExec.evidence = extractEvidence(tetyanaExec.content); 
+                if (tetyanaExec.evidence && typeof tetyanaExec.evidence.score === 'number') {
+                    tetyanaExec.lowEvidence = tetyanaExec.evidence.score < 15; // threshold heuristic
+                }
+            } catch {}
             responses.push(tetyanaExec);
             session.history.push(tetyanaExec);
+            if (tetyanaExec.lowEvidence) {
+                // Force an augmentation request before verification if trivial placeholder content
+                const subtype = session.actionableSubtype || 'generic';
+                const need = subtype === 'gui_app' ? 'PID та процес (pgrep), часовий штамп запуску' : 'конкретні файли/вихід команд';
+                const followMsg = `Недостатньо доказів (score=${tetyanaExec.evidence?.score || 0}). Додай: ${need}. Потім я перевірю.`;
+                const grishaEarlyRaw = await generateAgentResponse('grisha', followMsg, session);
+                const grishaEarly = tagResponse(grishaEarlyRaw, PHASE.GRISHA_FOLLOWUP);
+                responses.push(grishaEarly);
+                session.history.push(grishaEarly);
+                markNeedsMore(session, [need], tetyanaExec.content);
+                return responses; // skip immediate verification until enriched
+            }
             const verify = await grishaVerifyWithGoose(userMessage, atlasResponse.content, tetyanaExec.content, session.id);
             const confirmed = verify.confidence >= GRISHA_CONFIDENCE_THRESHOLD;
             const verdictMsg = confirmed
@@ -867,7 +999,22 @@ app.post('/chat/continue', async (req, res) => {
             const execPrompt = `Завдання користувача: ${pipe.userMessage}\nПлан Atlas: ${pipe.atlasPlan}\nВимоги Гриші: ${pipe.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
             const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
             const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
-            try { tetyanaExec.evidence = extractEvidence(tetyanaExec.content); } catch {}
+            try { 
+                tetyanaExec.evidence = extractEvidence(tetyanaExec.content); 
+                if (tetyanaExec.evidence && tetyanaExec.evidence.score < 15) {
+                    const subtype = session.actionableSubtype || 'generic';
+                    const need = subtype === 'gui_app' ? 'PID процесу калькулятора (pgrep) та час' : 'реальні артефакти (шляхи файлів / виходи команд)';
+                    const grishaPrompt = `Попереднє виконання має мало доказів (score=${tetyanaExec.evidence.score}). Попроси Тетяну надати: ${need}.`; 
+                    const grishaWarnRaw = await generateAgentResponse('grisha', grishaPrompt, session);
+                    const grishaWarn = tagResponse(grishaWarnRaw, PHASE.GRISHA_FOLLOWUP);
+                    responses.push(tetyanaExec);
+                    session.history.push(tetyanaExec);
+                    responses.push(grishaWarn);
+                    session.history.push(grishaWarn);
+                    markNeedsMore(session, [need], tetyanaExec.content);
+                    return responses;
+                }
+            } catch {}
             responses.push(tetyanaExec);
             session.history.push(tetyanaExec);
             PIPELINE_METRICS.stagedExecutions++;
@@ -970,12 +1117,12 @@ function isActionableTask(text) {
     const verbs = [
         'відкрий', 'запусти', 'виконай', 'виконати', 'обчисли', 'порахуй', 'корінь', 'sqrt',
         'збережи', 'зберегти', 'створи', 'створити', 'на пк', 'на робочому столі', 'на робочий стіл',
-    'відкрий калькулятор', 'калькулятор', 'редактор', 'текстовий файл', 'txt',
-    // хенд-оф/верифікація
-    'передай тетяні', 'передати тетяні', 'для тетяни', 'тетяна',
-    'передай гріші', 'передати гріші', 'для гриші', 'гриша', 'перевірку', 'перевірити'
+        'відкрий калькулятор', 'калькулятор', 'редактор', 'текстовий файл', 'txt',
+        'передай тетяні', 'передати тетяні', 'для тетяни', 'тетяна',
+        'передай гріші', 'передати гріші', 'для гриші', 'гриша', 'перевірку', 'перевірити'
     ];
-    return verbs.some(v => t.includes(v));
+    if (!verbs.some(v => t.includes(v))) return false;
+    return true;
 }
 
 // Legacy static plan removed: dynamic routing handled by ModelRegistry
@@ -1194,12 +1341,32 @@ function grishaVerificationSessionId(baseSessionId) {
 }
 
 function extractJson(text) {
-    // Try to extract the last JSON object from text
-    const s = String(text || '');
+    const s = String(text || '').trim();
+    if (!s) return null;
+    // 1. Fenced ```json blocks
+    const fenced = s.match(/```json[\r\n]+([\s\S]*?)```/i);
+    if (fenced) {
+        try { return JSON.parse(fenced[1]); } catch { /* ignore */ }
+    }
+    // 2. Balance braces scan (forward)
+    let best = null; let depth = 0; let buf = '';
+    for (let i = 0; i < s.length; i++) {
+        const ch = s[i];
+        if (ch === '{') { depth++; }
+        if (depth > 0) buf += ch;
+        if (ch === '}') {
+            depth--; if (depth === 0) { // complete candidate
+                try { best = JSON.parse(buf); } catch { /* ignore */ }
+                buf = ''; // continue searching last valid
+            }
+        }
+    }
+    if (best) return best;
+    // 3. Last resort (original heuristic)
     const start = s.lastIndexOf('{');
     const end = s.lastIndexOf('}');
     if (start !== -1 && end !== -1 && end > start) {
-        try { return JSON.parse(s.slice(start, end + 1)); } catch (_) {}
+        try { return JSON.parse(s.slice(start, end + 1)); } catch {}
     }
     return null;
 }

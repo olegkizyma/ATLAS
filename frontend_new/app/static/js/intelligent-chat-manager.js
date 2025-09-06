@@ -586,8 +586,13 @@ class AtlasIntelligentChatManager {
 
                 // If orchestrator indicates nextAction, continue pipeline only after TTS completes
                 if (data.session && data.session.nextAction) {
-                    this.log(`[CHAT] Next action scheduled: ${data.session.nextAction}. Waiting for TTS to finish...`);
-                    await this.waitForTTSIdle(60000);
+                    const voiceActive = this.voiceSystem.enabled && this.isVoiceEnabled();
+                    if (voiceActive) {
+                        this.log(`[CHAT] Next action scheduled: ${data.session.nextAction}. Waiting for TTS to finish...`);
+                        await this.waitForTTSIdle(30000).catch(()=>{});
+                    } else {
+                        this.log(`[CHAT] Next action scheduled: ${data.session.nextAction}. Voice off → immediate continue.`);
+                    }
                     await this.continuePipeline(data.session.id, 0);
                 } else if (data.endOfConversation === true) {
                     // No follow-up actions and orchestrator signaled end
@@ -684,8 +689,11 @@ class AtlasIntelligentChatManager {
             }
 
             if (data.session && data.session.nextAction) {
-                this.log(`[CHAT] Next action: ${data.session.nextAction}. Waiting for TTS…`);
-                await this.waitForTTSIdle(60000);
+                const voiceActive = this.voiceSystem.enabled && this.isVoiceEnabled();
+                this.log(`[CHAT] Next action: ${data.session.nextAction}. voiceActive=${voiceActive}`);
+                if (voiceActive) {
+                    await this.waitForTTSIdle(20000).catch(()=>{});
+                }
                 return await this.continuePipeline(data.session.id, depth + 1);
             } else if (data.endOfConversation === true) {
                 this.log('[CHAT] Conversation ended by orchestrator (continue)');
