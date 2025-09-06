@@ -30,6 +30,7 @@ import wave
 from threading import Lock
 from time import monotonic
 import re
+import time
 
 try:
     # Optional: robust retry adapter if available
@@ -176,7 +177,10 @@ def _mark_tts_failure(base: str, backoff: float = 5.0):
 def _tts_get(path: str, timeout: int = 5):
     base = _pick_tts_base()
     try:
-        r = (http or requests).get(f"{base}{path}", timeout=timeout)
+        # allow longer default timeout for larger voice lists or slower local services
+        effective_timeout = max(timeout, 5)
+        sess = http or requests
+        r = sess.get(f"{base}{path}", timeout=effective_timeout)
         if r.status_code >= 500:
             _mark_tts_failure(base)
         return r, base
@@ -188,7 +192,10 @@ def _tts_get(path: str, timeout: int = 5):
 def _tts_post(path: str, json_payload: dict, timeout: int):
     base = _pick_tts_base()
     try:
-        r = (http or requests).post(f"{base}{path}", json=json_payload, timeout=timeout)
+        # dynamic minimum timeout to account for long synthesis of long texts
+        effective_timeout = max(timeout, 10)
+        sess = http or requests
+        r = sess.post(f"{base}{path}", json=json_payload, timeout=effective_timeout)
         if r.status_code >= 500:
             _mark_tts_failure(base)
         return r, base
@@ -532,11 +539,27 @@ def chat():
         if not requests:
             return jsonify({'error': 'Requests module unavailable'}), 500
 
-        response = requests.post(
-            f'{ORCHESTRATOR_URL}/chat/stream',
-            json={'message': message, 'sessionId': session_id, 'userId': user_id},
-            timeout=30
-        )
+        # Use a longer timeout and a small retry loop for local orchestrator which may be busy
+        post_url = f'{ORCHESTRATOR_URL}/chat/stream'
+        last_exc = None
+        response = None
+        for attempt in range(1, 4):
+            try:
+                response = requests.post(
+                    post_url,
+                    json={'message': message, 'sessionId': session_id, 'userId': user_id},
+                    timeout=120
+                )
+                break
+            except Exception as e:
+                last_exc = e
+                logger.warning(f"Orchestrator POST attempt {attempt} failed: {e}")
+                # exponential backoff
+                time.sleep(min(2 ** attempt, 8))
+
+        if response is None:
+            logger.error(f"Orchestrator unreachable after retries: {last_exc}")
+            return jsonify({'error': 'Orchestrator unreachable', 'details': str(last_exc)}), 503
         if response.status_code == 200:
             return jsonify(response.json())
         else:

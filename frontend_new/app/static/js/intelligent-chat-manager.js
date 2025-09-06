@@ -528,9 +528,9 @@ class AtlasIntelligentChatManager {
     
     async streamFromOrchestrator(message, retryAttempt = 0) {
         const maxRetries = 3;
-        const timeoutDuration = 30000; // 30 seconds timeout
-        
-        const controller = new AbortController();
+    // Adaptive timeout: start large and increase with retries to accommodate slow local LLMs
+    const timeoutDuration = Math.min(120000 + (retryAttempt * 60000), 420000); // 2min -> up to 7min
+    const controller = new AbortController();
         const timeoutId = setTimeout(() => {
             this.log(`Request timeout after ${timeoutDuration/1000}s (attempt ${retryAttempt + 1})`);
             controller.abort();

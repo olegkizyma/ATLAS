@@ -87,7 +87,8 @@ async function callOpenAICompatChat(baseUrl, model, userMessage) {
         'Content-Type': 'application/json',
         ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {})
     };
-    const resp = await axios.post(url, payload, { headers, timeout: 20000 });
+    // Increase timeout for local LLMs which may be slower; 120s default
+    const resp = await axios.post(url, payload, { headers, timeout: parseInt(process.env.OPENAI_COMPAT_TIMEOUT_MS || '120000', 10) });
     if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
     const text = resp.data?.choices?.[0]?.message?.content;
     return (typeof text === 'string' && text.trim()) ? text.trim() : null;
