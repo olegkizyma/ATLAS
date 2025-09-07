@@ -1,12 +1,30 @@
 # ATLAS Architecture Visualization
 
-Сучасні візуалізації логіки та структури системи з метриками таймінгу, режимом ACK та обробкою дублікатів.
+Сучасні візуалізації логіки та структури системи ATLAS з метриками таймінгу, Recovery Bridge, режимом ACK та обробкою дублікатів.
+
+## Актуальний стан системи (September 7, 2025)
+
+### Основні компоненти
+- **Flask Frontend** (port 5001) - Основний веб-інтерфейс
+- **Node.js Orchestrator** (port 5101) - Керування агентами та оркестрація
+- **Recovery Bridge** (port 5102/5103) - Система відновлення після помилок ✅ **ВИПРАВЛЕНО**
+- **Goose Executor** (port 3000) - Реальне виконання завдань
+- **Ukrainian TTS** (port 3001) - Голосовий синтез
+- **Grisha Vision** - Візуальний моніторинг
+- **Local AI API** (port 3010) - OpenAI-сумісний API
+
+### Recovery Bridge ✅ **НОВІ МОЖЛИВОСТІ**
+- **WebSocket порт:** ws://localhost:5102 - Комунікація з JS оркестратором
+- **Health endpoint:** http://localhost:5103/health - Моніторинг стану
+- **Інтелектуальне відновлення:** Автоматична обробка помилок агентів
+- **JavaScript інтеграція:** Seamless підключення до frontend
 
 ## Вміст
-- `system_overview.mmd` – високорівнева діаграма multi-agent pipeline (Mermaid)
-- `runtime_flow.mmd` – деталізований послідовний процес запиту (Mermaid Sequence)
-- `components.graphviz` – Graphviz (DOT) для більш гнучкого рендеру
-- `layers.mmd` – шарова архітектура
+- `system_overview.mmd` – високорівнева діаграма multi-agent pipeline з Recovery Bridge (Mermaid)
+- `runtime_flow.mmd` – деталізований послідовний процес запиту з recovery flow (Mermaid Sequence)
+- `recovery_bridge_flow.mmd` – **НОВИЙ** детальна архітектура Recovery Bridge системи (Mermaid)
+- `components.graphviz` – Graphviz (DOT) з Recovery Bridge компонентами для гнучкого рендеру
+- `layers.mmd` – шарова архітектура з Recovery & Reliability Layer
 - `memory_flow.mmd` – обробка та ранжування памʼяті
 - `README.md` – цей файл
 
@@ -17,7 +35,17 @@ Graphviz: `dot -Tpng components.graphviz -o components.png`.
 ## Коротко
 Пайплайн: Atlas (plan) → Grisha (precheck) → Tetyana (execution) → Grisha (verdict/followup) + Probe підцикл (Tetiana probe → Grisha probe review → Atlas feasibility). Памʼять (SQLite) для Atlas/Grisha з ранжуванням (exponential decay + frequency) інʼєктується в prompt із токеновою метрикою.
 
+**Recovery Bridge інтеграція:** При помилках агентів система автоматично активує Recovery Bridge для аналізу і адаптації стратегії виконання.
+
 ### Нові можливості (Phase 3)
+
+#### Recovery Bridge System ✅ **АКТИВНО ПРАЦЮЄ**
+- **WebSocket сервер** (port 5102): Реальний час комунікації з JavaScript оркестратором
+- **HTTP Health Endpoint** (port 5103): Моніторинг стану та метрики відновлення  
+- **Intelligent Recovery System**: Автоматичний аналіз помилок агентів та адаптація стратегій
+- **Seamless Integration**: JavaScript WebSocket клієнт з автоматичним підключенням
+- **Failure Patterns**: Розпізнавання та класифікація типів помилок (timeout, validation, execution)
+- **Adaptation Strategies**: Retry with backoff, context reduction, task decomposition, manual escalation
 
 #### Детальні таймінги та метрики
 - Пер-агентні таймінги: `[TIMING] agent=atlas route=openai_compat model=... ms=... success=true`

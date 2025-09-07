@@ -1,9 +1,11 @@
-%% Detailed request lifecycle sequence with timing, ACK mode, and duplicate handling
+%% Detailed request lifecycle sequence with Recovery Bridge, timing, ACK mode, and duplicate handling
+%% Updated: September 7, 2025 - Recovery Bridge integration
 sequenceDiagram
     autonumber
     participant U as User/UI
     participant F as Flask API (5001)
     participant O as Orchestrator (Node 5101)
+    participant RB as Recovery Bridge (5102/5103)
     participant A as Atlas Planner
     participant G as Grisha Validator  
     participant T as Tetyana Executor
@@ -11,7 +13,7 @@ sequenceDiagram
     participant C as Duplicate Cache
     participant M as Metrics/Prometheus
 
-    note over U,M: Enhanced timing & observability system
+    note over U,M: Enhanced system with Recovery Bridge support
     
     U->>F: chat message + clientMessageId
     F->>C: check duplicate TTL cache (5min)
@@ -108,6 +110,24 @@ sequenceDiagram
             else verification confirmed
                 note over O: Pipeline complete, clear session state
             end
+        end
+        
+        alt failure recovery (NEW) ✅
+            note over O: Agent execution failure detected
+            O->>RB: WebSocket recovery request + failure data
+            note over RB: Intelligent Recovery System analysis
+            RB->>RB: failure pattern analysis + adaptation strategy
+            RB-->>O: recovery recommendations + adaptation parameters
+            alt recovery successful
+                note over O: Apply adaptations + retry with modified parameters
+                O->>A: retry with adaptations (context reduction/backoff/decompose)
+                note over A: [TIMING] agent=atlas phase=recovery_retry ms=... success=true
+                A-->>O: adapted plan + recovery applied
+            else manual intervention required
+                O-->>F: escalate to manual intervention + recovery suggestions
+                F-->>U: recovery options + manual fallback
+            end
+            O->>M: recovery_attempts++, recovery_success/failure++
         end
         
         note over O: cycleDuration = Date.now() - cycleStart

@@ -1,4 +1,5 @@
-%% High-level multi-agent system overview with timing, ACK mode, and duplicate handling
+%% High-level multi-agent system overview with Recovery Bridge, timing, ACK mode, and duplicate handling
+%% Updated: September 7, 2025 - Recovery Bridge integration added
 flowchart TD
     subgraph Client[User / UI]
         UI[Web UI / Chat]
@@ -13,7 +14,19 @@ flowchart TD
         Tetyana[Tetyana\nExecutor\n+per-agent timing]
     end
 
-    subgraph ACKFlow[ACK Mode Flow - NEW]
+    subgraph RecoverySystem[Recovery Bridge System - ACTIVE ✅]
+        RB[Recovery Bridge\nWebSocket :5102\nHealth :5103]
+        IRS[Intelligent Recovery\nFailure Analysis]
+        RBComm[JS Integration\nAdaptation Engine]
+        RBHealth[Health Monitoring\n/health endpoint]
+    end
+
+    Orchestrator <-->|failure recovery| RB
+    RB --> IRS --> RBComm
+    RB --> RBHealth
+    IRS -->|adaptation parameters| Orchestrator
+
+    subgraph ACKFlow[ACK Mode Flow]
         ACKReq[ACK Request\nX-Atlas-Ack: immediate]
         ACKResp[Immediate Accept\n~3s timeout]
         StatusPoll[Status Polling\n/api/chat/status/<id>]

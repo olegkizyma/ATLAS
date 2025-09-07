@@ -15,24 +15,77 @@
     .badge { display:inline-block; padding:2px 8px; font-size:.7rem; background:#2f81f7; color:#fff; border-radius:14px; letter-spacing:.5px; vertical-align:middle; }
     footer { opacity:.6; font-size:.75rem; margin-top:4rem; }
     code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
+    
+    /* Copy buttons */
+    .copy-container { position: relative; display: inline-block; }
+    .copy-btn { 
+      position: absolute; top: 8px; right: 8px; 
+      background: rgba(47,129,247,0.8); color: white; border: none; 
+      padding: 4px 8px; border-radius: 4px; cursor: pointer; 
+      font-size: 12px; opacity: 0.7; transition: opacity 0.2s;
+    }
+    .copy-btn:hover { opacity: 1; background: rgba(47,129,247,1); }
+    .copy-btn.copied { background: rgba(76,175,80,0.8); }
+    
+    /* File download buttons */
+    .download-section { margin: 1rem 0; }
+    .download-btn {
+      display: inline-block; margin: 4px 8px 4px 0;
+      padding: 6px 12px; background: rgba(156,255,199,0.1); 
+      color: #9cffc7; border: 1px solid rgba(156,255,199,0.3);
+      text-decoration: none; border-radius: 6px; font-size: 13px;
+      transition: all 0.2s;
+    }
+    .download-btn:hover { 
+      background: rgba(156,255,199,0.2); 
+      border-color: rgba(156,255,199,0.5);
+      color: #fff;
+    }
+    .download-btn::before { content: "📄 "; }
+    .download-btn.png::before { content: "🖼️ "; }
+    .download-btn.svg::before { content: "🎨 "; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
   <script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
 </head>
 <body>
-  <h1>ATLAS Architecture <span class="badge">LIVE</span></h1>
-  <p>Сукупний огляд системи: multi-agent pipeline (Atlas, Grisha, Tetyana), probe цикл, памʼять (ранжування), метрики.</p>
+  <h1>ATLAS Architecture <span class="badge">UPDATED Sep 7, 2025</span></h1>
+  <p>Сукупний огляд системи: multi-agent pipeline (Atlas, Grisha, Tetyana), Recovery Bridge, probe цикл, памʼять (ранжування), метрики.</p>
   <div class="panel" style="margin-bottom:2rem; background:#15202b;">
-    <h3>Legend</h3>
+    <h3>Legend & Recent Updates ✅</h3>
     <ul style="line-height:1.4; font-size:.9rem; padding-left:1.1rem;">
       <li><strong>Agents</strong>: Atlas (planner), Grisha (validator), Tetyana (executor)</li>
+      <li><strong>Recovery Bridge</strong>: ✅ WebSocket (:5102) + Health (:5103) - автоматичне відновлення помилок</li>
       <li><strong>Probe Cycle</strong>: Мінімальний експеримент для збирання бракуючих артефактів</li>
-  <li><strong>Memory</strong>: SQLite факти (key/value) з exponential decay + frequency ранжуванням</li>
-  <li><strong>Semantic</strong>: (опц.) hash/remote embeddings cosine top-K</li>
+      <li><strong>Memory</strong>: SQLite факти (key/value) з exponential decay + frequency ранжуванням</li>
+      <li><strong>Semantic</strong>: (опц.) hash/remote embeddings cosine top-K</li>
       <li><strong>Pruning</strong>: Capacity + TTL (3d by default) після кожного запису</li>
       <li><strong>Metrics</strong>: Prometheus endpoints (`/metrics/prometheus`) з memory_* та probe_*</li>
       <li><strong>rememberSafe</strong>: інлайн дедуп (60s) щоб зменшити шум</li>
+      <li><strong>System Status</strong>: 🎯 All services running, Recovery Bridge fixed & active</li>
     </ul>
+  </div>
+
+  <div class="panel download-section" style="margin-bottom:2rem; background:#0d1b0f;">
+    <h3>📥 Download Architecture Files</h3>
+    <p style="font-size:0.9rem; opacity:0.8;">Оригінальні файли архітектури для локального використання:</p>
+    <div>
+      <a href="system_overview.mmd" download class="download-btn">System Overview (Mermaid)</a>
+      <a href="runtime_flow.mmd" download class="download-btn">Runtime Flow (Mermaid)</a>
+      <a href="recovery_bridge_flow.mmd" download class="download-btn">Recovery Bridge (Mermaid)</a>
+      <a href="layers.mmd" download class="download-btn">Layers Architecture (Mermaid)</a>
+      <a href="memory_flow.mmd" download class="download-btn">Memory Flow (Mermaid)</a>
+      <a href="components.graphviz" download class="download-btn">Components (Graphviz DOT)</a>
+      <a href="components.png" download class="download-btn png">Components PNG</a>
+      <a href="components.svg" download class="download-btn svg">Components SVG</a>
+      <a href="SYSTEM_STATUS.md" download class="download-btn">System Status Report</a>
+      <a href="README.md" download class="download-btn">Architecture README</a>
+    </div>
+    <div style="margin-top:0.5rem;">
+      <button onclick="downloadAllFiles()" class="download-btn" style="background:rgba(255,193,7,0.2); color:#ffc107; border-color:rgba(255,193,7,0.5);">
+        📦 Download All Files
+      </button>
+    </div>
   </div>
 
   <section class="panel">
@@ -180,8 +233,123 @@
     </div>
   </section>
 
-  <footer>
-    Generated static visualization page. Онови Mermaid / Graphviz файли та перегенеруй образи при змінах.
+    <footer>
+    ATLAS Architecture Visualization by ATLAS Team | Last updated: September 7, 2025 ✅
   </footer>
+
+  <script>
+    // Copy functionality for code blocks and diagrams
+    function addCopyButtons() {
+      document.querySelectorAll('pre, .mermaid').forEach(block => {
+        const container = document.createElement('div');
+        container.className = 'copy-container';
+        block.parentNode.insertBefore(container, block);
+        container.appendChild(block);
+        
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy-btn';
+        copyBtn.textContent = '📋 Copy';
+        copyBtn.onclick = () => copyToClipboard(block, copyBtn);
+        container.appendChild(copyBtn);
+      });
+    }
+
+    function copyToClipboard(element, button) {
+      let text = '';
+      if (element.classList.contains('mermaid')) {
+        // For Mermaid diagrams, copy the source code
+        text = element.getAttribute('data-processed') ? 
+               element.textContent : 
+               element.innerHTML.replace(/<[^>]*>/g, '').trim();
+      } else {
+        text = element.textContent;
+      }
+      
+      navigator.clipboard.writeText(text).then(() => {
+        button.textContent = '✅ Copied!';
+        button.classList.add('copied');
+        setTimeout(() => {
+          button.textContent = '📋 Copy';
+          button.classList.remove('copied');
+        }, 2000);
+      }).catch(err => {
+        console.error('Copy failed:', err);
+        button.textContent = '❌ Failed';
+        setTimeout(() => {
+          button.textContent = '📋 Copy';
+        }, 2000);
+      });
+    }
+
+    // Download all files functionality
+    async function downloadAllFiles() {
+      const files = [
+        'system_overview.mmd',
+        'runtime_flow.mmd', 
+        'recovery_bridge_flow.mmd',
+        'layers.mmd',
+        'memory_flow.mmd',
+        'components.graphviz',
+        'components.png',
+        'components.svg',
+        'SYSTEM_STATUS.md',
+        'README.md'
+      ];
+      
+      const zip = new JSZip();
+      const button = event.target;
+      const originalText = button.textContent;
+      
+      button.textContent = '📦 Downloading...';
+      button.disabled = true;
+      
+      try {
+        for (const file of files) {
+          try {
+            const response = await fetch(file);
+            if (response.ok) {
+              const blob = await response.blob();
+              zip.file(file, blob);
+            }
+          } catch (err) {
+            console.warn(`Failed to download ${file}:`, err);
+          }
+        }
+        
+        const zipBlob = await zip.generateAsync({type: 'blob'});
+        const url = window.URL.createObjectURL(zipBlob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = 'atlas-architecture-files.zip';
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        window.URL.revokeObjectURL(url);
+        
+        button.textContent = '✅ Downloaded!';
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.disabled = false;
+        }, 3000);
+      } catch (err) {
+        console.error('Download failed:', err);
+        button.textContent = '❌ Failed';
+        setTimeout(() => {
+          button.textContent = originalText;
+          button.disabled = false;
+        }, 3000);
+      }
+    }
+
+    // Initialize copy buttons when page loads
+    document.addEventListener('DOMContentLoaded', () => {
+      addCopyButtons();
+    });
+  </script>
+  
+  <!-- JSZip for downloading all files -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+</body>
+</html>
 </body>
 </html>

@@ -1,4 +1,4 @@
-%% Layered architecture view
+%% Layered architecture view - Updated with Recovery Bridge (September 7, 2025)
 flowchart TB
     subgraph Presentation[Presentation Layer]
         UI[Web UI / Chat]
@@ -13,6 +13,13 @@ flowchart TB
         Metrics[Prometheus Export]
     end
 
+    subgraph Recovery[Recovery & Reliability Layer ✅]
+        RB[Recovery Bridge WS:5102]
+        RBHealth[Health Monitor :5103]
+        IRS[Intelligent Recovery System]
+        FHandler[Failure Handler]
+    end
+
     subgraph Agents[Agent Layer]
         Atlas[Atlas Planner]
         Grisha[Grisha Validator]
@@ -23,19 +30,27 @@ flowchart TB
         Memory[(SQLite Memory)]
         Ranking[Ranked Summarizer]
         Dedup[rememberSafe Dedup]
-    Pruning[TTL & Capacity Pruning]
+        Pruning[TTL & Capacity Pruning]
     end
 
     subgraph External[External / Optional]
         Goose[Goose Executor 3000]
         TTS[TTS 3001]
         LLM[Local AI API 3010]
+        Vision[Grisha Vision]
     end
 
     UI --> Flask --> Node --> Atlas
     Node --> Grisha
     Grisha --> Tetyana
     Tetyana --> Grisha
+    
+    %% Recovery Bridge integration
+    Node <--> RB
+    RB --> RBHealth
+    RB --> IRS --> FHandler
+    FHandler --> Node
+    
     Atlas --> Memory
     Grisha --> Memory
     Memory --> Ranking
@@ -45,3 +60,4 @@ flowchart TB
     Node --> LLM
     Tetyana --> Goose
     Node --> TTS
+    Node --> Vision

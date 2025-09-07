@@ -843,12 +843,13 @@ def handle_voice_interrupt():
 @app.route('/api/status')
 def status():
     """Simple status endpoint for Status Manager"""
+    recovery_status = check_recovery_bridge_health()
     return jsonify({
         'timestamp': datetime.now().isoformat(),
         'processes': {
             'frontend': {'count': 1, 'status': 'running'},
             'orchestrator': {'count': 1 if check_orchestrator_health() == 'running' else 0, 'status': check_orchestrator_health()},
-            'recovery': {'count': 1, 'status': 'running'},  # Recovery bridge is usually running if frontend is up
+            'recovery': {'count': 1 if recovery_status == 'running' else 0, 'status': recovery_status},
             'tts': {'count': 1 if check_tts_health() == 'running' else 0, 'status': check_tts_health()},
             'goose': {'count': 1 if check_goose_health() == 'running' else 0, 'status': check_goose_health()},
             'vision': {'count': 1 if check_vision_health() == 'running' else 0, 'status': check_vision_health()}
@@ -1014,6 +1015,16 @@ def check_goose_health():
         return 'unavailable'
     try:
         response = requests.get('http://localhost:3000/', timeout=3)
+        return 'running' if response.status_code == 200 else 'error'
+    except:
+        return 'stopped'
+
+def check_recovery_bridge_health():
+    """Check if Recovery Bridge is responding"""
+    if not requests:
+        return 'unavailable'
+    try:
+        response = requests.get('http://localhost:5103/health', timeout=3)
         return 'running' if response.status_code == 200 else 'error'
     except:
         return 'stopped'

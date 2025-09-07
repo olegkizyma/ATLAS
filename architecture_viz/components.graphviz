@@ -1,4 +1,5 @@
-// Graphviz DOT representation of ATLAS components with enhanced timing and ACK
+// Graphviz DOT representation of ATLAS components with Recovery Bridge, timing and ACK
+// Updated: September 7, 2025 - Recovery Bridge integration
 
 digraph ATLAS {
     rankdir=LR;
@@ -8,6 +9,13 @@ digraph ATLAS {
     subgraph cluster_client { label="Client Layer"; UI [label="Web UI / Chat\n+ ACK mode\n+ status polling"] }
     subgraph cluster_api { label="Flask API 5001\n+ unified logging"; API [label="Flask API\n+ clientMessageId\n+ ACK endpoints"]; StatusAPI [label="/api/chat/status\npolling endpoint"] }
     subgraph cluster_node { label="Node Orchestrator 5101\n+ enhanced timing"; ORCH [label="Orchestrator\n+ per-agent timing\n+ cycle timing"]; SessionMgr [label="Session Manager"]; DupCache [label="Duplicate Cache\nTTL 5min"] }
+
+    subgraph cluster_recovery { label="Recovery Bridge System ✅\nPorts 5102/5103"; style=filled; color="#e8f5e9";
+        RB [label="Recovery Bridge\nWebSocket :5102", fillcolor="#c8e6c8"];
+        RBHealth [label="Health Monitor\nHTTP :5103", fillcolor="#c8e6c8"];
+        IRS [label="Intelligent Recovery\nFailure Analysis", fillcolor="#a5d6a7"];
+        RBStats [label="Recovery Stats\nhandled_failures", fillcolor="#a5d6a7"];
+    }
 
     subgraph cluster_agents { label="Enhanced Agents\n+ timing instrumentation"; style=filled; color="#e0f7fa"; 
         Atlas [label="Atlas\nPlanner + timing", fillcolor="#e3f2fd"];
@@ -89,6 +97,19 @@ digraph ATLAS {
     DupCache -> DupMetric [label="increment"];
     Atlas -> TimingMetric [label="per-agent ms"];
     Grisha -> TimingMetric [label="per-agent ms"];
+    // Recovery Bridge flows ✅
+    ORCH -> RB [label="failure events", color="#d32f2f", style="bold"];
+    RB -> IRS [label="analyze failure", color="#f57c00"];
+    IRS -> RB [label="recovery strategy", color="#388e3c"];
+    RB -> ORCH [label="adaptations", color="#388e3c", style="bold"];
+    RB -> RBHealth [label="health status"];
+    RBHealth -> RBStats [label="metrics"];
+    
+    // Agent failure triggers
+    Atlas -> RB [label="planning failures", style=dashed, color="#d32f2f"];
+    Grisha -> RB [label="validation failures", style=dashed, color="#d32f2f"];
+    Tetyana -> RB [label="execution failures", style=dashed, color="#d32f2f"];
+    
     Tetyana -> TimingMetric [label="per-agent ms"];
     TP -> ProbeAdvanced [label="ADVANCE"];
     GP -> ProbeClarified [label="CLARIFY"];

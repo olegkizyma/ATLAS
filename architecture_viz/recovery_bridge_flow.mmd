@@ -1,0 +1,74 @@
+%% Recovery Bridge Architecture and Flow
+%% Created: September 7, 2025 - Recovery Bridge integration
+flowchart TD
+    subgraph RBSystem[Recovery Bridge System - ACTIVE ✅]
+        RBMain[Recovery Bridge Main Process]
+        WSServer[WebSocket Server :5102]
+        HTTPHealth[HTTP Health Server :5103]
+        IRS[Intelligent Recovery System]
+    end
+
+    subgraph JSOrchestrator[Node.js Orchestrator Integration]
+        JSClient[JavaScript WebSocket Client]
+        FailureDetector[Agent Failure Detection]
+        AdaptationEngine[Parameter Adaptation]
+        RetryLogic[Intelligent Retry Logic]
+    end
+
+    subgraph RecoveryStrategies[Recovery Strategies]
+        RetryBackoff[Retry with Backoff]
+        ContextReduction[Context Reduction]
+        TaskDecomposition[Task Decomposition]
+        ManualEscalation[Manual Intervention]
+    end
+
+    subgraph HealthMonitoring[Health & Monitoring]
+        HealthEndpoint[/health endpoint\nStatus: ok/error]
+        RecoveryStats[Recovery Statistics\nhandled_failures count]
+        PrometheusMetrics[Prometheus Metrics\nrecovery_* counters]
+    end
+
+    subgraph Implementation[Technical Implementation]
+        PythonVenv[Python Virtual Environment\nfrontend_new/venv]
+        AsyncIO[AsyncIO Event Loop\nWebSocket + HTTP servers]
+        JSONComm[JSON Message Protocol\nrequest/response/health]
+        ErrorHandling[Graceful Error Handling\nConnection management]
+    end
+
+    %% Main flow connections
+    FailureDetector --> JSClient
+    JSClient -->|WebSocket ws://localhost:5102| WSServer
+    WSServer --> RBMain --> IRS
+    
+    %% Recovery strategy selection
+    IRS --> RetryBackoff
+    IRS --> ContextReduction  
+    IRS --> TaskDecomposition
+    IRS --> ManualEscalation
+    
+    %% Adaptation feedback
+    RetryBackoff --> AdaptationEngine
+    ContextReduction --> AdaptationEngine
+    TaskDecomposition --> AdaptationEngine
+    AdaptationEngine --> RetryLogic
+    
+    %% Health monitoring
+    RBMain --> HTTPHealth
+    HTTPHealth --> HealthEndpoint
+    HealthEndpoint --> RecoveryStats
+    RecoveryStats --> PrometheusMetrics
+    
+    %% Technical implementation
+    RBMain --> AsyncIO
+    AsyncIO --> PythonVenv
+    WSServer --> JSONComm
+    HTTPHealth --> ErrorHandling
+
+    %% Status indicators
+    classDef active fill:#90EE90,stroke:#006400,stroke-width:2px
+    classDef working fill:#FFE4B5,stroke:#DAA520,stroke-width:2px
+    classDef monitoring fill:#E6E6FA,stroke:#4B0082,stroke-width:2px
+    
+    class RBMain,WSServer,HTTPHealth,IRS active
+    class AdaptationEngine,RetryLogic working
+    class HealthEndpoint,RecoveryStats,PrometheusMetrics monitoring
