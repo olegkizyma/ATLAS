@@ -112,3 +112,6 @@ mcp_tts_ukrainian/demo_*.wav
 
 # Playwright files
 .playwright-mcp
+
+# Archive of old versions
+archives/
