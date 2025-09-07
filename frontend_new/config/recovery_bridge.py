@@ -268,4 +268,65 @@ class RecoveryBridge:
     def generate_js_integration_code(self) -> str:
         """Генерує код для інтеграції з JavaScript оркестратором"""
         # Возвращаем компактный и безопасный JS-плейсхолдер вместо большого встроенного фрагмента.
-        # Раніше ту
+        return """
+// Recovery Bridge JS Integration
+const recoveryBridge = {
+    ws: null,
+    connect: function() {
+        this.ws = new WebSocket('ws://localhost:5102');
+        this.ws.onopen = () => console.log('Recovery bridge connected');
+        this.ws.onmessage = (event) => {
+            const data = JSON.parse(event.data);
+            this.handleMessage(data);
+        };
+    },
+    handleMessage: function(data) {
+        // Handle recovery bridge messages
+        console.log('Recovery bridge message:', data);
+    },
+    sendRecoveryRequest: function(failureData) {
+        if (this.ws && this.ws.readyState === WebSocket.OPEN) {
+            this.ws.send(JSON.stringify({
+                type: 'recovery_request',
+                payload: failureData,
+                request_id: Date.now().toString()
+            }));
+        }
+    }
+};
+"""
+
+async def main():
+    """Головна функція для запуску Recovery Bridge"""
+    logging.basicConfig(
+        level=logging.INFO,
+        format='%(asctime)s [%(name)s] %(levelname)s: %(message)s'
+    )
+    
+    bridge = RecoveryBridge()
+    
+    try:
+        # Запускаємо WebSocket сервер та HTTP health endpoint
+        ws_server = await bridge.start_websocket_server()
+        http_runner = await bridge.start_health_http()
+        
+        logger.info("🌉 Recovery Bridge started successfully")
+        logger.info(f"   WebSocket: ws://127.0.0.1:{bridge.ws_port}")
+        logger.info(f"   Health endpoint: http://127.0.0.1:5103/health")
+        
+        # Чекаємо завершення
+        await asyncio.Event().wait()
+        
+    except KeyboardInterrupt:
+        logger.info("Recovery Bridge shutdown requested")
+    except Exception as e:
+        logger.error(f"Recovery Bridge failed: {e}")
+        raise
+    finally:
+        if 'ws_server' in locals():
+            ws_server.close()
+        if 'http_runner' in locals():
+            await http_runner.cleanup()
+
+if __name__ == "__main__":
+    asyncio.run(main())

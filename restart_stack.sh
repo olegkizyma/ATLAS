@@ -318,6 +318,20 @@ check_services() {
         log_error "❌ Flask Frontend (port 5001) - Not responding"
         all_healthy=false
     fi
+
+    # Vision (embedded in Flask) — перевіряємо окремим ендпоінтом
+    if curl -s --max-time 4 "http://localhost:5001/api/vision/status" > "$LOG_DIR/.vision_status.json" 2>/dev/null; then
+        if grep -q '"vision_available": *true' "$LOG_DIR/.vision_status.json"; then
+            log_info "✅ Vision (Grisha) - Available"
+            export ATLAS_VISION_AVAILABLE=true
+        else
+            log_warn "🟡 Vision (Grisha) - Endpoint reachable, but reports unavailable"
+            export ATLAS_VISION_AVAILABLE=false
+        fi
+    else
+        log_warn "⚠️  Vision (Grisha) - Status endpoint not reachable"
+        export ATLAS_VISION_AVAILABLE=false
+    fi
     
     # Node.js orchestrator
     if curl -s --max-time 5 "http://localhost:5101/health" > /dev/null 2>&1; then
@@ -376,7 +390,11 @@ check_services() {
         else
             log_warn "   🗣️  Voice Synthesis: Disabled (TTS unavailable)"
         fi
-        log_restart "   👁️  Visual Monitoring: Grisha vision system enabled"
+        if [ "${ATLAS_VISION_AVAILABLE:-false}" = "true" ]; then
+            log_restart "   👁️  Visual Monitoring: Grisha vision system enabled"
+        else
+            log_warn "   👁️  Visual Monitoring: Disabled / unavailable"
+        fi
         echo ""
     log_restart "📄 Logs available in: $LOG_DIR"
     else
