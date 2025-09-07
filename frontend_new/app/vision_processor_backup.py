@@ -1,6 +1,30 @@
-#!/usr/bin/env python3
-"""
-ATLAS Vision Processor - Computer Vision Integration
+#!/usr/bin/env pythtry:
+    # OpenCV для базового комп'ютерного зору
+    import cv2
+except ImportError:
+    cv2 = None
+
+try:
+    # MediaPipe для розпізнавання об'єктів та рук
+    import mediapipe as mp
+except ImportError:
+    mp = None
+
+try:
+    # YOLO для детекції об'єктів (якщо доступно)
+    from ultralytics import YOLO
+except ImportError:
+    YOLO = None
+
+try:
+    # Screenshot capability for monitoring
+    import pyautogui
+    import threading
+    import time
+except ImportError:
+    pyautogui = None
+    threading = None
+    time = Noneion Processor - Computer Vision Integration
 Автоматичний парсинг фото з покращенням та візуальною передачею послідовності
 """
 
@@ -34,18 +58,6 @@ try:
     from ultralytics import YOLO
 except ImportError:
     YOLO = None
-
-try:
-    # Screenshot та monitoring capability
-    import pyautogui
-    import threading
-    import time
-    import subprocess
-except ImportError:
-    pyautogui = None
-    threading = None
-    time = None
-    subprocess = None
 
 logger = logging.getLogger('atlas.vision')
 
@@ -468,244 +480,10 @@ class VisionProcessor:
             for file_path in self.temp_dir.glob("*"):
                 if file_path.is_file() and file_path.stat().st_mtime < cutoff_time:
                     file_path.unlink()
-                    logger.debug(f"Cleaned up old file: {file_path}")
+                    logger.debug(f"Cleaned up temp file: {file_path}")
                     
         except Exception as e:
-            logger.warning(f"Cleanup failed: {e}")
-
-
-class GrishaVisionMonitor:
-    """Система візуального моніторингу для Гриші під час виконання завдань Тетяною"""
-    
-    def __init__(self, vision_processor: VisionProcessor):
-        self.vision_processor = vision_processor
-        self.monitoring_active = False
-        self.monitoring_thread = None
-        self.screenshots_log = []
-        self.session_id = None
-        self.start_time = None
-        self.task_description = None
-        
-    def start_monitoring(self, session_id: str, task_description: str) -> Dict[str, Any]:
-        """Запускає візуальний моніторинг для сесії виконання"""
-        try:
-            if self.monitoring_active:
-                self.stop_monitoring()
-            
-            self.session_id = session_id
-            self.task_description = task_description
-            self.start_time = datetime.now()
-            self.screenshots_log = []
-            self.monitoring_active = True
-            
-            # Створюємо папку для сесії
-            session_dir = self.vision_processor.temp_dir / f"monitoring_{session_id}"
-            session_dir.mkdir(exist_ok=True)
-            
-            # Запускаємо моніторинг в окремому потоці
-            if threading:
-                self.monitoring_thread = threading.Thread(
-                    target=self._monitoring_loop,
-                    args=(session_dir,),
-                    daemon=True
-                )
-                self.monitoring_thread.start()
-                
-            logger.info(f"Started visual monitoring for session {session_id}")
-            return {
-                'success': True,
-                'session_id': session_id,
-                'monitoring_active': True,
-                'start_time': self.start_time.isoformat()
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to start monitoring: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def stop_monitoring(self) -> Dict[str, Any]:
-        """Зупиняє візуальний моніторинг"""
-        try:
-            self.monitoring_active = False
-            
-            if self.monitoring_thread and self.monitoring_thread.is_alive():
-                self.monitoring_thread.join(timeout=5)
-            
-            end_time = datetime.now()
-            duration = (end_time - self.start_time).total_seconds() if self.start_time else 0
-            
-            # Генеруємо звіт моніторингу
-            monitoring_report = self._generate_monitoring_report()
-            
-            logger.info(f"Stopped visual monitoring for session {self.session_id}")
-            return {
-                'success': True,
-                'session_id': self.session_id,
-                'monitoring_active': False,
-                'duration_seconds': duration,
-                'screenshots_count': len(self.screenshots_log),
-                'monitoring_report': monitoring_report
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to stop monitoring: {e}")
-            return {'success': False, 'error': str(e)}
-    
-    def _monitoring_loop(self, session_dir: Path):
-        """Основний цикл моніторингу екрану"""
-        screenshot_interval = 3  # Скріншот кожні 3 секунди
-        
-        while self.monitoring_active:
-            try:
-                if pyautogui:
-                    # Робимо скріншот
-                    screenshot = pyautogui.screenshot()
-                    
-                    # Зберігаємо скріншот
-                    timestamp = datetime.now().strftime("%H%M%S")
-                    screenshot_path = session_dir / f"screen_{timestamp}.png"
-                    screenshot.save(screenshot_path)
-                    
-                    # Аналізуємо скріншот
-                    analysis = self._analyze_screenshot(screenshot_path)
-                    
-                    # Логуємо подію
-                    self.screenshots_log.append({
-                        'timestamp': datetime.now().isoformat(),
-                        'path': str(screenshot_path),
-                        'analysis': analysis
-                    })
-                    
-                    logger.debug(f"Screenshot captured: {screenshot_path}")
-                
-                # Чекаємо до наступного скріншоту
-                if time:
-                    time.sleep(screenshot_interval)
-                    
-            except Exception as e:
-                logger.warning(f"Screenshot capture failed: {e}")
-                if time:
-                    time.sleep(screenshot_interval)
-    
-    def _analyze_screenshot(self, screenshot_path: Path) -> Dict[str, Any]:
-        """Аналізує скріншот на предмет змін та активності"""
-        try:
-            # Базовий аналіз скріншоту
-            image = Image.open(screenshot_path)
-            
-            # Конвертуємо для OpenCV аналізу
-            cv_image = cv2.cvtColor(np.array(image), cv2.COLOR_RGB2BGR)
-            
-            analysis = {
-                'dimensions': [image.width, image.height],
-                'has_activity': True,  # Завжди є активність якщо зробили скріншот
-                'detected_elements': []
-            }
-            
-            # Якщо доступен YOLO, аналізуємо об'єкти
-            if self.vision_processor.yolo_model:
-                try:
-                    results = self.vision_processor.yolo_model(cv_image)
-                    for result in results:
-                        for box in result.boxes:
-                            if box.conf > 0.3:  # Нижчий поріг для UI елементів
-                                class_name = result.names[int(box.cls)]
-                                confidence = float(box.conf)
-                                analysis['detected_elements'].append({
-                                    'class': class_name,
-                                    'confidence': confidence
-                                })
-                except Exception as e:
-                    logger.debug(f"YOLO analysis failed for screenshot: {e}")
-            
-            return analysis
-            
-        except Exception as e:
-            logger.warning(f"Screenshot analysis failed: {e}")
-            return {'error': str(e)}
-    
-    def _generate_monitoring_report(self) -> Dict[str, Any]:
-        """Генерує звіт моніторингу для Гриші"""
-        try:
-            total_screenshots = len(self.screenshots_log)
-            duration = (datetime.now() - self.start_time).total_seconds() if self.start_time else 0
-            
-            # Підрахунок активності
-            activity_periods = []
-            detected_elements = []
-            
-            for log_entry in self.screenshots_log:
-                if 'analysis' in log_entry and 'detected_elements' in log_entry['analysis']:
-                    detected_elements.extend(log_entry['analysis']['detected_elements'])
-            
-            # Унікальні елементи
-            unique_elements = {}
-            for element in detected_elements:
-                element_class = element.get('class', 'unknown')
-                if element_class not in unique_elements:
-                    unique_elements[element_class] = 0
-                unique_elements[element_class] += 1
-            
-            return {
-                'task_description': self.task_description,
-                'monitoring_duration': duration,
-                'total_screenshots': total_screenshots,
-                'average_interval': duration / total_screenshots if total_screenshots > 0 else 0,
-                'detected_ui_elements': unique_elements,
-                'activity_summary': f"Зафіксовано {total_screenshots} кадрів активності за {duration:.1f} секунд",
-                'visual_evidence_available': total_screenshots > 0
-            }
-            
-        except Exception as e:
-            logger.error(f"Failed to generate monitoring report: {e}")
-            return {'error': str(e)}
-    
-    def get_visual_evidence(self) -> List[Dict[str, Any]]:
-        """Повертає візуальні докази для верифікації Гришею"""
-        try:
-            evidence = []
-            
-            # Вибираємо ключові скріншоти (початок, середина, кінець)
-            total_screenshots = len(self.screenshots_log)
-            
-            if total_screenshots > 0:
-                # Початковий скріншот
-                evidence.append({
-                    'type': 'start_state',
-                    'timestamp': self.screenshots_log[0]['timestamp'],
-                    'path': self.screenshots_log[0]['path'],
-                    'description': 'Початковий стан екрану'
-                })
-                
-                # Середній скріншот (якщо є)
-                if total_screenshots > 2:
-                    mid_index = total_screenshots // 2
-                    evidence.append({
-                        'type': 'mid_state',
-                        'timestamp': self.screenshots_log[mid_index]['timestamp'],
-                        'path': self.screenshots_log[mid_index]['path'],
-                        'description': 'Стан виконання'
-                    })
-                
-                # Фінальний скріншот
-                if total_screenshots > 1:
-                    evidence.append({
-                        'type': 'end_state',
-                        'timestamp': self.screenshots_log[-1]['timestamp'],
-                        'path': self.screenshots_log[-1]['path'],
-                        'description': 'Фінальний стан екрану'
-                    })
-            
-            return evidence
-            
-        except Exception as e:
-            logger.error(f"Failed to get visual evidence: {e}")
-            return []
-
-
-# Глобальний екземпляр для використання
-vision_processor = VisionProcessor()
-grisha_monitor = GrishaVisionMonitor(vision_processor)
+            logger.warning(f"Temp file cleanup failed: {e}")
 
 
 # Глобальний інстанс процесора

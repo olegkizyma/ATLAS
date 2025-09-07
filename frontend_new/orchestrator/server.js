@@ -199,6 +199,71 @@ let messageCounter = 0;
 // Helper functions
 const generateMessageId = () => `msg_${Date.now()}_${++messageCounter}`;
 
+// Visual Monitoring Integration for Grisha
+const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'http://127.0.0.1:5001';
+
+async function startGrishaVisualMonitoring(sessionId, taskDescription) {
+    try {
+        const response = await axios.post(`${FRONTEND_BASE_URL}/api/grisha/start-monitoring`, {
+            session_id: sessionId,
+            task_description: taskDescription
+        }, {
+            timeout: 5000,
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.data.success) {
+            console.log(`[GRISHA] Visual monitoring started for session ${sessionId}`);
+            return response.data;
+        } else {
+            console.warn(`[GRISHA] Failed to start visual monitoring: ${response.data.error}`);
+            return null;
+        }
+    } catch (error) {
+        console.warn(`[GRISHA] Visual monitoring start failed: ${error.message}`);
+        return null;
+    }
+}
+
+async function stopGrishaVisualMonitoring() {
+    try {
+        const response = await axios.post(`${FRONTEND_BASE_URL}/api/grisha/stop-monitoring`, {}, {
+            timeout: 10000,
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.data.success) {
+            console.log(`[GRISHA] Visual monitoring stopped for session ${response.data.session_id}`);
+            return response.data;
+        } else {
+            console.warn(`[GRISHA] Failed to stop visual monitoring: ${response.data.error}`);
+            return null;
+        }
+    } catch (error) {
+        console.warn(`[GRISHA] Visual monitoring stop failed: ${error.message}`);
+        return null;
+    }
+}
+
+async function getGrishaVisualEvidence() {
+    try {
+        const response = await axios.get(`${FRONTEND_BASE_URL}/api/grisha/visual-evidence`, {
+            timeout: 5000,
+            headers: { 'Content-Type': 'application/json' }
+        });
+        
+        if (response.data.success) {
+            return response.data.visual_evidence || [];
+        } else {
+            console.warn(`[GRISHA] Failed to get visual evidence: ${response.data.error}`);
+            return [];
+        }
+    } catch (error) {
+        console.warn(`[GRISHA] Visual evidence retrieval failed: ${error.message}`);
+        return [];
+    }
+}
+
 const logMessage = (level, message) => {
     const now = new Date();
     const utcTime = now.toISOString();
@@ -1407,13 +1472,20 @@ async function processAgentCycle(userMessage, session) {
             }
             const verify = await grishaVerifyWithGoose(userMessage, atlasResponse.content, tetyanaExec.content, session.id);
             const confirmed = verify.confidence >= GRISHA_CONFIDENCE_THRESHOLD;
-            const verdictMsg = confirmed
+            let verdictMsg = confirmed
                 ? `Незалежна перевірка: CONF=${verify.confidence.toFixed(2)} — Завдання ПІДТВЕРДЖЕНО виконаним.`
                 : `Незалежна перевірка: CONF=${verify.confidence.toFixed(2)} — Недостатньо доказів. Посилити перевірку.`;
+            
+            // Add visual verification info if available
+            if (verify.result?.visual_verification) {
+                verdictMsg += `\n\nВізуальна верифікація: ${verify.result.visual_verification}`;
+            }
+            
             const grishaVerdictRaw = await generateAgentResponse('grisha', verdictMsg + (verify.result?.summary ? `\n${verify.result.summary}` : ''), session);
             const grishaVerdict = tagResponse(grishaVerdictRaw, PHASE.GRISHA_VERDICT);
             grishaVerdict.verification = { confidence: verify.confidence, confirmed };
             grishaVerdict.evidence = (verify.result?.criteria || []).map(c => ({ name: c.name, result: c.result, evidence: c.evidence }));
+            grishaVerdict.visual_verification = verify.result?.visual_verification;
             PIPELINE_METRICS.verdicts++;
             PIPELINE_METRICS.verificationIterations += verify.iterations || 1;
             PIPELINE_METRICS.verificationConfidenceSum += verify.confidence || 0;
@@ -1568,13 +1640,20 @@ app.post('/chat/continue', async (req, res) => {
             // Verify by Grisha
             const verify = await grishaVerifyWithGoose(pipe.userMessage, pipe.atlasPlan, tetyanaExec.content, session.id);
             const confirmed = verify.confidence >= GRISHA_CONFIDENCE_THRESHOLD;
-            const verdictMsg = confirmed
+            let verdictMsg = confirmed
                 ? `Незалежна перевірка: CONF=${verify.confidence.toFixed(2)} — Завдання ПІДТВЕРДЖЕНО виконаним.`
                 : `Незалежна перевірка: CONF=${verify.confidence.toFixed(2)} — Недостатньо доказів. Посилити перевірку.`;
+            
+            // Add visual verification info if available
+            if (verify.result?.visual_verification) {
+                verdictMsg += `\n\nВізуальна верифікація: ${verify.result.visual_verification}`;
+            }
+            
             const grishaVerdictRaw = await generateAgentResponse('grisha', verdictMsg + (verify.result?.summary ? `\n${verify.result.summary}` : ''), session);
             const grishaVerdict = tagResponse(grishaVerdictRaw, PHASE.GRISHA_VERDICT);
             grishaVerdict.verification = { confidence: verify.confidence, confirmed };
             grishaVerdict.evidence = (verify.result?.criteria || []).map(c => ({ name: c.name, result: c.result, evidence: c.evidence }));
+            grishaVerdict.visual_verification = verify.result?.visual_verification;
             PIPELINE_METRICS.verdicts++;
             PIPELINE_METRICS.verificationIterations += verify.iterations || 1;
             PIPELINE_METRICS.verificationConfidenceSum += verify.confidence || 0;
@@ -1606,13 +1685,19 @@ app.post('/chat/continue', async (req, res) => {
 
             const verify = await grishaVerifyWithGoose(pipe.userMessage, pipe.atlasPlan, tetyanaMore.content, session.id);
             const confirmed = verify.confidence >= GRISHA_CONFIDENCE_THRESHOLD;
-            const verdictMsg = confirmed
+            let verdictMsg = confirmed
                 ? `Незалежна повторна перевірка: CONF=${verify.confidence.toFixed(2)} — Завдання ПІДТВЕРДЖЕНО.`
                 : `Незалежна повторна перевірка: CONF=${verify.confidence.toFixed(2)} — Недостатньо доказів.`;
+            
+            // Add visual verification info if available
+            if (verify.result?.visual_verification) {
+                verdictMsg += `\n\nВізуальна верифікація: ${verify.result.visual_verification}`;
+            }
             const grishaVerdictRaw = await generateAgentResponse('grisha', verdictMsg + (verify.result?.summary ? `\n${verify.result.summary}` : ''), session);
             const grishaVerdict = tagResponse(grishaVerdictRaw, PHASE.GRISHA_VERDICT);
             grishaVerdict.verification = { confidence: verify.confidence, confirmed };
             grishaVerdict.evidence = (verify.result?.criteria || []).map(c => ({ name: c.name, result: c.result, evidence: c.evidence }));
+            grishaVerdict.visual_verification = verify.result?.visual_verification;
             PIPELINE_METRICS.verdicts++;
             PIPELINE_METRICS.verificationIterations += verify.iterations || 1;
             PIPELINE_METRICS.verificationConfidenceSum += verify.confidence || 0;
@@ -1836,6 +1921,10 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     let executionSuccessful = false;
     
     if (agentName === 'tetyana') {
+        // Start Grisha visual monitoring before execution
+        const taskDescription = `Виконання завдання: ${inputMessage.substring(0, 100)}...`;
+        await startGrishaVisualMonitoring(session.id, taskDescription);
+        
         // Execution via Goose only (no provider fallbacks for execution)
         const execStartTime = Date.now();
         const execNotes = await runExecution(prompt, session.id, {
@@ -1845,6 +1934,9 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         const execDuration = Date.now() - execStartTime;
         logMessage('info', `[TIMING] agent=tetyana phase=execution ms=${execDuration} success=${!!execNotes}`);
 
+        // Stop visual monitoring after execution
+        const monitoringResult = await stopGrishaVisualMonitoring();
+        
         if (!execNotes) {
             // Execution failed -> return blocked status without switching providers
             const blocked = 'РЕЗЮМЕ: Виконання недоступне (Goose недоступний).\nСТАТУС: Blocked — повторити пізніше або перевірити підключення.';
@@ -2100,25 +2192,43 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
     let lastResult = null;
     let notes = [];
 
+    // Get visual evidence from monitoring
+    const visualEvidence = await getGrishaVisualEvidence();
+    const hasVisualEvidence = visualEvidence && visualEvidence.length > 0;
+    
+    let visualEvidenceText = '';
+    if (hasVisualEvidence) {
+        visualEvidenceText = '\n\nВІЗУАЛЬНІ ДОКАЗИ:\n';
+        visualEvidence.forEach((evidence, idx) => {
+            visualEvidenceText += `${idx + 1}. ${evidence.description} (${evidence.type}) - ${evidence.timestamp}\n`;
+        });
+        visualEvidenceText += `\nВсього візуальних доказів: ${visualEvidence.length}\n`;
+    }
+
     while (iteration < GRISHA_MAX_VERIFY_ITER) {
         iteration++;
         const verifyPrompt = [
-            'Ти — Гриша, незалежний валідаційний агент. Твоє завдання — ПЕРЕВІРИТИ твердження Тетяни незалежно, використовуючи доступ до системи (файли/OS/додатки).',
+            'Ти — Гриша, незалежний валідаційний агент. Твоє завдання — ПЕРЕВІРИТИ твердження Тетяни незалежно, використовуючи:',
+            '1. Доступ до системи (файли/OS/додатки)',
+            '2. Візуальні докази з моніторингу екрану під час виконання',
             'Працюй акуратно, виконуй перевірки інструментами, якщо потрібно.',
             'Поверни РІВНО JSON з полями:',
-            '{ "criteria": [ { "name": string, "result": true|false, "evidence": string }... ], "confidence": number (0..1), "summary": string }',
+            '{ "criteria": [ { "name": string, "result": true|false, "evidence": string }... ], "confidence": number (0..1), "summary": string, "visual_verification": string }',
             '',
             `Завдання користувача: ${userMessage}`,
             `План Atlas: ${atlasPlan}`,
             `Звіт Тетяни: ${tetyanaReport}`,
+            hasVisualEvidence ? visualEvidenceText : '\nВізуальні докази недоступні для цієї сесії.',
             '',
             'Валідаційні інструкції:',
             '- Перевіряй наявність артефактів, вміст файлів, коректність шляхів, результати команд.',
-            '- Для кожного критерію надай конкретний доказ (evidence), напр. абсолютний шлях, фрагмент вмісту, вихід команди).',
+            '- Порівняй звіт Тетяни з візуальними доказами (якщо доступні).',
+            '- Для кожного критерію надай конкретний доказ (evidence), включаючи візуальну верифікацію.',
+            '- У полі visual_verification опиши, як візуальні докази підтверджують або спростовують звіт.',
             '- Оціни загальну впевненість у діапазоні 0..1.'
         ].join('\n');
 
-    const grishaSys = 'Ти — Гриша, валідаційний агент. Виконуй перевірки інструментально. ПОВЕРТАЙ СТРОГО JSON: { "criteria": [ { "name": string, "result": true|false, "evidence": string } ], "confidence": number, "summary": string }';
+    const grishaSys = `Ти — Гриша, валідаційний агент. Виконуй перевірки інструментально ТА візуально. ПОВЕРТАЙ СТРОГО JSON: { "criteria": [ { "name": string, "result": true|false, "evidence": string } ], "confidence": number, "summary": string, "visual_verification": string }`;
     const gooseOut = await runExecution(verifyPrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
         const parsed = extractJson(gooseOut);
         if (parsed && typeof parsed === 'object') {
@@ -2143,7 +2253,12 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
             }
         } else {
             // Could not parse JSON; treat as low confidence and break to avoid loop
-            lastResult = { criteria: [], confidence: 0, summary: 'Неможливо розібрати відповідь Goose.' };
+            lastResult = { 
+                criteria: [], 
+                confidence: 0, 
+                summary: 'Неможливо розібрати відповідь Goose.',
+                visual_verification: hasVisualEvidence ? 'Візуальні докази були доступні, але відповідь не розпізнана.' : 'Візуальні докази недоступні.'
+            };
             confidence = 0;
             break;
         }

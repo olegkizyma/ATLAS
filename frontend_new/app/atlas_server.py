@@ -37,11 +37,12 @@ import base64
 
 # Computer Vision imports (optional)
 try:
-    from vision_processor import vision_processor
+    from vision_processor import vision_processor, grisha_monitor
     VISION_AVAILABLE = True
 except ImportError as e:
     print(f"Vision processor not available: {e}")
     vision_processor = None
+    grisha_monitor = None
     VISION_AVAILABLE = False
 
 try:
@@ -1378,6 +1379,87 @@ def vision_cleanup():
     except Exception as e:
         logger.error(f"/api/vision/cleanup error: {e}")
         return jsonify({'error': 'Cleanup failed', 'details': str(e)}), 500
+
+# ==================== GRISHA VISUAL MONITORING ENDPOINTS ====================
+
+@app.route('/api/grisha/start-monitoring', methods=['POST'])
+def grisha_start_monitoring():
+    """Запускає візуальний моніторинг для виконання завдання"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        data = request.get_json() or {}
+        session_id = data.get('session_id', f"session_{int(time.time())}")
+        task_description = data.get('task_description', 'Виконання завдання')
+        
+        result = grisha_monitor.start_monitoring(session_id, task_description)
+        
+        if result.get('success'):
+            logger.info(f"Grisha monitoring started for session {session_id}")
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        logger.error(f"/api/grisha/start-monitoring error: {e}")
+        return jsonify({'error': 'Failed to start monitoring', 'details': str(e)}), 500
+
+@app.route('/api/grisha/stop-monitoring', methods=['POST'])
+def grisha_stop_monitoring():
+    """Зупиняє візуальний моніторинг та повертає звіт"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        result = grisha_monitor.stop_monitoring()
+        
+        if result.get('success'):
+            logger.info(f"Grisha monitoring stopped for session {result.get('session_id')}")
+            return jsonify(result)
+        else:
+            return jsonify(result), 500
+            
+    except Exception as e:
+        logger.error(f"/api/grisha/stop-monitoring error: {e}")
+        return jsonify({'error': 'Failed to stop monitoring', 'details': str(e)}), 500
+
+@app.route('/api/grisha/visual-evidence')
+def grisha_visual_evidence():
+    """Отримує візуальні докази для верифікації"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        evidence = grisha_monitor.get_visual_evidence()
+        
+        return jsonify({
+            'success': True,
+            'evidence_count': len(evidence),
+            'visual_evidence': evidence
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/visual-evidence error: {e}")
+        return jsonify({'error': 'Failed to get visual evidence', 'details': str(e)}), 500
+
+@app.route('/api/grisha/monitoring-status')
+def grisha_monitoring_status():
+    """Перевіряє статус візуального моніторингу"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        return jsonify({
+            'monitoring_active': grisha_monitor.monitoring_active,
+            'session_id': grisha_monitor.session_id,
+            'screenshots_count': len(grisha_monitor.screenshots_log) if grisha_monitor.screenshots_log else 0,
+            'task_description': grisha_monitor.task_description
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/monitoring-status error: {e}")
+        return jsonify({'error': 'Failed to get monitoring status', 'details': str(e)}), 500
 
 if __name__ == '__main__':
     logger.info(f"Starting ATLAS Frontend Server on port {FRONTEND_PORT}")

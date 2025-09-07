@@ -47,7 +47,13 @@ ollama serve
 ### Агенти:
 - **🎯 Atlas** - Планувальник (AI-driven planning)
 - **⚙️ Tetyana** - Виконавець (Goose + AI execution)  
-- **✅ Grisha** - Валідатор (AI + Goose validation)
+- **✅ Grisha** - Валідатор (AI + Goose validation + **👁️ Візуальний моніторинг**)
+
+### 🆕 Нові можливості:
+- **👁️ Візуальний моніторинг Гриши** - автоматичне захоплення скріншотів під час виконання завдань
+- **🔍 Компʼютерний зір** - OpenCV, MediaPipe, YOLO для аналізу візуальних доказів
+- **📸 Автоматична обробка фото** - покращення, аналіз послідовностей, генерація відео
+- **🎬 Візуальні звіти** - створення відео з описом дій і візуалізацією процесів
 
 ### 🎥 ATLAS Vision System (NEW!)
 - **Автоматичний парсинг фото** - Computer vision аналіз
@@ -351,6 +357,35 @@ All system activities are logged with intelligent categorization:
 - `logs/orchestrator.log` - Agent coordination
 - `logs/performance.log` - System metrics
 - `logs/errors.log` - Error analysis
+
+## 👁️ Візуальний Моніторинг
+
+### Система візуальної верифікації
+ATLAS включає інноваційну систему візуального моніторингу, що дозволяє агенту Гриші:
+
+- **Автоматичний моніторинг** - Захоплення скріншотів під час виконання завдань Тетяною
+- **Аналіз візуальних доказів** - OpenCV + MediaPipe + YOLO для детекції активності
+- **Візуальна верифікація** - Підтвердження звітів Тетяни візуальними доказами
+- **Автоматична інтеграція** - Бесшовна робота з існуючим workflow агентів
+
+### Компʼютерний зір
+
+#### Обробка зображень:
+```bash
+# API для роботи з фото
+POST /api/vision/analyze         # Аналіз зображення
+POST /api/vision/enhance         # Покращення фото
+POST /api/vision/sequence        # Генерація послідовності
+POST /api/vision/video           # Створення відео
+```
+
+#### Підтримувані формати:
+- **Вхід**: JPG, PNG, WebP, TIFF
+- **Вихід**: Enhanced images, MP4 videos
+- **Аналіз**: Object detection, face recognition, text extraction
+
+### Документація
+Детальна інформація: [`DOCS/GRISHA_VISUAL_MONITORING.md`](DOCS/GRISHA_VISUAL_MONITORING.md)
 
 ## Advanced Features
 
