@@ -642,9 +642,6 @@ def chat():
                 else:
                     logger.info(f"/api/chat retry attempt={attempt} session={session_id} timeout={orch_timeout}s")
                 extra_headers = {}
-                # Проксируем флаг отключения дедупликации на orchestrator
-                if request.headers.get('X-Atlas-NoDedup') == '1':
-                    extra_headers['X-Atlas-NoDedup'] = '1'
                 response = requests.post(
                     post_url,
                     json={'message': message, 'sessionId': session_id, 'userId': user_id, 'clientMessageId': client_message_id},

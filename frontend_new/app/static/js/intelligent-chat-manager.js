@@ -550,9 +550,7 @@ class AtlasIntelligentChatManager {
         const response = await fetch(`${this.frontendBase}/api/chat`, {
                 method: 'POST',
                 headers: { 
-            'Content-Type': 'application/json',
-            // В dev можна вимкнути дедуп у orchestrator (передаємо далі через Flask -> X-Atlas-NoDedup)
-            'X-Atlas-NoDedup': '1'
+            'Content-Type': 'application/json'
                 },
                 body: JSON.stringify({ 
                     message, 
@@ -574,9 +572,6 @@ class AtlasIntelligentChatManager {
             const data = await response.json();
             
             if (data.success && data.response && Array.isArray(data.response)) {
-                if (data.response.length === 0) {
-                    this.addMessage('⚠️ Отримано порожню відповідь (можливо, дедуплікація). Спробуйте ще раз.', 'system');
-                }
                 this.log(`Received ${data.response.length} agent responses`);
                 
                 // Process each agent response sequentially
