@@ -85,42 +85,107 @@ const GRISHA_MAX_VERIFY_ITER = Math.max(1, parseInt(process.env.GRISHA_MAX_VERIF
 // Clarification auto-fill silence threshold (ms) configurable via env ATLAS_CLAR_AUTOFILL_MS
 const CLARIFICATION_AUTOFILL_SILENCE_MS = parseInt(process.env.ATLAS_CLAR_AUTOFILL_MS || '30000', 10);
 
-// Deterministic fast-lane patterns (very low risk). Pure math + simple file write directive.
-const FAST_LANE_PATTERNS = [
-    { type: 'math', re: /(sqrt|корінь)\s*(?:з|of)?\s*([0-9]+)\b/i },
-    { type: 'arith', re: /^\s*([0-9]+)\s*([+\-*\/])\s*([0-9]+)\s*$/ }
-];
-
-function evaluateDeterministicExpression(text) {
-    for (const p of FAST_LANE_PATTERNS) {
-        const m = text.match(p.re);
-        if (m && p.type === 'math') {
-            const n = parseInt(m[2],10);
-            if (!isNaN(n)) return { kind: 'sqrt', input: n, result: Math.sqrt(n) };
-        }
-        if (m && p.type === 'arith') {
-            const a = parseFloat(m[1]); const op = m[2]; const b = parseFloat(m[3]);
-            let r; if(op==='+' ) r=a+b; else if(op==='-') r=a-b; else if(op==='*') r=a*b; else if(op==='/' && b!==0) r=a/b; else continue;
-            return { kind: 'arith', input: `${a}${op}${b}`, result: r };
-        }
+// Enhanced agent prompt system - no hardcoded patterns, fully prompt-driven
+const AGENT_ROLE_PROMPTS = {
+    atlas: {
+        planning: (context) => [
+            `Ти — Atlas, стратег системи ATLAS. Твоя роль: аналізувати запити та створювати детальні плани виконання.`,
+            `Контекст завдання: ${context.userMessage}`,
+            context.memoryContext ? `Контекст з пам'яті: ${context.memoryContext}` : '',
+            `Створи детальний план виконання завдання. Включи:`,
+            `- Аналіз завдання`,
+            `- Кроки виконання`,
+            `- Необхідні ресурси`,
+            `- Критерії успіху`,
+            `Будь конкретним і практичним.`
+        ].filter(Boolean).join('\n'),
+        
+        autoResponse: (context) => [
+            `Ти — Atlas, стратег системи. Користувач не надав відповіді на запит.`,
+            `Твоя задача: проаналізувати ситуацію та надати розумну відповідь за користувача.`,
+            `Контекст: ${context.clarificationNeeded}`,
+            `Останні повідомлення: ${context.recentHistory}`,
+            `Надай найбільш логічну відповідь, яку міг би дати користувач, базуючись на контексті.`,
+            `Будь практичним і орієнтованим на результат.`
+        ].join('\n'),
+        
+        taskAnalysis: (userMessage) => [
+            `Ти — Atlas. Проаналізуй наступне завдання та визнач найкращий підхід:`,
+            `Завдання: ${userMessage}`,
+            `Визнач:`,
+            `- Тип завдання (обчислення, аналіз, виконання команд, тощо)`,
+            `- Складність (проста/середня/висока)`,
+            `- Необхідні інструменти`,
+            `- Можливі ризики`,
+            `Надай короткий аналіз для подальшого планування.`
+        ].join('\n')
+    },
+    
+    tetyana: {
+        execution: (context) => [
+            `Ти — Тетяна, виконавець завдань системи ATLAS.`,
+            `Завдання користувача: ${context.userMessage}`,
+            `План від Atlas: ${context.atlasPlan}`,
+            context.grishaRequirements ? `Вимоги від Гриші: ${context.grishaRequirements}` : '',
+            `Виконай завдання згідно з планом. Звітуй про:`,
+            `КРОКИ: (що саме виконано)`,
+            `РЕЗУЛЬТАТИ: (отримані дані/файли)`,
+            `ДОКАЗИ: (як можна перевірити)`,
+            `СТАТУС: (завершено/потребує продовження)`
+        ].filter(Boolean).join('\n'),
+        
+        autoAnalysis: (userMessage) => [
+            `Ти — Тетяна. Користувач надіслав: "${userMessage}"`,
+            `Проаналізуй чи можна це виконати швидко та безпечно без додаткових уточнень.`,
+            `Якщо так - виконай та звітуй. Якщо ні - поясни що потрібно уточнити.`,
+            `Будь ефективною та практичною.`
+        ].join('\n')
+    },
+    
+    grisha: {
+        validation: (context) => [
+            `Ти — Гриша, валідатор та контролер системи ATLAS.`,
+            `Завдання користувача: ${context.userMessage}`,
+            `План Atlas: ${context.atlasPlan}`,
+            context.tetyanaReport ? `Звіт Тетяни: ${context.tetyanaReport}` : '',
+            `Проаналізуй та дай висновок:`,
+            `- Чи план безпечний для виконання?`,
+            `- Чи є всі необхідні дані?`,
+            `- Які ризики та як їх мінімізувати?`,
+            `- Рекомендації для покращення`,
+            `Дай чіткий висновок: ЗАТВЕРДЖУЮ / ПОТРЕБУЄ_УТОЧНЕНЬ / ВІДХИЛЯЮ`
+        ].filter(Boolean).join('\n'),
+        
+        finalVerification: (context) => [
+            `Ти — Гриша. Перевір результати виконання:`,
+            `Оригінальне завдання: ${context.userMessage}`,
+            `План: ${context.atlasPlan}`,
+            `Результати Тетяни: ${context.tetyanaResults}`,
+            `Оціни:`,
+            `- Чи завдання виконано повністю?`,
+            `- Чи результати відповідають очікуванням?`,
+            `- Рівень довіри (0-100%)`,
+            `- Потрібні додаткові перевірки?`,
+            `Дай фінальну оцінку та рекомендації.`
+        ].filter(Boolean).join('\n')
     }
-    return null;
-}
+};
 
-function attemptFastLane(userMessage) {
-    const deterministic = evaluateDeterministicExpression(userMessage);
-    if (deterministic) {
+async function intelligentTaskAnalysis(userMessage, session) {
+    // Use Atlas to analyze task without hardcoded patterns
+    const analysisPrompt = AGENT_ROLE_PROMPTS.atlas.taskAnalysis(userMessage);
+    try {
+        const analysis = await generateAgentResponse('atlas', analysisPrompt, session);
         return {
-            content: `[ТЕТЯНА] РЕЗЮМЕ: Виконано просте обчислення.
-КРОКИ: 1) Обчислено ${deterministic.kind==='sqrt'?`корінь з ${deterministic.input}`:deterministic.input}.
-РЕЗУЛЬТАТИ: ${deterministic.result}
-ДОКАЗИ: результат обчислення є детермінованим.
-ПЕРЕВІРКА: повторний підрахунок внутрішнім калькулятором.
-СТАТУС: Done`,
-            agent: 'tetyana', provider: 'fast_lane', model: 'deterministic_math'
+            content: analysis.content,
+            agent: 'atlas',
+            provider: analysis.provider || 'intelligent_analysis',
+            model: analysis.model || 'prompt_driven'
         };
+    } catch (error) {
+        logMessage('warn', `Intelligent task analysis failed: ${error.message}`);
+        return null;
     }
-    return null;
 }
 
 // NOTE: Older lightweight scheduleClarificationAutoFill implementation removed (duplicate name) —
@@ -262,31 +327,34 @@ const AGENTS = {
     }
 };
 
-// Probe prompts configuration (centralized for fine-tuning)
+// Enhanced probe prompts using the agent role system
 const PROBE_PROMPTS = {
-    tetyanaProbe: ({ userMessage, atlasPlan, grishaShortage }) => [
-        'Ти — Тетяна. Виконай МІНІМАЛЬНИЙ пробний крок щоб здобути бракуючий артефакт.',
-        'Лише 1-2 дії. Не запускай повний план. Не пояснюй зайвого.',
-        'Формат строго:\nКРОКИ:\n1) ...\nАРТЕФАКТИ: (коротко)',
-        `Завдання користувача: ${userMessage}`,
-        `Поточний план Atlas: ${atlasPlan}`,
-        `Бракує (з Гриші): ${grishaShortage}`
-    ].join('\n'),
-    grishaReview: (probeContent) => [
-        'Ти — Гриша. Оціни пробу. Якщо вистачає даних для продовження без користувача — начни з FEASIBLE, інакше INFEASIBLE.',
-        'Після ключового слова дай коротко що отримано / чого бракує.',
-        `Пробний звіт: ${probeContent}`
-    ].join('\n'),
-    atlasFeasibility: (probeContent, reviewContent) => [
-        'Ти — Atlas. На основі проби і ревʼю напиши: ADVANCE або CLARIFY (первое слово).',
-        'Після слова — дуже короткий коментар.',
-        `Проба: ${probeContent}`,
-        `Ревʼю: ${reviewContent}`
-    ].join('\n'),
-    atlasClarificationFallback: () => [
-        'Ти — Atlas. Сформуй короткий структурований ЕТАП 0: які дані потрібні щоб продовжити.',
-        'Список пунктів, без води. Заверши: «Надайте ці дані однією відповіддю — після цього я згенерую план виконання.»'
-    ].join('\n')
+    tetyanaProbe: ({ userMessage, atlasPlan, grishaShortage }) => 
+        AGENT_ROLE_PROMPTS.tetyana.execution({
+            userMessage,
+            atlasPlan: `ПРОБНИЙ КРОК: ${atlasPlan}`,
+            grishaRequirements: `БРАКУЮЧІ ДАНІ: ${grishaShortage}`
+        }) + '\n\nВИКОНАЙ ЛИШЕ МІНІМАЛЬНИЙ ПРОБНИЙ КРОК для отримання бракуючих даних. НЕ виконуй повний план.',
+    
+    grishaReview: (probeContent) => 
+        AGENT_ROLE_PROMPTS.grisha.validation({
+            userMessage: 'Оцінка пробного кроку',
+            atlasPlan: 'Мінімальний пробний крок виконано',
+            tetyanaReport: probeContent
+        }) + '\n\nПочни відповідь з FEASIBLE (якщо даних достатньо) або INFEASIBLE (якщо треба більше даних).',
+    
+    atlasFeasibility: (probeContent, reviewContent) => 
+        AGENT_ROLE_PROMPTS.atlas.planning({
+            userMessage: 'Рішення на основі проби',
+            memoryContext: `Проба: ${probeContent}\nАналіз Гриші: ${reviewContent}`
+        }) + '\n\nПочни відповідь з ADVANCE (продовжити) або CLARIFY (потрібні уточнення від користувача).',
+    
+    atlasClarificationFallback: () => 
+        AGENT_ROLE_PROMPTS.atlas.autoResponse({
+            clarificationNeeded: 'Потрібна структурована відповідь про дані для продовження',
+            recentHistory: 'Система очікує уточнень від користувача',
+            userMessage: 'Запит уточнень'
+        })
 };
 
 // Session state management
@@ -1466,7 +1534,7 @@ async function processAgentCycle(userMessage, session) {
             `План Atlas: ${session.pipeline.atlasPlan}`
         ].join('\n');
         
-        const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
+        const grishaPreRaw = await generateNonBlockingAgentResponse('grisha', precheckPrompt, session);
         const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
         responses.push(grishaPre);
         session.history.push(grishaPre);
@@ -1495,7 +1563,7 @@ async function processAgentCycle(userMessage, session) {
         logMessage('info', `[processAgentCycle] executing tetyana based on nextAction`);
         
         const execPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nПлан Atlas: ${session.pipeline.atlasPlan}\nВимоги Гриші: ${session.pipeline.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
-        const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+        const tetyanaExecRaw = await generateNonBlockingAgentResponse('tetyana', execPrompt, session, { enableTools: true });
         const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
         
         try { 
@@ -1520,16 +1588,16 @@ async function processAgentCycle(userMessage, session) {
 
     // Phase 1: Atlas creates primary reply/plan (use heuristic intent to bias model choice)
     const preIntent = classifyIntentHeuristic(userMessage, '');
-    // Fast-lane: якщо запит чисто детермінований (математика) — відразу повертаємо результат без повного агентного циклу.
-    const fastLane = attemptFastLane(userMessage);
-    if (fastLane) {
-        const msg = tagResponse(fastLane, PHASE.EXECUTION);
+    // Intelligent task analysis: Use Atlas to determine if task can be handled quickly
+    const quickAnalysis = await intelligentTaskAnalysis(userMessage, session);
+    if (quickAnalysis && quickAnalysis.content.toLowerCase().includes('просте') || quickAnalysis.content.toLowerCase().includes('швидко')) {
+        const msg = tagResponse(quickAnalysis, PHASE.EXECUTION);
         session.history.push(msg);
         clearTimeout(session._clarAutoTimer); // no clarification timers relevant
         return [msg];
     }
 
-    const atlasResponseRaw = await generateAgentResponse('atlas', userMessage, session, { intentHint: preIntent });
+    const atlasResponseRaw = await generateNonBlockingAgentResponse('atlas', userMessage, session, { intentHint: preIntent });
     const atlasResponse = tagResponse(atlasResponseRaw, PHASE.ATLAS_PLAN);
     responses.push(atlasResponse);
     session.history.push(atlasResponse);
@@ -2445,6 +2513,85 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     };
 }
 
+// Enhanced Non-Blocking Agent Response System
+// Ensures system never gets stuck waiting for agent responses
+async function generateNonBlockingAgentResponse(agentName, inputMessage, session, options = {}) {
+    const maxTimeout = parseInt(process.env.ATLAS_AGENT_TIMEOUT_MS || '45000', 10); // 45 seconds max
+    const fallbackTimeout = parseInt(process.env.ATLAS_FALLBACK_TIMEOUT_MS || '15000', 10); // 15 seconds before Atlas helps
+    
+    try {
+        // Start the primary agent response
+        const primaryPromise = generateAgentResponse(agentName, inputMessage, session, options);
+        
+        // Create timeout promise
+        const timeoutPromise = new Promise((_, reject) => {
+            setTimeout(() => reject(new Error(`Agent ${agentName} timeout after ${maxTimeout}ms`)), maxTimeout);
+        });
+        
+        // Create Atlas fallback promise (triggered earlier)
+        const atlasHelpPromise = new Promise(async (resolve) => {
+            setTimeout(async () => {
+                if (agentName !== 'atlas') {
+                    logMessage('warn', `[NON_BLOCKING] ${agentName} taking too long, preparing Atlas assistance`);
+                    try {
+                        const helpContext = {
+                            clarificationNeeded: `${agentName} agent response needed`,
+                            userMessage: inputMessage,
+                            recentHistory: session.history.slice(-2).map(h => h.content).join('\n')
+                        };
+                        const atlasHelp = await generateAtlasAutoResponse(session, helpContext);
+                        resolve({
+                            role: 'assistant',
+                            content: `[ATLAS-ASSIST] ${atlasHelp}`,
+                            agent: 'atlas',
+                            messageId: generateMessageId(),
+                            timestamp: Date.now(),
+                            provider: 'atlas_assistance',
+                            model: 'auto_response',
+                            timing: { agentMs: fallbackTimeout, provider: 'atlas_assistance' },
+                            isAtlasAssist: true
+                        });
+                    } catch (error) {
+                        resolve(generateContextualFallback(session, { userMessage: inputMessage }));
+                    }
+                }
+            }, fallbackTimeout);
+        });
+        
+        // Race between primary response, Atlas help, and timeout
+        const result = await Promise.race([primaryPromise, atlasHelpPromise, timeoutPromise]);
+        
+        if (result.isAtlasAssist) {
+            logMessage('info', `[NON_BLOCKING] Atlas assisted for ${agentName} due to slow response`);
+        }
+        
+        return result;
+        
+    } catch (error) {
+        logMessage('error', `[NON_BLOCKING] ${agentName} failed completely: ${error.message}`);
+        
+        // Final fallback - Atlas always responds
+        const emergencyContext = {
+            clarificationNeeded: `Системна помилка агента ${agentName}`,
+            userMessage: inputMessage,
+            recentHistory: 'Аварійний режим'
+        };
+        
+        const emergencyResponse = await generateAtlasAutoResponse(session, emergencyContext);
+        return {
+            role: 'assistant',
+            content: `[ATLAS-EMERGENCY] ${emergencyResponse}`,
+            agent: 'atlas',
+            messageId: generateMessageId(),
+            timestamp: Date.now(),
+            provider: 'emergency_fallback',
+            model: 'atlas_emergency',
+            timing: { agentMs: maxTimeout, provider: 'emergency' },
+            isEmergency: true
+        };
+    }
+}
+
 
 // Simulate agent thinking (for Atlas and Grisha)
 
@@ -2766,34 +2913,50 @@ function enforceTetianaStructure(raw) {
 //  - Cancel timer if user replies earlier (handled where awaitingClarification is cleared)
 //  - Avoid multiple concurrent timers per session
 
-const CLAR_AUTOFILL_VARIANTS = [
-    'Олег Миколайович, припускаю що мета стандартна: отримати робочий результат за мінімальними ресурсами. Продовжую на базових припущеннях.',
-    'Схоже ви зайняті. Я беру ініціативу: середовище macOS, можна створювати тимчасові файли, зовнішніх секретів немає.',
-    'Не отримав деталей — стартую з гіпотези: ціль — короткий відтворюваний прототип + звіт з доказами.',
-    'Авто-делегація: дозволені базові CLI і Python пакети з requirements.txt. Якщо треба інше — напишете пізніше.',
-    'Приймаю рішення рухатись далі: критерієм успіху буде звіт + артефакти (файли / логи).',
-    'Оскільки відповіді немає — моделюю початковий стан як «чистий робочий каталог без специфічних конфіг».',
-    'Запускаю виконання із стандартними security-обмеженнями (без видалення критичних шляхів).',
-    'Беру на себе уточнення: час на перший корисний результат < 2 хв, далі ітеративне покращення.',
-    'Відсутність відповіді трактую як згоду на автономне продовження. Формую план і переходжу до реалізації.',
-    'Просканую контекст і використаю типові патерни. Якщо зʼявляться контр-вказівки — перебудую.',
-    'Делеговано мовчазно: активую стандартний набір припущень (середовище, інструменти, критерії).',
-    'Автоматичне уточнення: очікуваний вихід — структурований звіт + докази виконання.',
-    'Не бачу реакції — беру гіпотезу що потрібна максимальна прозорість кроків. Додаю перевірки.',
-    'Відсутність уточнень => вважаю що немає прихованих ліцензійних обмежень чи приватних моделей.',
-    'Я ініціюю самостійне формування уточнень: якщо пізніше уточните — адаптую без перезапуску.',
-    'Перехожу до плану: мінімізую ризики, фіксую кожен ключовий артефакт.',
-    'Розцінюю паузу як делегування. Застосовую стандартні практики (логування / короткі цикли).',
-    'Запускаю план без додаткових вводних. Можу призупинити, якщо зʼявиться ваша відповідь.',
-    'Мовчання прийнято: обираю базову стратегію і переходжу до дій.',
-    'Для уникнення простою — автозапуск: припускаю типові параметри. Уточнення можна надати в будь-який момент.'
-];
+// Enhanced Atlas Auto-Response System - Intelligent, context-aware responses
+async function generateAtlasAutoResponse(session, context) {
+    try {
+        const autoResponsePrompt = AGENT_ROLE_PROMPTS.atlas.autoResponse({
+            clarificationNeeded: context.clarificationNeeded || 'Потрібні додаткові дані',
+            recentHistory: session.history.slice(-3).map(h => h.content).join('\n'),
+            userMessage: context.userMessage || 'Останній запит користувача'
+        });
+        
+        const response = await generateAgentResponse('atlas', autoResponsePrompt, session);
+        return response.content || 'Продовжую з базовими припущеннями згідно з контекстом завдання.';
+    } catch (error) {
+        logMessage('warn', `Atlas auto-response generation failed: ${error.message}`);
+        // Fallback to contextual response
+        return generateContextualFallback(session, context);
+    }
+}
 
-function nextClarVariant(session) {
-    session._clarVariantIndex = (session._clarVariantIndex || 0) % CLAR_AUTOFILL_VARIANTS.length;
-    const v = CLAR_AUTOFILL_VARIANTS[session._clarVariantIndex];
-    session._clarVariantIndex = (session._clarVariantIndex + 1) % CLAR_AUTOFILL_VARIANTS.length;
-    return v;
+function generateContextualFallback(session, context) {
+    const recentMessages = session.history.slice(-2);
+    const lastAgent = recentMessages.length > 0 ? recentMessages[recentMessages.length - 1].agent : 'unknown';
+    
+    if (lastAgent === 'grisha') {
+        return 'На основі аналізу Гриші приймаю рішення продовжити з стандартними параметрами. Якщо потрібні уточнення - зупиню виконання.';
+    } else if (lastAgent === 'tetyana') {
+        return 'Базуючись на звіті Тетяни, продовжую з поточними результатами. Адаптую план за потреби.';
+    } else {
+        return 'Продовжую виконання з найбільш ймовірними параметрами для даного типу завдання. Система адаптується автоматично.';
+    }
+}
+
+async function nextClarVariant(session) {
+    // Generate intelligent response based on session context
+    const context = {
+        clarificationNeeded: session.pipeline?.need || 'Додаткові дані',
+        userMessage: session.pipeline?.userMessage || 'Поточне завдання'
+    };
+    
+    try {
+        return await generateAtlasAutoResponse(session, context);
+    } catch (error) {
+        logMessage('warn', `Failed to generate intelligent clarification: ${error.message}`);
+        return generateContextualFallback(session, context);
+    }
 }
 
 function scheduleClarificationAutoFill(session) {
@@ -2808,7 +2971,7 @@ function scheduleClarificationAutoFill(session) {
             if (!session.awaitingClarification) { logMessage('info', `[clar_timer] cancelled (flag cleared) sid=${session.id}`); return; }
             try {
                 logMessage('info', `[clar_timer] firing sid=${session.id} historyBefore=${session.history.length}`);
-                const assumed = nextClarVariant(session);
+                const assumed = await nextClarVariant(session);
                 logMessage('debug', `[clar_timer] generated assumption: ${assumed.slice(0,150)}`);
                 
                 pushAndBroadcast(session, {

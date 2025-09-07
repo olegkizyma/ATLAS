@@ -1579,7 +1579,13 @@ class AtlasIntelligentChatManager {
         });
 
         if (phase) {
-            try { this.updatePipelineHUD(phase); } catch(_) {}
+            try { 
+                this.updatePipelineHUD(phase, { 
+                    agent: agent, 
+                    autoResponse: metadata?.autoClarification,
+                    recovery: metadata?.recovery 
+                }); 
+            } catch(_) {}
         }
     }
 
@@ -1660,30 +1666,55 @@ class AtlasIntelligentChatManager {
         } catch (e) { this.log('[PIPELINE] HUD build failed: '+e.message); }
     }
 
-    updatePipelineHUD(phase) {
+    updatePipelineHUD(phase, metadata = {}) {
         if (!phase) return;
         if (!this.pipelineState.order.includes(phase)) return;
-    if (this._clarificationFreeze && phase !== 'atlas_clarify') return; // freeze progress while awaiting clarification
+        if (this._clarificationFreeze && phase !== 'atlas_clarify') return; // freeze progress while awaiting clarification
+        
         this.pipelineState.active = phase;
         this.pipelineState.seen.add(phase);
+        
         const hud = document.getElementById('pipeline-hud');
         if (!hud) return;
+        
+        // Update phase steps
         const steps = hud.querySelectorAll('.ph-step');
         steps.forEach(step => {
             const ph = step.dataset.phase;
-            step.classList.remove('active','done');
-            if (ph === phase) step.classList.add('active');
-            else if (this.pipelineState.seen.has(ph)) step.classList.add('done');
+            step.classList.remove('active','done','processing');
+            
+            if (ph === phase) {
+                step.classList.add('active');
+                // Add visual indicator for current processing
+                step.style.boxShadow = '0 0 8px currentColor';
+                
+                // Update step text with more context
+                if (metadata.agent) {
+                    const agentName = metadata.agent.toUpperCase();
+                    const action = this.getAgentActionText(metadata.agent, phase);
+                    step.textContent = `${agentName}: ${action}`;
+                }
+            } else if (this.pipelineState.seen.has(ph)) {
+                step.classList.add('done');
+                step.style.boxShadow = 'none';
+            } else {
+                step.style.boxShadow = 'none';
+            }
         });
-        // Progress %
+        
+        // Progress bar with smoother animation
         const idx = this.pipelineState.order.indexOf(phase);
         const total = this.pipelineState.order.length;
         const pct = Math.max(0, Math.min(100, Math.round(((idx+1)/ total)*100)));
         const bar = document.getElementById('pipeline-progress-bar');
         if (bar) {
-            if (!this._clarificationFreeze || phase === 'atlas_clarify') bar.style.width = pct + '%';
+            if (!this._clarificationFreeze || phase === 'atlas_clarify') {
+                bar.style.width = pct + '%';
+                bar.style.transition = 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
+            }
         }
-        // If verdict has verification info in latest messages – update mini tag
+        
+        // Enhanced verdict information
         if (phase === 'grisha_verdict') {
             try {
                 const recent = [...this.messages].reverse().find(m => m.phase === 'grisha_verdict' && m.agent === 'grisha');
@@ -1691,6 +1722,57 @@ class AtlasIntelligentChatManager {
                     const confMatch = recent.text.match(/CONF\s*=\s*(\d+\.\d+)/i);
                     const conf = confMatch ? parseFloat(confMatch[1]) : null;
                     const mini = hud.querySelector('.ph-step[data-phase="grisha_verdict"] .verdict-mini');
+                    if (mini && conf !== null) {
+                        mini.textContent = `${Math.round(conf*100)}%`;
+                        mini.style.color = conf >= 0.8 ? '#4CAF50' : conf >= 0.6 ? '#FF9800' : '#F44336';
+                    }
+                }
+            } catch(e) { this.log('[PIPELINE] Verdict update failed: '+e.message); }
+        }
+        
+        // Auto-response phase indicator
+        if (phase === 'atlas_clarify' && metadata.autoResponse) {
+            const step = hud.querySelector('.ph-step[data-phase="atlas_clarify"]');
+            if (step) {
+                step.textContent = 'ATLAS: AUTO-RESPONSE';
+                step.style.color = '#ff9800';
+            }
+        }
+        
+        // Recovery phase indicator
+        if (metadata.recovery) {
+            const step = hud.querySelector('.ph-step[data-phase="' + phase + '"]');
+            if (step) {
+                step.style.borderLeft = '3px solid #ff4444';
+                step.title = 'Recovery mode active';
+            }
+        }
+        
+        this.log(`[PIPELINE] Phase updated: ${phase} (${pct}% complete)`);
+    }
+    
+    getAgentActionText(agent, phase) {
+        const actions = {
+            atlas: {
+                atlas_plan: 'PLANNING',
+                atlas_clarify: 'CLARIFYING',
+                atlas_feasibility: 'FEASIBILITY',
+                atlas_auto_clarify: 'AUTO-RESPONSE'
+            },
+            grisha: {
+                grisha_precheck: 'VALIDATING',
+                grisha_verdict: 'VERIFYING',
+                grisha_followup: 'FOLLOWING UP',
+                grisha_probe_review: 'REVIEWING'
+            },
+            tetyana: {
+                execution: 'EXECUTING',
+                tetyana_probe: 'PROBING'
+            }
+        };
+        
+        return actions[agent]?.[phase] || 'PROCESSING';
+    }
                     if (mini && conf !== null) {
                         mini.textContent = conf.toFixed(2);
                         mini.style.color = conf >= 0.75 ? '#00ffa5' : (conf >= 0.5 ? '#ffd700' : '#ff4d4d');
