@@ -1145,7 +1145,21 @@ app.post('/chat/stream', async (req, res) => {
         if (cache.map.has(key)) {
             PIPELINE_METRICS.duplicatesSuppressed++;
             logMessage('info', `Duplicate clientMessageId suppressed key=${key}`);
-            return res.json({ success: true, duplicate: true, response: [], session: { id: sid, currentAgent: 'atlas' }, metrics: { suppressed: true } });
+            return res.json({ 
+                success: true, 
+                duplicate: true, 
+                response: [
+                    {
+                        role: 'system',
+                        agent: 'atlas',
+                        content: '[duplicate_suppressed] Повідомлення з цим clientMessageId вже оброблено. Нових агентних відповідей немає.',
+                        timestamp: Date.now(),
+                        type: 'duplicate_suppressed'
+                    }
+                ], 
+                session: { id: sid, currentAgent: 'atlas' }, 
+                metrics: { suppressed: true }
+            });
         }
         cache.map.set(key, { ts: NOW, sessionId: sid });
         touch(key);

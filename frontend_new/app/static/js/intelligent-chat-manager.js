@@ -540,15 +540,14 @@ class AtlasIntelligentChatManager {
     async waitForTTSIdle(timeoutMs = 20000) {
         try {
             const start = Date.now();
-            this.log(`[TTS] Waiting for TTS idle (timeout: ${timeoutMs}ms)`);
-            
-            // Швидкий вихід, якщо нічого не відтворюється
-            if (!this.voiceSystem.currentAudio && 
-                this.voiceSystem.ttsQueue.length === 0 && 
-                !this.voiceSystem.isProcessingTTS) {
-                this.log('[TTS] Already idle, returning immediately');
-                return;
+            const fastIdle = !this.voiceSystem.currentAudio &&
+                              this.voiceSystem.ttsQueue.length === 0 &&
+                              !this.voiceSystem.isProcessingTTS;
+            if (fastIdle) {
+                // Fast path: полностью просто
+                return false; // не ждали
             }
+            this.log(`[TTS] Waiting for TTS idle (timeout: ${timeoutMs}ms)`);
             
             await new Promise(resolve => {
                 const check = () => {
@@ -561,13 +560,13 @@ class AtlasIntelligentChatManager {
                     const idle = isCurrentAudioIdle && isQueueEmpty && isNotProcessing;
                     
                     if (idle) {
-                        this.log('[TTS] TTS is now idle');
-                        return resolve();
+                        this.log('[TTS] -> idle');
+                        return resolve(true);
                     }
                     
                     if (Date.now() - start > timeoutMs) {
-                        this.log(`[TTS] TTS wait timeout after ${timeoutMs}ms`);
-                        return resolve();
+                        this.log(`[TTS] wait timeout after ${timeoutMs}ms (continue)`);
+                        return resolve(false);
                     }
                     
                     setTimeout(check, 200);
