@@ -38,6 +38,18 @@ export function startActionablePipeline(session, userMessage, atlasPlan, grishaP
   session.nextAction = 'tetyana_execute';
 }
 
+export function startPendingPrecheck(session, userMessage, atlasPlan) {
+  session.pipeline = {
+    type: 'actionable',
+    stage: 'pending_precheck',
+    userMessage,
+    atlasPlan,
+    grishaPre: null,
+    iter: 0
+  };
+  session.nextAction = 'grisha_precheck';
+}
+
 export function startProbePipeline(session, userMessage, atlasDraft, grishaShortage) {
   session.probe = {
     stage: 'pending_probe',

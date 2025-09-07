@@ -14,7 +14,7 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
 import ModelRegistry from './model_registry.js';
-import { PHASE, initSession, startActionablePipeline, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
+import { PHASE, initSession, startActionablePipeline, startPendingPrecheck, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
 import { initMemory, remember, recall, summarizeRecent, summarizeRanked, rememberSafe, summarizeForPrompt, memoryHealth, semanticContext, startMemoryMaintenance } from './agent_memory.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
 import { IntentCache } from './intent_cache.js';
@@ -1026,20 +1026,42 @@ app.post('/agent/tetyana', async (req, res) => {
             return res.status(502).json({ error: 'Goose is unavailable for Tetiana' });
         }
 
-        // 2) Короткий звіт: формуємо через openai-compat з окремого списку моделей (до 58)
+        // 2) Короткий звіт: формуємо через Goose з промптом замість окремих моделей
         let provider = 'goose';
         let model = 'github_copilot';
         let content = null;
+        
         try {
-            const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
+            // Використовуємо Goose для формування звіту
             const reportPrompt = [
+                'Сформуй короткий структурований ЗВІТ українською на основі виконання вище. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
+                'Будь стислим та конкретним. Максимум 3-4 речення на кожен розділ.',
+                `Виконання (сирий вивід): ${String(gooseExec).slice(0, 6000)}`
+            ].join('\n');
+            
+            const gooseReport = await runExecution(reportPrompt, sessionId, { 
+                enableTools: false, 
+                systemInstruction: 'Ти експерт з аналізу та структурування звітів. Створюй чіткі, короткі звіти українською мовою.' 
+            });
+            
+            if (gooseReport) {
+                content = gooseReport;
+                logMessage('info', `[TIMING] agent=tetyana phase=report provider=goose model=github_copilot success=true`);
+            } else {
+                throw new Error('Goose report generation failed');
+            }
+        } catch (err) {
+            logMessage('warn', `[TIMING] agent=tetyana phase=report provider=goose error=${err.message}`);
+            // Fallback to openai_compat only if Goose completely fails
+            const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
+            const fallbackPrompt = [
                 'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
                 `Виконання (сирий вивід): ${String(gooseExec).slice(0, 6000)}`
             ].join('\n');
             for (const route of reportRoutes) {
                 try {
                     const started = Date.now();
-                    const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, reportPrompt);
+                    const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, fallbackPrompt);
                     if (txt) {
                         content = txt;
                         provider = 'openai_compat';
@@ -1052,7 +1074,7 @@ app.post('/agent/tetyana', async (req, res) => {
                     registry.reportFailure(route);
                 }
             }
-        } catch (_) { /* ignore summarizer errors, fallback to goose text below */ }
+        }
 
         // 3) Якщо summarizer не спрацював — повертаємо структурований вивід Goose як є
         const finalText = enforceTetianaStructure(content || gooseExec);
@@ -1408,6 +1430,68 @@ async function processAgentCycle(userMessage, session) {
         timestamp: Date.now()
     });
 
+    // Check if we have a pending nextAction (e.g., after auto-clarification)
+    if (session.nextAction === 'grisha_precheck' && session.pipeline) {
+        // Execute Grisha precheck for pending pipeline
+        const precheckPrompt = [
+            'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
+            'Якщо бракує ключових даних для виконання — задай КОНКРЕТНІ питання користувачеві (що саме потрібно уточнити).',
+            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ» або ПИТАННЯ «ДО КОРИСТУВАЧА» (якщо потрібні уточнення).',
+            '',
+            `Завдання користувача: ${session.pipeline.userMessage}`,
+            `План Atlas: ${session.pipeline.atlasPlan}`
+        ].join('\n');
+        
+        const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
+        const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
+        responses.push(grishaPre);
+        session.history.push(grishaPre);
+        
+        // Update pipeline with Grisha precheck results
+        session.pipeline.grishaPre = grishaPre.content;
+        session.pipeline.stage = 'prechecked';
+        session.nextAction = 'tetyana_execute';
+        
+        logMessage('info', `[processAgentCycle] executed pending grisha_precheck`);
+        
+        // Запускаємо новий цикл для виконання nextAction
+        logMessage('info', `[processAgentCycle] scheduling next cycle for tetyana_execute`);
+        setTimeout(() => {
+            const syntheticUser = '[AUTO] Продовжити виконання Тетяни.';
+            processAgentCycle(syntheticUser, session).catch(e => {
+                logMessage('warn', `[processAgentCycle] auto tetyana cycle failed: ${e.message}`);
+            });
+        }, 100); // невелика затримка для завершення поточного циклу
+        
+        return responses;
+    }
+
+    // Check if we need to execute Tetyana after precheck
+    if (session.nextAction === 'tetyana_execute' && session.pipeline && session.pipeline.stage === 'prechecked') {
+        logMessage('info', `[processAgentCycle] executing tetyana based on nextAction`);
+        
+        const execPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nПлан Atlas: ${session.pipeline.atlasPlan}\nВимоги Гриші: ${session.pipeline.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
+        const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+        const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
+        
+        try { 
+            tetyanaExec.evidence = extractEvidence(tetyanaExec.content); 
+            if (tetyanaExec.evidence && typeof tetyanaExec.evidence.score === 'number') {
+                tetyanaExec.lowEvidence = tetyanaExec.evidence.score < 15;
+            }
+        } catch {}
+        
+        responses.push(tetyanaExec);
+        session.history.push(tetyanaExec);
+        
+        // Clear nextAction after execution
+        session.nextAction = null;
+        clearPipeline(session);
+        
+        logMessage('info', `[processAgentCycle] tetyana execution completed`);
+        return responses;
+    }
+
     // Колишня доменна логіка виявлення артефактів видалена — все керується через рольові промпти.
 
     // Phase 1: Atlas creates primary reply/plan (use heuristic intent to bias model choice)
@@ -1455,7 +1539,8 @@ async function processAgentCycle(userMessage, session) {
         // 1) Grisha precheck now; execution deferred until frontend TTS completes
         const precheckPrompt = [
             'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
-            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ», де кожен пункт — конкретне завдання з очікуваним артефактом.',
+            'Якщо бракує ключових даних для виконання — задай КОНКРЕТНІ питання користувачеві (що саме потрібно уточнити).',
+            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ» або ПИТАННЯ «ДО КОРИСТУВАЧА» (якщо потрібні уточнення).',
             '',
             `Завдання користувача: ${userMessage}`,
             `План Atlas: ${atlasResponse.content}`
@@ -1539,31 +1624,20 @@ async function processAgentCycle(userMessage, session) {
                         if (session.probe?.startedAt) { PIPELINE_METRICS.probeLatencyMs += (Date.now()-session.probe.startedAt); PIPELINE_METRICS.probeCycles++; }
                         remember('atlas','last_probe_outcome','clarify');
                         clearProbe(session);
-                        // Fallback to clarification path
-                        const atlasClarPrompt = PROBE_PROMPTS.atlasClarificationFallback();
-                        const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
-                        logProbe('Probe failed after max attempts -> clarification escalated');
-                        const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN); atlasClar.clarification = true; atlasClar.phase = 'atlas_clarify';
-                        responses.push(atlasClar); session.history.push(atlasClar);
-                        session.awaitingClarification = true; PIPELINE_METRICS.clarifications++;
+                        // Fallback to clarification path - але без додаткових питань від Atlas
+                        // Просто позначаємо що потрібне уточнення, Гріша вже сказав що потрібно
+                        logProbe('Probe failed after max attempts -> clarification needed (Grisha already provided guidance)');
+                        session.awaitingClarification = true; 
+                        PIPELINE_METRICS.clarifications++;
                     }
                     return responses;
                 }
-                const atlasClarPrompt = [
-                    'Ти — Atlas. Сформуй короткий структурований ЕТАП 0: що потрібно отримати від користувача для продовження.',
-                    'Не вигадуй доменних полів. Лише перефразуй задачу, підкресли, що потрібні уточнення, і наведи список пунктів як маркери (по суті, які дані / контекст / обмеження / початковий стан / очікувані критерії).',
-                    'Закінчи інструкцією: «Надайте ці дані однією відповіддю — після цього я згенерую план виконання.»',
-                    'Українською. Мінімізуй декоративний текст.'
-                ].join('\n');
-                const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
-                const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN);
-                atlasClar.clarification = true;
-                atlasClar.phase = 'atlas_clarify'; // спеціальна фаза для фронтенду
-                responses.push(atlasClar);
-                session.history.push(atlasClar);
-                session.awaitingClarification = true; scheduleClarificationAutoFill(session);
+                // Замість генерації нових питань Atlas'ом, дозволяємо Гріші самому сказати що потрібно
+                // Гріша вже сформулював що йому потрібно в grishaPre.content
+                // Просто повертаємо відповідь Гриші як остаточну без додаткових питань від Atlas
+                session.awaitingClarification = true; 
+                scheduleClarificationAutoFill(session);
                 PIPELINE_METRICS.clarifications++;
-                // Ставимо стан що потрібно більше даних (узагальнені):
                 markNeedsMore(session, ['additional_context'], grishaPre.content);
                 return responses;
             }
@@ -1658,23 +1732,13 @@ async function processAgentCycle(userMessage, session) {
             const repeated = session.lastPlanningSignature && session.lastPlanningSignature === planningSig;
             session.lastPlanningSignature = planningSig;
             if (!session.awaitingClarification && (shortage || repeated)) {
-                const atlasClarPrompt = [
-                    'Ти — Atlas. Користувач сформулював задачу, але потрібні уточнення для переходу до виконання.',
-                    '1) Коротко перефразуй задачу одним реченням.',
-                    '2) Дай список «Надайте:» (контекст, початковий стан, моделі/пристрої, цільові критерії, обмеження, бажані інструменти).',
-                    '3) Заверши: «Надайте ці дані однією відповіддю — після цього я згенерую виконуваний план.»',
-                    'Жодних зайвих прикрас.'
-                ].join('\n');
-                const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
-                const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN);
-                atlasClar.clarification = true;
-                atlasClar.phase = 'atlas_clarify';
-                responses.push(atlasClar);
-                session.history.push(atlasClar);
-                session.awaitingClarification = true; scheduleClarificationAutoFill(session);
+                // Замість генерації нових питань Atlas'ом, дозволяємо природному потоку планування
+                // Гріша вже може сформулювати що потрібно в своїх відповідях
+                session.awaitingClarification = true; 
+                scheduleClarificationAutoFill(session);
                 PIPELINE_METRICS.clarifications++;
                 if (repeated) PIPELINE_METRICS.planningStallClarifications++;
-                logMessage('info', `[PLANNING] Clarification escalated (shortage=${shortage} repeated=${repeated})`);
+                logMessage('info', `[PLANNING] Clarification needed (shortage=${shortage} repeated=${repeated}) - letting Grisha handle questions`);
                 return responses;
             }
         } catch (e) { logMessage('warn', 'Planning escalation error: ' + e.message); }
@@ -1990,7 +2054,8 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
         PIPELINE_METRICS.actionableSessions++;
         const precheckPrompt = [
             'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
-            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ», де кожен пункт — конкретне завдання з очікуваним артефактом.',
+            'Якщо бракує ключових даних для виконання — задай КОНКРЕТНІ питання користувачеві (що саме потрібно уточнити).',
+            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ» або ПИТАННЯ «ДО КОРИСТУВАЧА» (якщо потрібні уточнення).',
             '',
             `Завдання користувача: ${userMessage}`,
             `План Atlas: ${atlasResponse.content}`
@@ -2003,18 +2068,10 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
             const lowerGrisha = (grishaPre.content || '').toLowerCase();
             const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
             if (shortage && !session.awaitingClarification) {
-                const atlasClarPrompt = [
-                    'Ти — Atlas. Користувач сформулював задачу, але потрібні уточнення для переходу до виконання.',
-                    '1) Коротко перефразуй задачу одним реченням.',
-                    '2) Дай список «Надайте:» (контекст, початковий стан, моделі/пристрої, цільові критерії, обмеження, бажані інструменти).',
-                    '3) Заверши: «Надайте ці дані однією відповіддю — після цього я згенерую виконуваний план.»',
-                    'Жодних зайвих прикрас.'
-                ].join('\n');
-                const atlasClarRaw = await generateAgentResponse('atlas', atlasClarPrompt, session);
-                const atlasClar = tagResponse(atlasClarRaw, PHASE.ATLAS_PLAN);
-                atlasClar.clarification = true; atlasClar.phase = 'atlas_clarify';
-                responses.push(atlasClar); session.history.push(atlasClar);
-                session.awaitingClarification = true; PIPELINE_METRICS.clarifications++;
+                // Замість генерації нових питань Atlas'ом, дозволяємо Гріші бути основним джерелом питань
+                // Відповідь Гриші вже містить необхідні уточнення
+                session.awaitingClarification = true; 
+                PIPELINE_METRICS.clarifications++;
                 markNeedsMore(session, ['additional_context'], grishaPre.content);
                 try { scheduleClarificationAutoFill(session); } catch(e){ logMessage('warn','Clarification auto-fill scheduling failed: '+e.message); }
                 return responses;
@@ -2133,39 +2190,71 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         } else {
             // Report Goose success to registry
             registry.reportSuccess({ provider: 'goose', model: 'github_copilot' }, Date.now() - execStartTime);
-            // Short structured report via openai-compat using configured 58-model list
+            
+            // Short structured report via Goose using dedicated prompt
             const reportStartTime = Date.now();
-            const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
             const reportPrompt = [
-                'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
+                'Сформуй короткий структурований ЗВІТ українською на основі виконання вище. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
+                'Будь стислим та конкретним. Максимум 3-4 речення на кожен розділ.',
                 `Виконання (сирий вивід): ${String(execNotes).slice(0, 6000)}`
             ].join('\n');
+            
             let reportText = null;
-            for (const route of reportRoutes) {
-                const routeStartTime = Date.now();
-                try {
-                    const started = Date.now();
-                    const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, reportPrompt);
-                    const routeDuration = Date.now() - routeStartTime;
-                    if (txt) {
-                        reportText = txt;
-                        registry.reportSuccess(route, Date.now() - started);
-                        provider = 'openai_compat';
-                        model = route.model;
-                        executionSuccessful = true;
-                        logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=true`);
-                        break;
+            
+            try {
+                // Primary: Use Goose for report generation
+                const gooseReport = await runExecution(reportPrompt, session.id, { 
+                    enableTools: false, 
+                    systemInstruction: 'Ти експерт з аналізу та структурування звітів. Створюй чіткі, короткі звіти українською мовою.' 
+                });
+                
+                if (gooseReport) {
+                    reportText = gooseReport;
+                    provider = 'goose';
+                    model = 'github_copilot';
+                    executionSuccessful = true;
+                    const reportDuration = Date.now() - reportStartTime;
+                    logMessage('info', `[TIMING] agent=tetyana phase=report provider=goose ms=${reportDuration} success=true`);
+                } else {
+                    throw new Error('Goose report generation failed');
+                }
+            } catch (err) {
+                logMessage('warn', `[TIMING] agent=tetyana phase=report provider=goose error=${err.message}`);
+                
+                // Fallback: Use openai-compat models only if Goose fails
+                const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
+                const fallbackPrompt = [
+                    'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
+                    `Виконання (сирий вивід): ${String(execNotes).slice(0, 6000)}`
+                ].join('\n');
+                
+                for (const route of reportRoutes) {
+                    const routeStartTime = Date.now();
+                    try {
+                        const started = Date.now();
+                        const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, fallbackPrompt);
+                        const routeDuration = Date.now() - routeStartTime;
+                        if (txt) {
+                            reportText = txt;
+                            registry.reportSuccess(route, Date.now() - started);
+                            provider = 'openai_compat';
+                            model = route.model;
+                            executionSuccessful = true;
+                            logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=true`);
+                            break;
+                        }
+                        registry.reportFailure(route, new Error('Empty response from model'));
+                        logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=false`);
+                    } catch (err) {
+                        const routeDuration = Date.now() - routeStartTime;
+                        registry.reportFailure(route, err);
+                        logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} error=${err.message}`);
                     }
-                    registry.reportFailure(route, new Error('Empty response from model'));
-                    logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=false`);
-                } catch (err) {
-                    const routeDuration = Date.now() - routeStartTime;
-                    registry.reportFailure(route, err);
-                    logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} error=${err.message}`);
                 }
             }
+            
             const reportDuration = Date.now() - reportStartTime;
-            logMessage('info', `[TIMING] agent=tetyana phase=report_total ms=${reportDuration} routes_tried=${reportRoutes.length}`);
+            logMessage('info', `[TIMING] agent=tetyana phase=report_total ms=${reportDuration} routes_tried=${reportText ? 1 : 0}`);
             const base = reportText || execNotes;
             content = enforceTetianaStructure(base);
             if (!provider) { provider = 'goose'; model = 'github_copilot'; }
@@ -2366,12 +2455,12 @@ function createAgentPrompt(agentName, message, session) {
     
     switch (agentName) {
         case 'atlas':
-            return `${baseContext} Ти — ATLAS, стратег. Твоє завдання: швидко перефразувати запит користувача українською зрозумілою мовою, окреслити суть і контекст, виділити ключові вимоги і ризики. Без детальної нумерації кроків — це робота Тетяни. Якщо бракує даних, сформулюй 1–2 точні питання до користувача або до Тетяни.${memoryBlock}
+            return `${baseContext} Ти — ATLAS, стратег і планувальник. Твоє завдання: проаналізувати запит користувача та створити чіткий план виконання українською мовою. Окресли суть завдання, контекст, ключові вимоги та можливі ризики. Сформулюй конкретні кроки для виконання. Якщо бракує даних, сформулюй 1–2 точні питання до користувача.${memoryBlock}
 
 Запит користувача: ${message}
 Нещодавній контекст: ${getRecentHistory(session, 3)}
 
-Стиль: стисло, по суті, дружньо, з легкими живими зверненнями за потреби (без заучених фраз).`;
+Стиль: стисло, по суті, дружньо, з фокусом на практичному виконанні завдання.`;
 
         case 'grisha':
             return `${baseContext} Ти — Гриша, валідаційний агент. Перша перевірка — одразу після перефразування від ATLAS: оцінка ризиків і безпеки, вкажи на слабкі місця. Друга перевірка — після звіту Тетяни: валідуй, що завдання справді виконано за критеріями. Якщо не виконано — чітко вкажи, що саме не так, і які докази потрібні.${memoryBlock}
@@ -2732,8 +2821,16 @@ function scheduleClarificationAutoFill(session) {
                     const syntheticUser = '[AUTO] Продовжити виконання.';
                     
                     logMessage('info', `[clar_timer] kickstart with atlas="${lastAtlas?.content?.slice(0,100)}" grisha="${lastGrisha?.content?.slice(0,100)}"`);
-                    startActionablePipeline(session, syntheticUser, lastAtlas?.content || '', lastGrisha?.content || '');
+                    // Після auto-clarification потрібен новий precheck Гришею
+                    startPendingPrecheck(session, syntheticUser, lastAtlas?.content || '');
+                    
                     logMessage('info', `[clar_timer] kickstart completed successfully`);
+                    
+                    // Запускаємо processAgentCycle для обробки nextAction
+                    logMessage('info', `[clar_timer] starting processAgentCycle after kickstart`);
+                    processAgentCycle(syntheticUser, session).catch(e => {
+                        logMessage('warn', `[clar_timer] processAgentCycle after kickstart failed: ${e.message}`);
+                    });
                 } catch(e){ logMessage('warn', `[clar_timer] kickstart failed: ${e.message}`); }
             } catch (e) {
                 logMessage('warn', 'Clarification auto-fill failed: ' + e.message);

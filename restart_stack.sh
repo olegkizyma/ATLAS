@@ -153,6 +153,64 @@ check_local_ai_api() {
     return 1
 }
 
+# Детальна перевірка ключових моделей для ATLAS
+test_key_models() {
+    log_info "🧠 Testing key AI models functionality..."
+    
+    # Список критичних моделей для тестування
+    local test_models=(
+    "mistral-ai/ministral-3b"
+        "microsoft/phi-3.5-mini-instruct" 
+        "mistral-ai/ministral-3b"
+        "openai/gpt-4o"
+        "xai/grok-3-mini"
+    )
+    
+    local working_models=0
+    local total_models=${#test_models[@]}
+    
+    for model in "${test_models[@]}"; do
+        log_debug "Testing model: $model"
+        
+        # Простий тест чат-завершення
+        local response
+        response=$(curl -s --max-time 10 -X POST "http://127.0.0.1:3010/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -d "{
+                \"model\": \"$model\",
+                \"messages\": [{\"role\": \"user\", \"content\": \"Test\"}],
+                \"max_tokens\": 5,
+                \"temperature\": 0.1
+            }" 2>/dev/null)
+        
+        if echo "$response" | grep -q '"choices"' && echo "$response" | grep -q '"content"'; then
+            log_info "  ✅ $model - Working"
+            working_models=$((working_models + 1))
+        else
+            log_warn "  ❌ $model - Failed or empty response"
+            if [ "${DEBUG_MODEL_TESTS:-0}" = "1" ]; then
+                log_debug "Response: $(echo "$response" | head -c 200)..."
+            fi
+        fi
+    done
+    
+    log_info "📊 Model Test Results: $working_models/$total_models models working"
+    
+    if [ $working_models -eq 0 ]; then
+        log_error "❌ No models are working! ATLAS won't function properly."
+        if [ "${ALLOW_NO_WORKING_MODELS}" != "1" ]; then
+            return 1
+        fi
+        log_warn "ALLOW_NO_WORKING_MODELS set - continuing anyway"
+    elif [ $working_models -lt 3 ]; then
+        log_warn "⚠️  Only $working_models models working - limited functionality expected"
+    else
+        log_info "✅ Sufficient models working for full ATLAS operation"
+    fi
+    
+    return 0
+}
+
 # Graceful stop процесу
 graceful_stop() {
     local pid=$1
@@ -456,6 +514,23 @@ check_services() {
         log_warn "⚠️  Ukrainian TTS (port 3001) - Not available (Voice features disabled)"
     fi
     
+    # AI Models Status Check
+    log_restart "🧠 AI Models Quick Check:"
+    if [ "${SKIP_MODEL_STATUS_CHECK:-0}" != "1" ]; then
+        local quick_test_response
+        quick_test_response=$(curl -s --max-time 8 -X POST "http://127.0.0.1:3010/v1/chat/completions" \
+            -H "Content-Type: application/json" \
+            -d '{"model": "mistral-ai/ministral-3b", "messages": [{"role": "user", "content": "OK"}], "max_tokens": 3}' 2>/dev/null)
+        
+        if echo "$quick_test_response" | grep -q '"choices"'; then
+            log_info "✅ AI Models - Quick test passed (ministral-3b responsive)"
+        else
+            log_warn "⚠️  AI Models - Quick test failed or slow response"
+        fi
+    else
+        log_info "🔄 AI Models - Status check skipped (SKIP_MODEL_STATUS_CHECK=1)"
+    fi
+    
     if [ "$all_healthy" = true ]; then
         log_restart "🎉 All core services are running!"
         echo ""
@@ -497,6 +572,12 @@ main() {
     check_node_version || exit 1
     # Попередня перевірка Local AI API (можна пропустити якщо змінна встановлена)
     check_local_ai_api || { log_warn "Пропускаємо через відсутність Local AI API"; [ "${ALLOW_NO_LOCAL_AI}" = "1" ] || exit 1; }
+    # Детальна перевірка ключових моделей
+    if [ "${SKIP_MODEL_TESTS:-0}" != "1" ]; then
+        test_key_models || { log_warn "Model tests failed"; [ "${ALLOW_NO_WORKING_MODELS}" = "1" ] || exit 1; }
+    else
+        log_info "Model tests skipped via SKIP_MODEL_TESTS=1"
+    fi
     
     # Зупинка сервісів
     stop_all_services
