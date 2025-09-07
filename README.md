@@ -49,6 +49,13 @@ ollama serve
 - **⚙️ Tetyana** - Виконавець (Goose + AI execution)  
 - **✅ Grisha** - Валідатор (AI + Goose validation)
 
+### 🎥 ATLAS Vision System (NEW!)
+- **Автоматичний парсинг фото** - Computer vision аналіз
+- **Покращення зображень** - AI-enhanced image processing  
+- **Візуальні послідовності** - Генерація відео з описом дій
+- **Детекція об'єктів** - YOLO + MediaPipe integration
+- **Розпізнавання жестів** - Hands, faces, poses detection
+
 ## 🧠 Ключові принципи
 
 ### ✅ Pure Intelligence
@@ -174,6 +181,21 @@ open http://127.0.0.1:5001
 - Python 3.8+
 - Node.js 16+
 - Virtual environment support
+
+### Vision System Dependencies
+```bash
+# Computer vision libraries
+pip install opencv-python mediapipe ultralytics pillow
+
+# Test vision functionality
+python scripts/test_vision_system.py
+```
+
+### Vision API Endpoints
+- `/api/vision/upload` - Image upload with analysis
+- `/api/vision/analyze` - Detailed computer vision analysis
+- `/api/vision/enhance` - AI-powered image enhancement  
+- `/api/vision/sequence/<timestamp>` - Video sequence generation
 
 ### Installation
 

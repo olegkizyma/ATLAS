@@ -49,6 +49,13 @@ class AtlasApp {
             // Ініціалізуємо мінімалістичний чат
             this.initMinimalChat();
             
+            // Ініціалізуємо vision систему якщо доступна
+            if (window.AtlasVision) {
+                this.managers.vision = new window.AtlasVision();
+                window.atlasVision = this.managers.vision;
+                this.log('Atlas Vision system initialized');
+            }
+            
             // Робимо інші менеджери глобально доступними
             window.atlasChat = this.managers.chat;
             // atlasStatus вже встановлений вище, якщо існує

@@ -688,6 +688,80 @@ app.get('/session/:sessionId/status', (req, res) => {
     }
 });
 
+// Session status endpoint for ACK mode
+app.get('/session/:sessionId/status', (req, res) => {
+    try {
+        const { sessionId } = req.params;
+        const session = sessions.get(sessionId);
+        
+        if (!session) {
+            return res.json({
+                sessionId,
+                status: 'not_found',
+                ready: false,
+                error: 'Session not found'
+            });
+        }
+        
+        const now = Date.now();
+        const lastActivity = session.lastInteraction || session.lastActivity || 0;
+        const isStale = (now - lastActivity) > 300000; // 5 minutes
+        
+        // Determine processing status
+        let status = 'idle';
+        let ready = true;
+        let response = null;
+        
+        if (session.awaitingClarification) {
+            status = 'awaiting_clarification';
+            ready = true;
+        } else if (session.pipeline) {
+            status = 'processing';
+            ready = false;
+        } else if (session.ttsGate && session.ttsGate.pendingPhase) {
+            status = 'tts_pending';
+            ready = false;
+        } else if (isStale) {
+            status = 'stale';
+            ready = true;
+        }
+        
+        // If there's a recent response, include it
+        if (session.history && session.history.length > 0) {
+            const lastMsg = session.history[session.history.length - 1];
+            if (lastMsg.role === 'assistant' && (now - (lastMsg.timestamp || 0)) < 30000) {
+                response = [lastMsg];
+                ready = true;
+                status = 'completed';
+            }
+        }
+        
+        res.json({
+            sessionId,
+            status,
+            ready,
+            response,
+            timing: {
+                lastActivity,
+                ageMs: now - lastActivity
+            },
+            session: {
+                currentAgent: session.currentAgent,
+                awaitingClarification: !!session.awaitingClarification,
+                pipelineActive: !!session.pipeline
+            }
+        });
+        
+    } catch (error) {
+        res.status(500).json({
+            sessionId: req.params.sessionId,
+            status: 'error',
+            ready: false,
+            error: error.message
+        });
+    }
+});
+
 // Routes
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });

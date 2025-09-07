@@ -1,32 +1,38 @@
-// Graphviz DOT representation of ATLAS components
+// Graphviz DOT representation of ATLAS components with enhanced timing and ACK
 
 digraph ATLAS {
     rankdir=LR;
     // shape=rounded is not a valid Graphviz shape warning; use box + rounded style
     node [shape=box, style="rounded,filled", fillcolor="#f5f5f5", fontname="Inter"];
 
-    subgraph cluster_client { label="Client"; UI [label="Web UI / Chat"] }
-    subgraph cluster_api { label="Flask 5001"; API [label="Flask API"] }
-    subgraph cluster_node { label="Node Orchestrator 5101"; ORCH [label="Orchestrator"] }
+    subgraph cluster_client { label="Client Layer"; UI [label="Web UI / Chat\n+ ACK mode\n+ status polling"] }
+    subgraph cluster_api { label="Flask API 5001\n+ unified logging"; API [label="Flask API\n+ clientMessageId\n+ ACK endpoints"]; StatusAPI [label="/api/chat/status\npolling endpoint"] }
+    subgraph cluster_node { label="Node Orchestrator 5101\n+ enhanced timing"; ORCH [label="Orchestrator\n+ per-agent timing\n+ cycle timing"]; SessionMgr [label="Session Manager"]; DupCache [label="Duplicate Cache\nTTL 5min"] }
 
-    subgraph cluster_agents { label="Agents"; style=filled; color="#e0f7fa"; 
-        Atlas [label="Atlas\nPlanner", fillcolor="#e3f2fd"];
-        Grisha [label="Grisha\nValidator", fillcolor="#e8f5e9"];
-        Tetyana [label="Tetyana\nExecutor", fillcolor="#fff8e1"];
+    subgraph cluster_agents { label="Enhanced Agents\n+ timing instrumentation"; style=filled; color="#e0f7fa"; 
+        Atlas [label="Atlas\nPlanner + timing", fillcolor="#e3f2fd"];
+        Grisha [label="Grisha\nValidator + timing", fillcolor="#e8f5e9"];
+        Tetyana [label="Tetyana\nExecutor + timing", fillcolor="#fff8e1"];
     }
 
-    subgraph cluster_probe { label="Probe Cycle"; style=dashed; color="#c5cae9";
-        TP [label="Tetyana Probe"];
-        GP [label="Grisha Review"];
-        AF [label="Atlas Feasibility"];
+    subgraph cluster_probe { label="Probe Cycle\n+ advanced timing"; style=dashed; color="#c5cae9";
+        TP [label="Tetyana Probe\n+ execution timing"];
+        GP [label="Grisha Review\n+ review timing"];
+        AF [label="Atlas Feasibility\n+ decision timing"];
+        ProbeMetrics [label="Probe Metrics\nadvanced/clarified"];
     }
 
-    subgraph cluster_memory { label="SQLite Memory"; style=filled; color="#ede7f6";
-        MAtlas [label="Atlas Memory"];
-        MGrisha [label="Grisha Memory"];
+    subgraph cluster_memory { label="SQLite Memory\n+ semantic search"; style=filled; color="#ede7f6";
+        MAtlas [label="Atlas Facts\n+ ranked retrieval"];
+        MGrisha [label="Grisha Facts\n+ ranked retrieval"];
     }
 
-    subgraph cluster_metrics { label="Prometheus Metrics"; style=dotted; color="#ffecb3";
+    subgraph cluster_metrics { label="Enhanced Prometheus Metrics"; style=dotted; color="#ffecb3";
+        DupMetric [label="duplicates_suppressed"];
+        TimingMetric [label="agent_timing_ms"];
+        ProbeAdvanced [label="probe_advanced_total"];
+        ProbeClarified [label="probe_clarified_total"];
+        RouteMetrics [label="route_success/fail"];
         P1 [label="pipeline_phase_*"];
         P2 [label="probe_*"];
         P3 [label="memory_context_tokens"];
@@ -36,30 +42,90 @@ digraph ATLAS {
         P7 [label="semantic_enabled"];
     }
 
+    subgraph cluster_logging { label="Unified Logging System"; style=filled; color="#f3e5f5";
+        NodeLogs [label="Node Logs\nUTC+offset"];
+        PythonLogs [label="Python Logs\nUTC+offset"];
+        LogFormat [label="Unified Format\n2025-09-07T02:30:15.123+02:00"];
+    }
+
+    subgraph cluster_vision { label="ATLAS Vision System"; style=filled; color="#e8f5e8";
+        VisionProcessor [label="Vision Processor\n+ OpenCV + MediaPipe", fillcolor="#c8e6c9"];
+        ImageAnalyzer [label="Image Analyzer\n+ YOLO + Face Detection", fillcolor="#a5d6a7"];
+        SequenceGenerator [label="Sequence Generator\n+ Action Timeline", fillcolor="#81c784"];
+        VideoSynthesizer [label="Video Synthesizer\n+ Effect Overlay", fillcolor="#66bb6a"];
+        VisionAPI [label="Vision API\n/api/vision/*", fillcolor="#4caf50"];
+        VisionUI [label="Vision UI\nDrag & Drop Interface", fillcolor="#43a047"];
+    }
+
     subgraph cluster_ext { label="Optional Services"; style=dashed; color="#ffe0b2";
         Goose [label="Goose 3000"];
         TTS [label="TTS 3001"];
         LLM [label="Local AI API 3010", fillcolor="#e1f5fe"];
     }
 
-    UI -> API -> ORCH -> Atlas -> Grisha -> Tetyana;
-    Tetyana -> Grisha -> ORCH;
-    Atlas -> TP -> GP -> AF -> Atlas;
-
-    Atlas -> MAtlas; Grisha -> MGrisha;
+    // Flow connections with enhanced timing and ACK features
+    UI -> API [label="sync/ACK requests\n+ clientMessageId"];
+    UI -> StatusAPI [label="status polling", style=dashed];
+    API -> ORCH [label="proxy requests\n+ timing"];
+    API -> DupCache [label="check duplicates"];
+    ORCH -> SessionMgr [label="session tracking"];
+    
+    ORCH -> Atlas [label="planning + timing"];
+    ORCH -> Grisha [label="validation + timing"];  
+    ORCH -> Tetyana [label="execution + timing"];
+    
+    // Probe cycle flows
+    Atlas -> TP [label="initiate probe", style=dashed];
+    TP -> GP [label="review artifacts", style=dashed];
+    GP -> AF [label="feasibility", style=dashed];
+    AF -> ProbeMetrics [label="outcome tracking", style=dashed];
+    
+    // Memory and context flows
+    Atlas -> MAtlas [label="store insights"];
+    Grisha -> MGrisha [label="store validations"];
     MAtlas -> MGrisha [dir=both, style=dashed, label="shared context"];
+    
+    // Metrics collection flows
+    DupCache -> DupMetric [label="increment"];
+    Atlas -> TimingMetric [label="per-agent ms"];
+    Grisha -> TimingMetric [label="per-agent ms"];
+    Tetyana -> TimingMetric [label="per-agent ms"];
+    TP -> ProbeAdvanced [label="ADVANCE"];
+    GP -> ProbeClarified [label="CLARIFY"];
+    
+    // Unified logging flows
+    ORCH -> NodeLogs [label="structured logs"];
+    API -> PythonLogs [label="structured logs"];
+    NodeLogs -> LogFormat [label="UTC+offset"];
+    PythonLogs -> LogFormat [label="UTC+offset"];
 
-    // Pruning / TTL and Semantic conceptual nodes
+    // Legacy metrics connections
+    ORCH -> P1; ORCH -> P2; ORCH -> P3; ORCH -> P4;
+
+    // Vision system flows
+    UI -> VisionUI [label="drag & drop images", style=dashed, color="#4caf50"];
+    VisionUI -> VisionAPI [label="upload requests", color="#4caf50"];
+    VisionAPI -> VisionProcessor [label="image data", color="#4caf50"];
+    VisionProcessor -> ImageAnalyzer [label="OpenCV/MediaPipe", color="#4caf50"];
+    ImageAnalyzer -> SequenceGenerator [label="detection results", color="#4caf50"];
+    SequenceGenerator -> VideoSynthesizer [label="action timeline", color="#4caf50"];
+    VideoSynthesizer -> VisionUI [label="video sequence", color="#4caf50"];
+    
+    // Integration with main system
+    VisionAPI -> API [label="vision endpoints", style=dashed];
+    Tetyana -> VisionProcessor [label="image tasks", style=dashed, color="#4caf50"];
+
+    // External service connections
+    Tetyana -> Grisha -> ORCH [label="response chain"];
+    Tetyana -> Goose [label="tool execution"];
+    ORCH -> LLM [label="AI inference"];
+    ORCH -> TTS [label="voice synthesis"];
+    
+    // Memory lifecycle nodes
     Prune [label="TTL & Capacity Pruning", fillcolor="#ffecec", shape=box, style="rounded,filled,dashed"];
     Semantic [label="Semantic Embeddings (opt)", fillcolor="#eef7ff", shape=box, style="rounded,filled,dashed"];
     MAtlas -> Prune [style=dashed];
     MGrisha -> Prune [style=dashed];
     MAtlas -> Semantic [style=dashed];
     MGrisha -> Semantic [style=dashed];
-
-    ORCH -> P1; ORCH -> P2; ORCH -> P3; ORCH -> P4;
-
-    Tetyana -> Goose;
-    ORCH -> LLM;
-    ORCH -> TTS;
 }

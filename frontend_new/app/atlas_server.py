@@ -33,6 +33,16 @@ import re
 import time
 import math
 import uuid
+import base64
+
+# Computer Vision imports (optional)
+try:
+    from vision_processor import vision_processor
+    VISION_AVAILABLE = True
+except ImportError as e:
+    print(f"Vision processor not available: {e}")
+    vision_processor = None
+    VISION_AVAILABLE = False
 
 try:
     # Optional: robust retry adapter if available
@@ -671,6 +681,38 @@ def chat_status(session_id):
             'error': str(e)
         }), 500
 
+@app.route('/api/chat/status/<session_id>')
+def chat_status(session_id):
+    """Get processing status for ACK mode"""
+    try:
+        if not requests:
+            return jsonify({'error': 'Requests module unavailable'}), 500
+            
+        # Query orchestrator for session status
+        try:
+            response = requests.get(f'{ORCHESTRATOR_URL}/session/{session_id}/status', timeout=5)
+            if response.status_code == 200:
+                return jsonify(response.json())
+            else:
+                return jsonify({
+                    'sessionId': session_id,
+                    'status': 'unknown',
+                    'ready': False,
+                    'error': f'Orchestrator returned {response.status_code}'
+                }), response.status_code
+        except Exception as e:
+            logger.warning(f"Session status check failed: {e}")
+            return jsonify({
+                'sessionId': session_id,
+                'status': 'unavailable',
+                'ready': False,
+                'error': str(e)
+            }), 503
+            
+    except Exception as e:
+        logger.error(f"Chat status error: {e}")
+        return jsonify({'error': 'Internal error'}), 500
+
 @app.route('/api/voice/synthesize', methods=['POST'])
 def synthesize_voice():
     """TTS synthesis endpoint"""
@@ -1178,6 +1220,190 @@ def intent_classification():
     except Exception as e:
         logger.error(f"/api/intent error: {e}")
         return jsonify({'error': 'Intent classification failed', 'details': str(e)}), 500
+
+# ==================== VISION PROCESSING ENDPOINTS ====================
+
+@app.route('/api/vision/status')
+def vision_status():
+    """Статус комп'ютерного зору"""
+    return jsonify({
+        'vision_available': VISION_AVAILABLE,
+        'modules': {
+            'opencv': 'cv2' in sys.modules,
+            'mediapipe': 'mediapipe' in sys.modules,
+            'yolo': 'ultralytics' in sys.modules,
+            'pillow': 'PIL' in sys.modules
+        }
+    })
+
+@app.route('/api/vision/upload', methods=['POST'])
+def vision_upload():
+    """Завантажує та обробляє зображення"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON body required'}), 400
+        
+        image_data = data.get('image')
+        if not image_data:
+            return jsonify({'error': 'image field is required'}), 400
+        
+        # Обробляємо зображення
+        result = vision_processor.process_image_upload(image_data)
+        
+        if result['success']:
+            logger.info(f"Image processed successfully: {result['timestamp']}")
+            return jsonify({
+                'success': True,
+                'analysis': result['analysis'],
+                'sequence': result['sequence'],
+                'enhanced_available': True,
+                'timestamp': result['timestamp']
+            })
+        else:
+            return jsonify({'error': result['error']}), 500
+            
+    except Exception as e:
+        logger.error(f"/api/vision/upload error: {e}")
+        return jsonify({'error': 'Image processing failed', 'details': str(e)}), 500
+
+@app.route('/api/vision/analyze', methods=['POST'])
+def vision_analyze():
+    """Детальний аналіз зображення з послідовністю дій"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON body required'}), 400
+        
+        image_data = data.get('image')
+        generate_video = data.get('generate_video', False)
+        
+        if not image_data:
+            return jsonify({'error': 'image field is required'}), 400
+        
+        # Обробляємо зображення
+        result = vision_processor.process_image_upload(image_data)
+        
+        if not result['success']:
+            return jsonify({'error': result['error']}), 500
+        
+        response = {
+            'success': True,
+            'analysis': result['analysis'],
+            'sequence': result['sequence'],
+            'enhanced_path': result['enhanced_path'],
+            'scene_description': result['analysis']['scene_description']
+        }
+        
+        # Генеруємо відео якщо потрібно
+        if generate_video:
+            try:
+                video_path = vision_processor.generate_video_sequence(
+                    result['enhanced_path'], 
+                    result['sequence']
+                )
+                if video_path:
+                    response['video_path'] = video_path
+                    response['video_available'] = True
+                else:
+                    response['video_available'] = False
+                    response['video_error'] = 'Video generation failed'
+            except Exception as ve:
+                logger.warning(f"Video generation failed: {ve}")
+                response['video_available'] = False
+                response['video_error'] = str(ve)
+        
+        return jsonify(response)
+        
+    except Exception as e:
+        logger.error(f"/api/vision/analyze error: {e}")
+        return jsonify({'error': 'Vision analysis failed', 'details': str(e)}), 500
+
+@app.route('/api/vision/enhance', methods=['POST'])
+def vision_enhance():
+    """Покращує зображення"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'JSON body required'}), 400
+        
+        image_data = data.get('image')
+        if not image_data:
+            return jsonify({'error': 'image field is required'}), 400
+        
+        # Тільки покращення зображення
+        result = vision_processor.process_image_upload(image_data)
+        
+        if result['success']:
+            # Читаємо покращене зображення та повертаємо як base64
+            try:
+                with open(result['enhanced_path'], 'rb') as f:
+                    enhanced_data = base64.b64encode(f.read()).decode('utf-8')
+                
+                return jsonify({
+                    'success': True,
+                    'enhanced_image': f"data:image/jpeg;base64,{enhanced_data}",
+                    'timestamp': result['timestamp']
+                })
+            except Exception as fe:
+                logger.error(f"Failed to read enhanced image: {fe}")
+                return jsonify({'error': 'Failed to read enhanced image'}), 500
+        else:
+            return jsonify({'error': result['error']}), 500
+            
+    except Exception as e:
+        logger.error(f"/api/vision/enhance error: {e}")
+        return jsonify({'error': 'Image enhancement failed', 'details': str(e)}), 500
+
+@app.route('/api/vision/sequence/<timestamp>')
+def vision_get_sequence(timestamp):
+    """Отримує згенеровану послідовність за timestamp"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        # Шукаємо файли по timestamp
+        temp_dir = vision_processor.temp_dir
+        video_path = temp_dir / f"sequence_{timestamp}.mp4"
+        
+        if video_path.exists():
+            return send_file(str(video_path), mimetype='video/mp4')
+        else:
+            return jsonify({'error': 'Video sequence not found'}), 404
+            
+    except Exception as e:
+        logger.error(f"/api/vision/sequence error: {e}")
+        return jsonify({'error': 'Failed to retrieve sequence'}), 500
+
+@app.route('/api/vision/cleanup', methods=['POST'])
+def vision_cleanup():
+    """Очищає тимчасові файли"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        data = request.get_json() or {}
+        hours = data.get('hours', 24)
+        
+        vision_processor.cleanup_temp_files(hours)
+        
+        return jsonify({
+            'success': True,
+            'message': f'Cleaned files older than {hours} hours'
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/vision/cleanup error: {e}")
+        return jsonify({'error': 'Cleanup failed', 'details': str(e)}), 500
 
 if __name__ == '__main__':
     logger.info(f"Starting ATLAS Frontend Server on port {FRONTEND_PORT}")

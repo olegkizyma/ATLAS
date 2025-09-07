@@ -5,49 +5,122 @@ sequenceDiagram
     participant F as Flask API (5001)
     participant O as Orchestrator (Node 5101)
     participant A as Atlas Planner
-    participant G as Grisha Validator
+    participant G as Grisha Validator  
     participant T as Tetyana Executor
     participant DB as SQLite Memory
     participant C as Duplicate Cache
+    participant M as Metrics/Prometheus
 
-    note over U,DB: Timing starts: cycleStart = Date.now()
+    note over U,M: Enhanced timing & observability system
     
     U->>F: chat message + clientMessageId
-    F->>C: check duplicate cache
+    F->>C: check duplicate TTL cache (5min)
     alt duplicate found
+        C->>M: duplicatesSuppressed++
         C-->>F: duplicate=true, suppressed metric++
-        F-->>U: cached response, no processing
+        F-->>U: cached response, no reprocessing
     else new request
-        C->>C: cache clientMessageId
-        alt ACK mode requested
-            F->>O: immediate ACK check (header X-Atlas-Ack)
-            O-->>F: accepted=true
-            F-->>U: processing accepted, poll for status
-            note over U: User can poll /api/chat/status/:sessionId
+        C->>C: cache clientMessageId + sessionId + timestamp
+        
+        alt ACK mode (useAck=true | X-Atlas-Ack header)
+            note over F,O: Fast ACK handshake (3s timeout)
+            F->>O: immediate ACK check (X-Atlas-Ack: immediate)
+            O-->>F: accepted=true + estimatedMs
+            F-->>U: {ack: true, pollUrl, clientMessageId}
+            note over U: Poll /api/chat/status/:sessionId every 2s
+            loop status polling
+                U->>F: GET /api/chat/status/:sessionId
+                F->>O: GET /session/:sessionId/status
+                O-->>F: {status, ready, response, timing}
+                F-->>U: processing status + ageMs
+            end
         end
         
-        F->>O: REST /chat + clientMessageId + timing
-        note over O: agentStartTime = Date.now()
-        O->>DB: fetch ranked memory (Atlas & Grisha)
-        O->>A: prompt + memory context + timing start
-        note over A: [TIMING] agent=atlas route=... ms=...
-        A-->>O: plan draft + timing info
-        O->>G: plan validation + timing start
-        note over G: [TIMING] agent=grisha route=... ms=...
-        G-->>O: precheck verdict (ok/clarify) + timing
+        note over O: cycleStart = Date.now()
+        F->>O: POST /chat/stream + clientMessageId + timing config
+        O->>DB: fetch ranked memory facts (Atlas & Grisha)
         
-        alt needs probe
-            note over O: PROBE cycle start
-            O->>T: probe request + timing start
-            note over T: [TIMING] agent=tetyana phase=execution ms=...
-            T-->>O: probe artifacts + timing
-            O->>G: probe review + timing start
-            note over G: [TIMING] agent=grisha phase=probe_review ms=...
+        note over A: agentStartTime = Date.now()
+        O->>A: prompt + memory context + intentHint
+        A->>A: LLM processing (goose/openai_compat routes)
+        note over A: [TIMING] agent=atlas route=openai_compat model=gpt-4 ms=1234 success=true
+        A-->>O: plan draft + timing.agentMs
+        O->>M: agent timing metrics + route success/fail
+        
+        note over G: agentStartTime = Date.now()  
+        O->>G: plan validation request + memory context
+        G->>G: validation analysis (multiple route attempts)
+        note over G: [TIMING] agent=grisha route=goose model=github_copilot ms=890 success=true
+        G-->>O: precheck verdict (ok/shortage/clarify) + timing.agentMs
+        O->>M: agent timing metrics + route metrics
+        
+        alt shortage detected & probe enabled
+            note over O: PROBE cycle start (probesStarted++)
+            O->>T: probe execution request + enableTools=true
+            note over T: agentStartTime = Date.now()
+            T->>T: actual system execution via Goose tools
+            note over T: [TIMING] agent=tetyana phase=execution ms=2340 success=true
+            T-->>O: probe artifacts + structured report + timing
+            
+            note over G: agentStartTime = Date.now()
+            O->>G: probe review prompt (FEASIBLE/INFEASIBLE)
+            G->>G: artifact analysis + evidence assessment
+            note over G: [TIMING] agent=grisha phase=probe_review ms=567 success=true  
             G-->>O: probe assessment + timing
-            O->>A: feasibility synthesis + timing start
-            note over A: [TIMING] agent=atlas phase=feasibility ms=...
+            
+            note over A: agentStartTime = Date.now()
+            O->>A: feasibility synthesis (probe + review)
+            A->>A: decision logic (ADVANCE/CLARIFY)
+            note over A: [TIMING] agent=atlas phase=feasibility ms=345 success=true
             A-->>O: ADVANCE / CLARIFY decision + timing
-            note over O: PROBE cycle complete, latency recorded
+            
+            alt ADVANCE decision
+                O->>M: probesAdvanced++, probeLatencyMs += cycle_time
+                note over O: Clear probe state, continue actionable pipeline
+            else CLARIFY decision  
+                O->>M: probesClarified++, probeLatencyMs += cycle_time
+                note over O: Escalate to user clarification
+                O-->>F: clarification request + awaitingClarification=true
+                F-->>U: structured clarification prompt
+            end
+        end
+        
+        alt standard actionable execution
+            note over T: agentStartTime = Date.now()
+            O->>T: execution prompt + enableTools + structured report format
+            T->>T: real system execution + report generation
+            note over T: [TIMING] agent=tetyana phase=execution ms=3450 success=true
+            note over T: [TIMING] agent=tetyana phase=report route=gpt-4 ms=1100 success=true
+            T-->>O: structured execution report + evidence + timing
+            
+            note over G: agentStartTime = Date.now()
+            O->>G: independent verification via Goose tools
+            G->>G: verification execution + confidence scoring
+            note over G: [TIMING] agent=grisha phase=verification ms=2100 success=true
+            G-->>O: verification result + confidence + evidence + timing
+            O->>M: verdicts++, verificationIterations++, confidenceSum += conf
+            
+            alt confidence < threshold
+                O->>G: followup request for additional evidence
+                note over G: [TIMING] agent=grisha phase=followup ms=234 success=true
+                G-->>O: followup requirements + timing
+                O->>M: followups++
+            else verification confirmed
+                note over O: Pipeline complete, clear session state
+            end
+        end
+        
+        note over O: cycleDuration = Date.now() - cycleStart
+        O->>M: request completed + total timing + agent breakdown
+        O-->>F: response array + timing.totalMs + per-agent timing
+        F-->>U: final response + unified UTC+offset timestamps
+    end
+
+    note over M: Prometheus metrics updated:
+    note over M: atlas_duplicates_suppressed_total
+    note over M: atlas_agent_timing_ms{agent,route,model}  
+    note over M: atlas_probe_advanced_total, atlas_probe_clarified_total
+    note over M: atlas_request_duration_ms, atlas_route_success_total
         end
         
         alt proceed execution

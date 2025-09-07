@@ -8,45 +8,88 @@ flowchart TD
     API -->|clientMessageId + timing| Orchestrator[Node Orchestrator 5101]
 
     subgraph Agents[Multi-Agent Core]
-        Atlas[Atlas\nPlanner\n+timing]
-        Grisha[Grisha\nValidator\n+timing]
-        Tetyana[Tetyana\nExecutor\n+timing]
+        Atlas[Atlas\nPlanner\n+per-agent timing]
+        Grisha[Grisha\nValidator\n+per-agent timing]
+        Tetyana[Tetyana\nExecutor\n+per-agent timing]
     end
 
-    subgraph ACKFlow[ACK Mode Flow]
-        ACKReq[ACK Request]
-        ACKResp[Immediate Accept]
-        StatusPoll[Status Polling]
+    subgraph ACKFlow[ACK Mode Flow - NEW]
+        ACKReq[ACK Request\nX-Atlas-Ack: immediate]
+        ACKResp[Immediate Accept\n~3s timeout]
+        StatusPoll[Status Polling\n/api/chat/status/<id>]
+        StatusCheck[Session Status Check\n/session/<id>/status]
     end
 
     UI -->|ackMode=true| ACKReq
     ACKReq --> ACKResp --> UI
-    UI -->|/api/chat/status| StatusPoll
+    UI -->|poll every 2s| StatusPoll
+    StatusPoll --> StatusCheck --> UI
 
-    subgraph DuplicateSuppress[Duplicate Suppression]
-        Cache[(clientMessageId Cache)]
+    subgraph DuplicateSuppress[Duplicate Suppression - NEW]
+        Cache[(clientMessageId Cache\nTTL 5min)]
         Suppress[Suppress Duplicate]
-        Metric[duplicates_suppressed_total]
+        Metric[duplicates_suppressed_total\nPrometheus metric]
     end
 
     Orchestrator --> Cache
     Cache -->|duplicate found| Suppress --> Metric
 
-    Orchestrator --> Atlas
-    Atlas --> Grisha
-    Grisha -->|approve/adjust| Tetyana
-    Tetyana -->|execution result| Grisha
-    Grisha -->|verdict & followup| Orchestrator
-    Orchestrator --> API --> UI
-
-    subgraph ProbeCycle[Probe Cycle]
-        TP[Tetyana Probe\n+timing]
-        GP[Grisha Probe Review\n+timing]
-        AF[Atlas Feasibility\n+timing]
+    subgraph TimingMetrics[Timing System - NEW]
+        AgentTiming[Per-Agent Timing\nagentMs, provider, model]
+        CycleTiming[Cycle Duration\ntotalMs in response]
+        RouteMetrics[Route Success/Fail\nms per route attempt]
     end
 
-    Atlas -. initiate probe .-> TP
-    TP --> GP --> AF --> Atlas
+    Orchestrator --> Atlas
+    Atlas -->|+timing logs| Grisha
+    Grisha -->|approve/adjust +timing| Tetyana
+    Tetyana -->|execution result +timing| Grisha
+    Grisha -->|verdict & followup +timing| Orchestrator
+    Orchestrator -->|response + timing| API --> UI
+
+    Atlas --> AgentTiming
+    Grisha --> AgentTiming  
+    Tetyana --> AgentTiming
+    Orchestrator --> CycleTiming
+    Orchestrator --> RouteMetrics
+
+    subgraph ProbeCycle[Probe Cycle - ENHANCED]
+        TP[Tetyana Probe\n+execution timing]
+        GP[Grisha Probe Review\n+review timing]
+        AF[Atlas Feasibility\n+decision timing]
+        ProbeAdvanced[PIPELINE_METRICS\nprobesAdvanced]
+        ProbeClarified[PIPELINE_METRICS\nprobesClarified]
+    end
+
+    Atlas -. shortage detected .-> TP
+    TP --> GP --> AF
+    AF -->|ADVANCE| ProbeAdvanced --> Atlas
+    AF -->|CLARIFY| ProbeClarified --> Atlas
+
+    subgraph UnifiedLogging[Unified Logging - NEW]
+        UTCFormat[UTC+Offset Format\n2025-09-07T02:30:15.123+02:00]
+        NodeLogs[Node.js Orchestrator\nUTC+offset]
+        PythonLogs[Python Frontend\nUTC+offset]
+    end
+
+    Atlas --> NodeLogs --> UTCFormat
+    API --> PythonLogs --> UTCFormat
+
+    subgraph MetricsExport[Enhanced Metrics]
+        Prometheus[/metrics/prometheus]
+        DuplicateMetric[atlas_duplicates_suppressed_total]
+        TimingMetric[atlas_agent_timing_ms]
+        ProbeMetrics[atlas_probe_* metrics]
+    end
+
+    Metric --> DuplicateMetric
+    AgentTiming --> TimingMetric
+    ProbeAdvanced --> ProbeMetrics
+    ProbeClarified --> ProbeMetrics
+
+    Prometheus --> DuplicateMetric
+    Prometheus --> TimingMetric
+    Prometheus --> ProbeMetrics
 
     subgraph Memory[Shared Memory (SQLite)]
         MAtlas[(Atlas Memory)]
