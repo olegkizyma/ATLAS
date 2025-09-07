@@ -2696,6 +2696,8 @@ function scheduleClarificationAutoFill(session) {
             try {
                 logMessage('info', `[clar_timer] firing sid=${session.id} historyBefore=${session.history.length}`);
                 const assumed = nextClarVariant(session);
+                logMessage('debug', `[clar_timer] generated assumption: ${assumed.slice(0,150)}`);
+                
                 pushAndBroadcast(session, {
                     role: 'assistant',
                     agent: 'atlas',
@@ -2704,6 +2706,8 @@ function scheduleClarificationAutoFill(session) {
                     phase: 'atlas_auto_clarify',
                     autoClarification: true
                 });
+                logMessage('debug', `[clar_timer] atlas auto-clarification pushed, history length: ${session.history.length}`);
+                
                 pushAndBroadcast(session, {
                     role: 'user',
                     agent: 'user',
@@ -2712,17 +2716,25 @@ function scheduleClarificationAutoFill(session) {
                     autoClarification: true,
                     assumed: true
                 });
+                logMessage('debug', `[clar_timer] user assumption pushed, history length: ${session.history.length}`);
+                
                 session.awaitingClarification = false;
                 session.forceNewCycle = true;
                 session.cycleCount = (session.cycleCount || 0) + 1;
-                if ((baseHistoryLen + 2) >= session.history.length) {
-                    logMessage('info', `[clar_timer] auto-continue kickstart sid=${session.id}`);
-                    try {
-                        const lastAtlasClar = [...session.history].reverse().find(m => m.agent==='atlas' && m.clarification);
-                        const syntheticUser = '[AUTO] Продовжити виконання.';
-                        startActionablePipeline(session, syntheticUser, lastAtlasClar?.content || '', lastAtlasClar?.content || '');
-                    } catch(e){ logMessage('warn', `[clar_timer] kickstart failed: ${e.message}`); }
-                }
+                logMessage('debug', `[clar_timer] flags set, baseHistoryLen=${baseHistoryLen}, currentLength=${session.history.length}`);
+                
+                // Завжди робимо kickstart після auto-clarification
+                logMessage('info', `[clar_timer] auto-continue kickstart sid=${session.id}`);
+                try {
+                    // Знаходимо попередні відповіді Atlas та Grisha для правильного kickstart
+                    const lastAtlas = [...session.history].reverse().find(m => m.agent==='atlas' && (m.phase === 'atlas_plan' || m.phase === 'atlas_clarify'));
+                    const lastGrisha = [...session.history].reverse().find(m => m.agent==='grisha' && m.phase === 'grisha_precheck');
+                    const syntheticUser = '[AUTO] Продовжити виконання.';
+                    
+                    logMessage('info', `[clar_timer] kickstart with atlas="${lastAtlas?.content?.slice(0,100)}" grisha="${lastGrisha?.content?.slice(0,100)}"`);
+                    startActionablePipeline(session, syntheticUser, lastAtlas?.content || '', lastGrisha?.content || '');
+                    logMessage('info', `[clar_timer] kickstart completed successfully`);
+                } catch(e){ logMessage('warn', `[clar_timer] kickstart failed: ${e.message}`); }
             } catch (e) {
                 logMessage('warn', 'Clarification auto-fill failed: ' + e.message);
             }
@@ -2776,10 +2788,14 @@ function broadcastHistory(sessionId, payloadObj) {
 
 // Wrap a push into session history so UI can receive without polling
 function pushAndBroadcast(session, messageObj) {
-    session.history.push(messageObj);
     try {
+        session.history.push(messageObj);
+        logMessage('debug', `[pushAndBroadcast] pushed ${messageObj.agent}:${messageObj.phase||'no-phase'} content_len=${(messageObj.content||'').length}`);
         broadcastHistory(session.id, { type: 'message', message: sanitizeMessageForClient(messageObj) });
-    } catch {}
+    } catch (e) {
+        logMessage('warn', `[pushAndBroadcast] failed: ${e.message}`);
+        throw e;
+    }
 }
 
 function sanitizeMessageForClient(m) {
