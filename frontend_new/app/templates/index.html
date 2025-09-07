@@ -8,7 +8,7 @@
     <link rel="icon" href="{{ url_for('static', filename='assets/favicon.ico') }}" type="image/x-icon">
     <link rel="apple-touch-icon" href="{{ url_for('static', filename='assets/apple-touch-icon.png') }}">
     
-    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/main.css') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}">
     <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
 </head>
 <body>
@@ -93,20 +93,26 @@
     </div>
 
     <!-- Scripts -->
-    <script src="{{ url_for('static', filename='js/utils.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/config.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/logger-manager.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/status-manager.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/circuit-breaker-hud.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/utils.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
+    <script src="{{ url_for('static', filename='js/config.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
+    <script src="{{ url_for('static', filename='js/logger-manager.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
+    <script src="{{ url_for('static', filename='js/status-manager.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
+    <script src="{{ url_for('static', filename='js/circuit-breaker-hud.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
     
-    <script src="{{ url_for('static', filename='js/intelligent-chat-manager.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/vision.js') }}"></script>
-    <script src="{{ url_for('static', filename='js/app.js') }}"></script>
+    <script src="{{ url_for('static', filename='js/intelligent-chat-manager.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
+    <script src="{{ url_for('static', filename='js/vision.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
+    
+    <!-- Development Cache Manager (only in debug mode) -->
+    {% if cache_bust %}
+    <script src="{{ url_for('static', filename='js/dev-cache-manager.js') }}?v={{ cache_bust }}"></script>
+    {% endif %}
+    
+    <script src="{{ url_for('static', filename='js/app.js') }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}"></script>
 
     <!-- Service Worker -->
     <script>
         if ('serviceWorker' in navigator) {
-            navigator.serviceWorker.register('{{ url_for("static", filename="js/service-worker.js") }}')
+            navigator.serviceWorker.register('{{ url_for("static", filename="js/service-worker.js") }}{% if cache_bust %}?v={{ cache_bust }}{% endif %}')
                 .then(registration => console.log('SW registered:', registration))
                 .catch(error => console.log('SW registration failed:', error));
         }

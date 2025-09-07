@@ -2,6 +2,16 @@
  * Atlas Application Controller
  * Головний контролер додатку без перезавантажень
  */
+
+// Check if we're in development mode (cache busting enabled)
+const isDevelopment = window.location.search.includes('v=') || 
+                     document.querySelector('script[src*="?v="]') !== null;
+
+if (isDevelopment) {
+    console.log('🔧 ATLAS DEVELOPMENT MODE: Cache disabled for fresh updates');
+    console.log('🔄 Static files will reload on every request');
+}
+
 class AtlasApp {
     constructor() {
         this.managers = {};

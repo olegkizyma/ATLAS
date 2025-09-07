@@ -75,7 +75,6 @@ export class ModelRegistry {
             
             // Premium tier: Best reasoning for complex reports (6-8 req/min)
             'microsoft/phi-4',                      // 8 req/min
-            'xai/grok-3',                           // 6 req/min - найкращий для складних звітів
             'mistral-ai/mistral-large-2411',        // 6 req/min
         ];
 
@@ -86,7 +85,6 @@ export class ModelRegistry {
         const defaultAtlasModels = parseModels(['ATLAS_TEXT_MODELS'], [
             // Removed: 'openai/o3' (http_error)
             'openai/gpt-4o',                        // 18 req/min - проверена висока якість
-            'xai/grok-3',                           // 6 req/min - найкраще міркування
             // Removed: 'openai/gpt-5-nano' (http_error)
             'openai/gpt-4.1',                       // 12 req/min
             'mistral-ai/mistral-large-2411',        // 6 req/min
@@ -138,7 +136,6 @@ export class ModelRegistry {
                 { provider: 'goose' },
                 { provider: 'openai_compat', models: [
                     'openai/gpt-4o',                    // 18 req/min - висока якість верифікації
-                    'xai/grok-3',                       // 6 req/min - розумна верифікація
                     'mistral-ai/ministral-3b',          // 45 req/min - найшвидший
                     'microsoft/phi-3.5-mini-instruct',  // 38 req/min
                     'microsoft/phi-3-mini-128k-instruct', // 35 req/min

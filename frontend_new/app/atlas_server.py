@@ -94,8 +94,23 @@ TTS_DIR = CURRENT_DIR.parent.parent / 'ukrainian-tts'
 app = Flask(__name__, 
            template_folder=str(TEMPLATE_DIR),
            static_folder=str(STATIC_DIR))
+
+# Disable caching for development (prevent 304 responses)
+app.config['SEND_FILE_MAX_AGE_DEFAULT'] = 0
+app.config['TEMPLATES_AUTO_RELOAD'] = True
+
 if CORS:
     CORS(app)
+
+# Add no-cache headers for development
+@app.after_request
+def add_no_cache_headers(response):
+    """Add no-cache headers to prevent 304 responses in development"""
+    if app.debug:
+        response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+        response.headers['Pragma'] = 'no-cache'
+        response.headers['Expires'] = '0'
+    return response
 
 # Load .env if present (for local development) without failing in prod
 try:  # optional dependency
@@ -315,8 +330,11 @@ def _make_silence_wav(duration_ms: int = 400) -> io.BytesIO:
 @app.route('/')
 def index():
     """Serve the main interface"""
+    # Add cache busting timestamp for development
+    cache_bust = int(time.time()) if app.debug else ""
     return render_template('index.html', 
-                         current_time=datetime.now().strftime('%H:%M:%S'))
+                         current_time=datetime.now().strftime('%H:%M:%S'),
+                         cache_bust=cache_bust)
 
 @app.route('/api/health')
 def health():
@@ -330,6 +348,24 @@ def health():
             'tts': check_tts_health()
         }
     })
+
+@app.route('/api/clear-cache')
+def clear_cache():
+    """Clear browser cache endpoint for development"""
+    response = jsonify({
+        'status': 'cache_cleared',
+        'timestamp': datetime.now().isoformat(),
+        'message': 'Browser cache headers reset'
+    })
+    response.headers['Cache-Control'] = 'no-store, no-cache, must-revalidate, max-age=0'
+    response.headers['Pragma'] = 'no-cache'
+    response.headers['Expires'] = '0'
+    return response
+
+@app.route('/.well-known/appspecific/com.chrome.devtools.json')
+def chrome_devtools():
+    """Handle Chrome DevTools request to prevent 404"""
+    return jsonify({'status': 'not_applicable'}), 404
 
 @app.route('/logs')
 def get_logs():

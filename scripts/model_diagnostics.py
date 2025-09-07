@@ -43,9 +43,7 @@ DEFAULT_FAILED_MODELS = [
     "microsoft/phi-4-mini-instruct",
     "openai/o4-mini",
     "mistral-ai/mistral-medium-2505",
-    "xai/grok-3-mini",
     # Earlier blacklist examples
-    "xai/grok-3",
     "openai/gpt-4o"
 ]
 

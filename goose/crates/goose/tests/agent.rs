@@ -348,7 +348,7 @@ mod tests {
     async fn test_agent_with_xai() -> Result<()> {
         run_test_with_config(TestConfig {
             provider_type: ProviderType::Xai,
-            model: "grok-3",
+            model: "grok-2",
             context_window: 9_000,
         })
         .await

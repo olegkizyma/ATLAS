@@ -163,7 +163,6 @@ test_key_models() {
         "microsoft/phi-3.5-mini-instruct" 
         "mistral-ai/ministral-3b"
         "openai/gpt-4o"
-        "xai/grok-3-mini"
     )
     
     local working_models=0

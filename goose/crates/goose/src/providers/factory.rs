@@ -301,7 +301,7 @@ mod tests {
             "GOOSE_LEAD_FALLBACK_TURNS",
         ]);
 
-        _guard.set("GOOSE_LEAD_MODEL", "grok-3");
+        _guard.set("GOOSE_LEAD_MODEL", "grok-2");
 
         let result = create("openai", ModelConfig::new_or_fail("gpt-4o-mini"));
 

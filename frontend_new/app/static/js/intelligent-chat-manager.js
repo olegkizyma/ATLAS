@@ -1773,13 +1773,11 @@ class AtlasIntelligentChatManager {
         
         return actions[agent]?.[phase] || 'PROCESSING';
     }
-                    if (mini && conf !== null) {
-                        mini.textContent = conf.toFixed(2);
-                        mini.style.color = conf >= 0.75 ? '#00ffa5' : (conf >= 0.5 ? '#ffd700' : '#ff4d4d');
-                    }
-                }
-            } catch(_) {}
-        }
+
+    updateVerdictDisplay(phase) {
+        const hud = document.getElementById('pipeline-hud');
+        if (!hud) return;
+        
         if (phase === 'atlas_feasibility') {
             try {
                 const recent = [...this.messages].reverse().find(m => m.phase === 'atlas_feasibility');
@@ -1802,6 +1800,30 @@ class AtlasIntelligentChatManager {
                     }
                 }
             } catch(_){}
+        }
+        
+        // Add confidence display for other phases
+        if (phase === 'grisha_verdict') {
+            try {
+                const recent = [...this.messages].reverse().find(m => m.phase === 'grisha_verdict');
+                if (recent && recent.metadata && recent.metadata.confidence) {
+                    const conf = recent.metadata.confidence;
+                    const step = hud.querySelector('.ph-step[data-phase="grisha_verdict"]');
+                    if (step) {
+                        let mini = step.querySelector('.confidence-mini');
+                        if (!mini) {
+                            mini = document.createElement('span');
+                            mini.className='confidence-mini';
+                            mini.style.cssText='display:inline-block;margin-left:4px;font-weight:600;font-size:11px;';
+                            step.appendChild(mini);
+                        }
+                        if (mini && conf !== null) {
+                            mini.textContent = conf.toFixed(2);
+                            mini.style.color = conf >= 0.75 ? '#00ffa5' : (conf >= 0.5 ? '#ffd700' : '#ff4d4d');
+                        }
+                    }
+                }
+            } catch(_) {}
         }
     }
     

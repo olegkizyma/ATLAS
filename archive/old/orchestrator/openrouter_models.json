@@ -65,7 +65,7 @@
     { "id": "openai/text-embedding-3-large", "object": "model", "created": 1677610602, "owned_by": "openai" },
     { "id": "openai/text-embedding-3-small", "object": "model", "created": 1677610602, "owned_by": "openai" },
 
-    { "id": "xai/grok-3", "object": "model", "created": 1677610602, "owned_by": "xai" },
-    { "id": "xai/grok-3-mini", "object": "model", "created": 1677610602, "owned_by": "xai" }
+    { "id": "meta-llama/llama-3.2-1b-instruct", "object": "model", "created": 1677610602, "owned_by": "meta-llama" },
+    { "id": "meta-llama/llama-3.2-3b-instruct", "object": "model", "created": 1677610602, "owned_by": "meta-llama" }
   ]
 }
