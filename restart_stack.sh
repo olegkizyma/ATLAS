@@ -166,8 +166,24 @@ stop_all_services() {
         done
     fi
     
+    # Stop Goose and TTS if they were started by ATLAS
+    local goose_pids=$(lsof -ti:3000 2>/dev/null || echo "")
+    if [ -n "$goose_pids" ]; then
+        for pid in $goose_pids; do
+            graceful_stop "$pid" "Goose (port 3000)" 10
+        done
+    fi
+    
+    local tts_pids=$(lsof -ti:3001 2>/dev/null || echo "")
+    if [ -n "$tts_pids" ]; then
+        for pid in $tts_pids; do
+            graceful_stop "$pid" "Ukrainian TTS (port 3001)" 5
+        done
+    fi
+    
     # Cleanup PID files
     rm -f "$LOG_DIR/atlas.pid" "$LOG_DIR/frontend.pid" "$LOG_DIR/orchestrator.pid" 2>/dev/null || true
+    rm -f "$LOG_DIR/goose.pid" "$LOG_DIR/tts.pid" 2>/dev/null || true
     
     log_restart "✅ All services stopped"
 }
@@ -231,12 +247,38 @@ start_services() {
         log_warn "recovery_bridge.py not found at frontend_new/config — skipping recovery bridge start"
     fi
     
-    # Start Goose web + Ukrainian TTS (repo-local logs)
-    if [ -x "$REPO_ROOT/scripts/start_tts_and_goose.sh" ]; then
-        log_info "💻 Starting Goose web and Ukrainian TTS (logs: $LOG_DIR)"
-        LOG_DIR="$LOG_DIR" "$REPO_ROOT/scripts/start_tts_and_goose.sh" || log_warn "Failed to start Goose/TTS helper"
+    # Перевірка та опціональний запуск Goose і TTS (тільки якщо відсутні)
+    log_info "🔍 Checking optional services..."
+    
+    # Перевірка Goose
+    if curl -s --max-time 3 "http://127.0.0.1:3000/health" > /dev/null 2>&1; then
+        log_info "✅ Goose (port 3000) - Already running"
+        export ATLAS_GOOSE_AVAILABLE=true
     else
-        log_warn "start_tts_and_goose.sh missing or not executable"
+        log_warn "⚠️  Goose (port 3000) - Not available"
+        export ATLAS_GOOSE_AVAILABLE=false
+        # Спроба запуску тільки якщо скрипт існує
+        if [ -x "$REPO_ROOT/scripts/start_tts_and_goose.sh" ]; then
+            log_info "� Attempting to start Goose web..."
+            LOG_DIR="$LOG_DIR" "$REPO_ROOT/scripts/start_tts_and_goose.sh" && {
+                sleep 3
+                if curl -s --max-time 3 "http://127.0.0.1:3000/health" > /dev/null 2>&1; then
+                    log_info "✅ Goose started successfully"
+                    export ATLAS_GOOSE_AVAILABLE=true
+                else
+                    log_warn "⚠️  Goose start failed - continuing without it"
+                fi
+            } || log_warn "Failed to start Goose/TTS helper"
+        fi
+    fi
+    
+    # Перевірка Ukrainian TTS
+    if curl -s --max-time 3 "http://127.0.0.1:3001/health" > /dev/null 2>&1; then
+        log_info "✅ Ukrainian TTS (port 3001) - Available"
+        export ATLAS_TTS_AVAILABLE=true
+    else
+        log_warn "⚠️  Ukrainian TTS (port 3001) - Not available"
+        export ATLAS_TTS_AVAILABLE=false
     fi
 
     log_restart "✅ All services started"
@@ -271,12 +313,41 @@ check_services() {
         log_warn "⚠️  Recovery Bridge (port 5102) - Not responding"
     fi
     
+    # Optional services status
+    log_restart "🔍 Optional Services Status:"
+    
+    # Goose
+    if curl -s --max-time 3 "http://localhost:3000/health" > /dev/null 2>&1; then
+        log_info "✅ Goose (port 3000) - Available"
+    else
+        log_warn "⚠️  Goose (port 3000) - Not available (Tetyana execution limited)"
+    fi
+    
+    # Ukrainian TTS
+    if curl -s --max-time 3 "http://localhost:3001/health" > /dev/null 2>&1; then
+        log_info "✅ Ukrainian TTS (port 3001) - Available"
+    else
+        log_warn "⚠️  Ukrainian TTS (port 3001) - Not available (Voice features disabled)"
+    fi
+    
     if [ "$all_healthy" = true ]; then
         log_restart "🎉 All core services are running!"
         echo ""
         log_restart "📊 ATLAS Interface: http://localhost:5001"
         log_restart "🔧 Orchestrator API: http://localhost:5101"
         log_restart "🌉 Recovery Bridge: http://localhost:5102"
+        echo ""
+        # Status summary
+        if [ "${ATLAS_GOOSE_AVAILABLE:-false}" = "true" ]; then
+            log_restart "   ⚡ Real Execution: Enabled via Goose"
+        else
+            log_warn "   ⚡ Real Execution: Limited (Goose unavailable)"
+        fi
+        if [ "${ATLAS_TTS_AVAILABLE:-false}" = "true" ]; then
+            log_restart "   🗣️  Voice Synthesis: Ukrainian TTS enabled"
+        else
+            log_warn "   🗣️  Voice Synthesis: Disabled (TTS unavailable)"
+        fi
         echo ""
     log_restart "📄 Logs available in: $LOG_DIR"
     else
