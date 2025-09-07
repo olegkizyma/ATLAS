@@ -2075,7 +2075,11 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             provider = 'goose';
             model = 'github_copilot';
             recordCircuitBreakerFailure();
+            // Report Goose failure to registry
+            registry.reportFailure({ provider: 'goose', model: 'github_copilot' }, new Error('Goose execution failed'));
         } else {
+            // Report Goose success to registry
+            registry.reportSuccess({ provider: 'goose', model: 'github_copilot' }, Date.now() - execStartTime);
             // Short structured report via openai-compat using configured 58-model list
             const reportStartTime = Date.now();
             const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
@@ -2099,11 +2103,11 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                         logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=true`);
                         break;
                     }
-                    registry.reportFailure(route);
+                    registry.reportFailure(route, new Error('Empty response from model'));
                     logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=false`);
                 } catch (err) {
                     const routeDuration = Date.now() - routeStartTime;
-                    registry.reportFailure(route);
+                    registry.reportFailure(route, err);
                     logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} error=${err.message}`);
                 }
             }
@@ -2137,7 +2141,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                         logMessage('info', `[TIMING] agent=${agentName} route=goose model=${model} ms=${routeDuration} success=true`);
                         break;
                     }
-                    registry.reportFailure(route);
+                    registry.reportFailure(route, new Error('Empty response from Goose'));
                     logMessage('info', `[TIMING] agent=${agentName} route=goose model=${model} ms=${routeDuration} success=false`);
                 } else if (route.provider === 'openai_compat') {
                     const text = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, prompt);
@@ -2151,12 +2155,12 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                         logMessage('info', `[TIMING] agent=${agentName} route=openai_compat model=${model} ms=${routeDuration} success=true`);
                         break;
                     }
-                    registry.reportFailure(route);
+                    registry.reportFailure(route, new Error('Empty response from OpenAI model'));
                     logMessage('info', `[TIMING] agent=${agentName} route=openai_compat model=${model} ms=${routeDuration} success=false`);
                 }
             } catch (err) {
                 const routeDuration = Date.now() - routeStartTime;
-                registry.reportFailure(route);
+                registry.reportFailure(route, err);
                 logMessage('info', `[TIMING] agent=${agentName} route=${route.provider} model=${route.model} ms=${routeDuration} error=${err.message}`);
                 // keep trying next route
             }
@@ -2323,7 +2327,23 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
     let lastResult = null;
     let notes = [];
 
-    // Get visual evidence from monitoring
+    // Ensure visual monitoring is enabled for this verification cycle.
+    // Start monitoring if frontend supports it; always attempt to stop in finally.
+    let monitoringStarted = false;
+    try {
+        const taskDescription = `Валідація: ${String(atlasPlan || userMessage).slice(0, 120)}`;
+        const startRes = await startGrishaVisualMonitoring(baseSessionId, taskDescription);
+        monitoringStarted = !!startRes && !!startRes.success;
+        if (monitoringStarted) {
+            console.log(`[GRISHA] Visual monitoring ensured for verification session ${verifySession}`);
+        } else {
+            console.log(`[GRISHA] Visual monitoring not started or already running for session ${verifySession}`);
+        }
+    } catch (e) {
+        console.warn(`[GRISHA] Failed to start visual monitoring before verification: ${e.message}`);
+    }
+
+    // Get visual evidence from monitoring (may be empty if frontend didn't start or no frames captured)
     const visualEvidence = await getGrishaVisualEvidence();
     const hasVisualEvidence = visualEvidence && visualEvidence.length > 0;
     
@@ -2393,6 +2413,15 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
             confidence = 0;
             break;
         }
+    }
+    // Ensure we stop visual monitoring if we started it here (best-effort)
+    try {
+        if (monitoringStarted) {
+            const stopRes = await stopGrishaVisualMonitoring();
+            if (stopRes && stopRes.success) console.log(`[GRISHA] Visual monitoring stopped for verification session ${verifySession}`);
+        }
+    } catch (e) {
+        console.warn(`[GRISHA] Error stopping visual monitoring: ${e.message}`);
     }
 
     return { result: lastResult, confidence, iterations: iteration, notes };

@@ -15,6 +15,11 @@ export class ModelRegistry {
         this.cooldownMs = options.cooldownMs ?? 30_000; // cooldown period after threshold reached
         this.healthIntervalMs = options.healthIntervalMs ?? 20_000; // periodic health check
 
+        // Model blacklist tracking (for individual model failures)
+        this.modelFailures = new Map(); // modelId -> { count, lastFailure, cooledUntil }
+        this.modelFailureThreshold = 3; // failures before temporary blacklist
+        this.modelCooldownMs = 60_000; // 1 minute cooldown for failing models
+
         // Providers
         const gooseBase = (process.env.GOOSE_BASE_URL || 'http://localhost:3000').replace(/\/$/, '');
         const openaiCompatBase = (process.env.FALLBACK_API_BASE || 'http://127.0.0.1:3010/v1').replace(/\/$/, '');
@@ -39,26 +44,43 @@ export class ModelRegistry {
             return fallback;
         };
 
-        // Default compact list if 58-model env not provided (strongly recommended to set TETYANA_TEXT_MODELS or TETYANA_TEXT_MODELS_58)
+        // Default list prioritizing quality first, then speed (quality-first approach)
         const defaultTetyanaModels = [
-            'microsoft/phi-3.5-mini-instruct',
-            'meta/meta-llama-3.1-8b-instruct',
-            'mistral-ai/mistral-nemo',
-            'openai/gpt-4o-mini',
-            'qwen/qwen2.5-7b-instruct',
-            'google/gemma-2-9b-it',
-            'deepseek/deepseek-r1-distill-qwen-7b'
+            'openai/o3',                            // Найновіша якісна модель
+            'openai/gpt-4o',                        // 18 req/min - висока якість
+            'xai/grok-3',                           // 6 req/min - високоякісна
+            'openai/gpt-5-nano',                    // 20 req/min - нова якісна
+            'mistral-ai/ministral-3b',              // 45 req/min - найшвидший
+            'microsoft/phi-3-mini-4k-instruct',     // 40 req/min
+            'mistral-ai/mistral-small-2503',        // 40 req/min  
+            'microsoft/phi-3.5-mini-instruct',      // 38 req/min
+            'openai/gpt-4o-mini',                   // 35 req/min
+            'microsoft/phi-3-mini-128k-instruct',   // 35 req/min
+            'meta/meta-llama-3.1-8b-instruct',     // 30 req/min
+            'openai/gpt-4.1-mini',                  // 30 req/min
+            'microsoft/phi-3-small-8k-instruct',   // 30 req/min
+            'microsoft/phi-3-small-128k-instruct',  // 28 req/min
+            'ai21-labs/ai21-jamba-1.5-mini',       // 25 req/min
+            'microsoft/phi-4-mini-instruct',        // 22 req/min
+            'openai/o4-mini',                       // 20 req/min
+            'mistral-ai/mistral-medium-2505',       // 18 req/min
+            'xai/grok-3-mini'                       // 18 req/min
         ];
 
         // Load extended list for Tetyana short-report summarization
         const tetyanaTextModels = parseModels(['TETYANA_TEXT_MODELS', 'TETYANA_TEXT_MODELS_58'], defaultTetyanaModels);
 
-        // Atlas smarter reasoning defaults (overridable via ATLAS_TEXT_MODELS)
-        // Chosen for diversity: frontier (openai), large open-source (meta), efficient deepseek
+        // Atlas advanced reasoning models - якість перш за все
         const defaultAtlasModels = parseModels(['ATLAS_TEXT_MODELS'], [
-            'openai/gpt-5',
-            'meta/meta-llama-3.3-70b-instruct',
-            'deepseek/deepseek-v3-0324'
+            'openai/o3',                            // Найновіша якісна модель
+            'openai/gpt-4o',                        // 18 req/min - проверена висока якість
+            'xai/grok-3',                           // 6 req/min - найкраще міркування
+            'openai/gpt-5-nano',                    // 20 req/min - нова якісна
+            'meta/llama-3.3-70b-instruct',          // 4 req/min - виправлена назва
+            'openai/gpt-4.1',                       // 12 req/min
+            'mistral-ai/mistral-large-2411',        // 6 req/min
+            'microsoft/phi-4',                      // 8 req/min
+            'openai/o1-mini'                        // 16 req/min
         ]);
 
         this.providers = {
@@ -98,9 +120,14 @@ export class ModelRegistry {
                 // Re-ordered: goose first (tool + local verification) then remote models
                 { provider: 'goose' },
                 { provider: 'openai_compat', models: [
-                    'microsoft/phi-3.5-mini-instruct',
-                    'mistral-ai/mistral-nemo',
-                    'openai/gpt-4o-mini'
+                    'openai/gpt-4o',                    // 18 req/min - висока якість верифікації
+                    'xai/grok-3',                       // 6 req/min - розумна верифікація
+                    'mistral-ai/ministral-3b',          // 45 req/min - найшвидший
+                    'microsoft/phi-3.5-mini-instruct',  // 38 req/min
+                    'openai/gpt-4o-mini',               // 35 req/min
+                    'microsoft/phi-3-mini-128k-instruct', // 35 req/min
+                    'meta/meta-llama-3.1-8b-instruct', // 30 req/min
+                    'mistral-ai/mistral-nemo'           // 14 req/min
                 ]}
             ],
             // Tetyana is tool-enabled and designed for Goose only
@@ -116,9 +143,12 @@ export class ModelRegistry {
         this.agentIntentPrefs = {
             atlas: {
                 smalltalk: [
-                    'microsoft/phi-3.5-mini-instruct', // fast, conversational
-                    'meta/meta-llama-3.1-8b-instruct',
-                    'openai/gpt-4o-mini'
+                    'openai/gpt-4o',                    // Якісна для smalltalk
+                    'openai/gpt-5-nano',                // Нова якісна
+                    'mistral-ai/ministral-3b',          // 45 req/min - швидкий для smalltalk
+                    'microsoft/phi-3.5-mini-instruct',  // 38 req/min
+                    'microsoft/phi-3-mini-4k-instruct', // 40 req/min
+                    'openai/gpt-4o-mini'                // 35 req/min
                 ]
             },
             // For Tetyana, when intentHint === 'short_report', prioritize the configured list (up to 58 models)
@@ -164,25 +194,32 @@ export class ModelRegistry {
                     // Build prioritized unique list: preferred first, then remaining in defined order
                     const preferSet = new Set(prefs);
                     const prioritized = [];
-                    for (const m of prefs) if (models.includes(m)) prioritized.push(m);
-                    for (const m of models) if (!preferSet.has(m)) prioritized.push(m);
+                    for (const m of prefs) if (models.includes(m) && !this._isModelBlacklisted(m)) prioritized.push(m);
+                    for (const m of models) if (!preferSet.has(m) && !this._isModelBlacklisted(m)) prioritized.push(m);
                     for (const m of prioritized) {
                         routes.push({ provider: 'openai_compat', baseUrl: prov.baseUrl, model: m });
                     }
                 } else {
                     const rr = this.roundRobinIdx[agentName]?.openai_compat ?? 0;
-                    // Rotate starting point for load spreading
-                    for (let i = 0; i < models.length; i++) {
-                        const idx = (rr + i) % models.length;
+                    // Filter out blacklisted models and rotate starting point for load spreading
+                    const availableModels = models.filter(m => !this._isModelBlacklisted(m));
+                    const blacklistedModels = models.filter(m => this._isModelBlacklisted(m));
+                    
+                    if (blacklistedModels.length > 0) {
+                        console.log(`[MODEL_REGISTRY] Agent ${agentName}: ${blacklistedModels.length} models blacklisted: ${blacklistedModels.join(', ')}`);
+                    }
+                    
+                    for (let i = 0; i < availableModels.length; i++) {
+                        const idx = (rr + i) % availableModels.length;
                         routes.push({
                             provider: 'openai_compat',
                             baseUrl: prov.baseUrl,
-                            model: models[idx]
+                            model: availableModels[idx]
                         });
                     }
                     // Advance rotation pointer
-                    if (this.roundRobinIdx[agentName]) {
-                        this.roundRobinIdx[agentName].openai_compat = (rr + 1) % models.length;
+                    if (this.roundRobinIdx[agentName] && availableModels.length > 0) {
+                        this.roundRobinIdx[agentName].openai_compat = (rr + 1) % availableModels.length;
                     }
                 }
             } else if (step.provider === 'goose') {
@@ -245,12 +282,56 @@ export class ModelRegistry {
         const p = this.providers[route?.provider];
         if (!p) return;
         this._markHealthy(p, latencyMs);
+        
+        // Clear model failure count on success
+        if (route?.model && this.modelFailures.has(route.model)) {
+            this.modelFailures.delete(route.model);
+        }
     }
 
-    reportFailure(route) {
+    reportFailure(route, error = null) {
         const p = this.providers[route?.provider];
         if (!p) return;
         this._markFailure(p);
+        
+        // Track model-specific failures
+        if (route?.model) {
+            this._recordModelFailure(route.model, error);
+        }
+    }
+
+    // Model blacklist management
+    _isModelBlacklisted(modelId) {
+        const failures = this.modelFailures.get(modelId);
+        if (!failures) return false;
+        
+        // Check if still in cooldown
+        if (failures.cooledUntil && now() < failures.cooledUntil) {
+            return true;
+        }
+        
+        // Clear expired cooldown
+        if (failures.cooledUntil && now() >= failures.cooledUntil) {
+            this.modelFailures.delete(modelId);
+            return false;
+        }
+        
+        return failures.count >= this.modelFailureThreshold;
+    }
+
+    _recordModelFailure(modelId, error = null) {
+        const current = this.modelFailures.get(modelId) || { count: 0, lastFailure: 0, cooledUntil: 0 };
+        current.count++;
+        current.lastFailure = now();
+        current.lastError = error?.message || error?.code || 'unknown';
+        
+        // Apply cooldown if threshold reached
+        if (current.count >= this.modelFailureThreshold) {
+            current.cooledUntil = now() + this.modelCooldownMs;
+            console.warn(`[MODEL_REGISTRY] Model ${modelId} blacklisted for ${this.modelCooldownMs/1000}s after ${current.count} failures. Last error: ${current.lastError}`);
+        }
+        
+        this.modelFailures.set(modelId, current);
     }
 
     _markHealthy(p, latencyMs) {
