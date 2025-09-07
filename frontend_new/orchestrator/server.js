@@ -1688,50 +1688,45 @@ async function processAgentCycle(userMessage, session) {
     return responses;
 }
 
-// Lightweight intent classifier for routing
+// Intelligent intent classifier (pure prompt-based system, no hardcoded patterns)
 // Returns: 'actionable' | 'planning' | 'qa' | 'smalltalk'
 function classifyIntentHeuristic(userText = '', atlasText = '') {
     try {
-        const txt = (userText || '').toLowerCase().trim();
-        // Extremely lightweight guardrails: treat very short purely social inputs as smalltalk
-        if (/^(hi|hello|привіт|привет|дякую|thanks|ok|ок)$/i.test(txt)) return 'smalltalk';
-
-        // Detect explicit question (QA) — ends with ? and not an imperative create/run pattern
-        if (/[?？]\s*$/.test(txt) && !/(створ|созд|create|запусти|run|execute)/.test(txt)) return 'qa';
-
-        // Filesystem / execution actionable patterns
-        const actionablePatterns = [
-            /(створ(и|ити)|создай|создать|create|make)\s+(нову|новую|new)?\s*(папк|folder|directory)/,
-            /(запиши|додай|append|write)\s+.*(файл|file)/,
-            /(run|запусти|start|execute)\b.*(script|скрипт|server|сервер)/,
-            /(видали|удали|delete|remove|rm)\s+.*(файл|file|папк|folder|directory)/
-        ];
-        if (actionablePatterns.some(r => r.test(txt))) {
-            if (txt.length < 600) { // safety: avoid marking huge specs as immediate actionable
-                logMessage('debug', `[intent_heuristic] actionable matched pattern for text='${txt.slice(0,120)}'`);
-                return 'actionable';
-            }
-        }
-
-        // If Atlas plan already exists referencing concrete steps and user adds nothing new — remain planning
-        if (/крок|step|plan/i.test(atlasText) && txt.split(/\s+/).length < 4) return 'planning';
-
-        // Default fallback
-        return 'planning';
+        // Minimal safety: truly empty/invalid input defaults to planning
+        const txt = String(userText || '').trim();
+        if (!txt) return 'planning';
+        
+        // System relies on intelligent LLM classification in classifyIntentSmart()
+        // This heuristic serves only as fallback when LLM is unavailable
+        // No hardcoded language patterns - all decisions flow through agent prompts
+        
+        logMessage('debug', `[intent_heuristic] fallback classifier for text='${txt.slice(0,120)}' - deferring to smart classification`);
+        return 'planning'; // Conservative fallback, LLM will handle proper classification
     } catch (e) {
+        logMessage('warn', `[intent_heuristic] classification error: ${e.message}`);
         return 'planning';
     }
 }
 
-// LLM-based intent classification via openai_compat (3010) with fallback to heuristic
+// Intelligent intent classification following Atlas → Grisha → Tetiana architecture
 async function classifyIntentSmart(userText, atlasText) {
     try {
         const routes = (registry.getRoutes('atlas') || []).filter(r => r.provider === 'openai_compat');
         const prompt = [
-            'Класифікуй намір користувача в одну категорію: actionable | planning | qa | smalltalk.',
-            'Формат відповіді: тільки одне слово з цього списку. Без пояснень, без лапок.',
+            'СИСТЕМА: Atlas → Grisha → Tetiana - планувальник → валідатор → виконавець',
             '',
-            `Повідомлення: ${String(userText || '').slice(0, 2000)}`
+            'КЛАСИФІКАЦІЯ НАМІРІВ:',
+            '- actionable: Конкретні завдання (створити файл, запустити програму, встановити софт, виконати команди)',
+            '- planning: Абстрактні питання планування (як зробити, що краще, стратегії)',
+            '- qa: Запитання про знання (що таке, як працює, пояснення)',
+            '- smalltalk: Привітання, дякую, загальна розмова',
+            '',
+            'ВАЖЛИВО: Якщо користувач просить ЗРОБИТИ щось конкретне - це завжди actionable!',
+            'Приклади actionable: "створи файл", "запусти програму", "встанови пакет", "видали папку"',
+            '',
+            'Відповідь: тільки одне слово з списку [actionable, planning, qa, smalltalk]',
+            '',
+            `Повідомлення користувача: ${String(userText || '').slice(0, 2000)}`
         ];
         if (atlasText && String(atlasText).trim()) {
             prompt.push(`Контекст Atlas: ${String(atlasText).slice(0, 1000)}`);
