@@ -66,6 +66,7 @@ export async function executeWithFallback(message, sessionId, options = {}) {
  */
 async function executeWithGitHubGoose(message, sessionId, options = {}) {
     if (!GITHUB_TOKEN) {
+        console.warn('[GOOSE_FALLBACK] GitHub token not configured, skipping GitHub Goose fallback');
         throw new Error('GitHub token not configured for fallback');
     }
 

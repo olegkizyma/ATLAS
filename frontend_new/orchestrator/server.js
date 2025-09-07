@@ -17,24 +17,24 @@ import ModelRegistry from './model_registry.js';
 import { PHASE, initSession, startActionablePipeline, startPendingPrecheck, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
 import { initMemory, remember, recall, summarizeRecent, summarizeRanked, rememberSafe, summarizeForPrompt, memoryHealth, semanticContext, startMemoryMaintenance } from './agent_memory.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
-import { executeWithFallback, getFallbackStatus } from './github_goose_fallback.js';
 import { IntentCache } from './intent_cache.js';
 import { chatWithModel, chatWithModelTimeout, chatWithModelRotation, healthCheck } from './openai_client.js';
 
-// Enhanced execution wrapper with GitHub Goose fallback
-async function executeWithFallbackWrapper(message, sessionId, options = {}) {
+// Enhanced execution wrapper with model rotation instead of GitHub Goose fallback
+async function executeWithModelRotation(agentName, message, sessionId, options = {}) {
     try {
-        const result = await executeWithFallback(message, sessionId, options);
+        logMessage('info', `[EXECUTION] Using model rotation for agent=${agentName} session=${sessionId}`);
+        const result = await callWithModelRotation(agentName, message, options);
+        
         if (result && result.content) {
-            // Log the execution source for metrics
-            logMessage('info', `[EXECUTION] source=${result.source} success=true`);
+            logMessage('info', `[EXECUTION] agent=${agentName} provider=${result.provider} model=${result.model} success=true`);
             return result.content;
         } else {
-            throw new Error('No content returned from execution');
+            throw new Error('No content returned from model rotation');
         }
     } catch (error) {
-        logMessage('error', `[EXECUTION] fallback failed: ${error.message}`);
-        return null;
+        logMessage('error', `[EXECUTION] agent=${agentName} failed: ${error.message}`);
+        throw new Error('Model rotation execution failed');
     }
 }
 
@@ -1003,9 +1003,15 @@ app.get('/session/:sessionId/status', (req, res) => {
 });
 
 // Routes
-// Fallback status endpoint
+// Model rotation status endpoint
 app.get('/fallback/status', (req, res) => {
-    const status = getFallbackStatus();
+    const status = {
+        type: 'model_rotation',
+        status: 'active',
+        models_available: registry ? registry.getStats() : {},
+        github_fallback: 'disabled',
+        timestamp: new Date().toISOString()
+    };
     res.json(status);
 });
 
@@ -1182,66 +1188,50 @@ app.post('/agent/tetyana', async (req, res) => {
 
         logMessage('info', `Direct Tetyana request: ${message.substring(0, 100)}...`);
 
-        // 1) Виконання: Тетяна працює ТІЛЬКИ через Goose (без провайдерних фолбеків)
+        // 1) Виконання: Тетяна працює через model rotation з planning intent
         const sys = tetianaSystemInstruction({ enableTools: true });
-    // Replaced undefined callGooseAgent with executeWithFallbackWrapper for enhanced reliability
-    const gooseExec = await executeWithFallbackWrapper(message, sessionId, { enableTools: true, systemInstruction: sys });
-        if (!gooseExec) {
-            return res.status(502).json({ error: 'Goose is unavailable for Tetiana' });
+    // Use our model rotation system instead of Goose fallback
+    const execResult = await executeWithModelRotation('tetyana', message, sessionId, { 
+        intentHint: 'execution',
+        systemInstruction: sys 
+    });
+        if (!execResult) {
+            return res.status(502).json({ error: 'Model rotation unavailable for Tetyana' });
         }
 
-        // 2) Короткий звіт: формуємо через Goose з промптом замість окремих моделей
-        let provider = 'goose';
-        let model = 'github_copilot';
+        // 2) Короткий звіт: формуємо через model rotation замість Goose
+        let provider = 'openai_compat';
+        let model = 'tetyana_best';
         let content = null;
         
         try {
-            // Використовуємо Goose для формування звіту
+            // Використовуємо model rotation для формування звіту
             const reportPrompt = [
                 'Сформуй короткий структурований ЗВІТ українською на основі виконання вище. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
                 'Будь стислим та конкретним. Максимум 3-4 речення на кожен розділ.',
-                `Виконання (сирий вивід): ${String(gooseExec).slice(0, 6000)}`
+                `Виконання (сирий вивід): ${String(execResult).slice(0, 6000)}`
             ].join('\n');
             
-            const gooseReport = await executeWithFallbackWrapper(reportPrompt, sessionId, { 
-                enableTools: false, 
+            const reportResult = await executeWithModelRotation('tetyana', reportPrompt, sessionId, { 
+                intentHint: 'reporting',
                 systemInstruction: 'Ти експерт з аналізу та структурування звітів. Створюй чіткі, короткі звіти українською мовою.' 
             });
             
-            if (gooseReport) {
-                content = gooseReport;
-                logMessage('info', `[TIMING] agent=tetyana phase=report provider=goose model=github_copilot success=true`);
+            if (reportResult) {
+                content = reportResult;
+                logMessage('info', `[TIMING] agent=tetyana phase=report provider=openai_compat success=true`);
             } else {
-                throw new Error('Goose report generation failed');
+                throw new Error('Model rotation report generation failed');
             }
         } catch (err) {
-            logMessage('warn', `[TIMING] agent=tetyana phase=report provider=goose error=${err.message}`);
-            // Fallback to openai_compat only if Goose completely fails
-            const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
-            const fallbackPrompt = [
-                'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
-                `Виконання (сирий вивід): ${String(gooseExec).slice(0, 6000)}`
-            ].join('\n');
-            for (const route of reportRoutes) {
-                try {
-                    const started = Date.now();
-                    const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, fallbackPrompt);
-                    if (txt) {
-                        content = txt;
-                        provider = 'openai_compat';
-                        model = route.model;
-                        registry.reportSuccess(route, Date.now() - started);
-                        break;
-                    }
-                    registry.reportFailure(route);
-                } catch (_) {
-                    registry.reportFailure(route);
-                }
-            }
+            logMessage('warn', `[TIMING] agent=tetyana phase=report error=${err.message}`);
+            // Fallback to simple summary if model rotation fails
+            content = `[АВТОЗВІТ] Виконання завершено. Детальний звіт недоступний через технічні проблеми.\n\nВиконання: ${String(execResult).slice(0, 500)}...`;
+            logMessage('info', `[TIMING] agent=tetyana phase=report provider=fallback success=true`);
         }
 
-        // 3) Якщо summarizer не спрацював — повертаємо структурований вивід Goose як є
-        const finalText = enforceTetianaStructure(content || gooseExec);
+        // 3) Якщо summarizer не спрацював — повертаємо структурований вивід як є
+        const finalText = enforceTetianaStructure(content || execResult);
 
         const msg = {
             role: 'assistant',
@@ -2330,10 +2320,10 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         const taskDescription = `Виконання завдання: ${inputMessage.substring(0, 100)}...`;
         await startGrishaVisualMonitoring(session.id, taskDescription);
         
-        // Execution via Goose only (no provider fallbacks for execution)
+        // Execution via model rotation instead of Goose only
         const execStartTime = Date.now();
-        const execNotes = await executeWithFallbackWrapper(prompt, session.id, {
-            enableTools: options.enableTools === true,
+        const execNotes = await executeWithModelRotation('tetyana', prompt, session.id, {
+            intentHint: 'execution',
             systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true })
         });
         const execDuration = Date.now() - execStartTime;
@@ -2366,19 +2356,19 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             let reportText = null;
             
             try {
-                // Primary: Use enhanced execution with GitHub fallback
-                const gooseReport = await executeWithFallbackWrapper(reportPrompt, session.id, { 
-                    enableTools: false, 
+                // Primary: Use model rotation for reports
+                const reportResult = await executeWithModelRotation('tetyana', reportPrompt, session.id, { 
+                    intentHint: 'reporting',
                     systemInstruction: 'Ти експерт з аналізу та структурування звітів. Створюй чіткі, короткі звіти українською мовою.' 
                 });
                 
-                if (gooseReport) {
-                    reportText = gooseReport;
-                    provider = 'goose';
-                    model = 'github_copilot';
+                if (reportResult) {
+                    reportText = reportResult;
+                    provider = 'openai_compat';
+                    model = 'tetyana_best';
                     executionSuccessful = true;
                     const reportDuration = Date.now() - reportStartTime;
-                    logMessage('info', `[TIMING] agent=tetyana phase=report provider=goose ms=${reportDuration} success=true`);
+                    logMessage('info', `[TIMING] agent=tetyana phase=report provider=openai_compat ms=${reportDuration} success=true`);
                 } else {
                     throw new Error('Goose report generation failed');
                 }
@@ -2436,19 +2426,23 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             const started = Date.now();
             try {
                 if (route.provider === 'goose') {
-                    const gooseText = await executeWithFallbackWrapper(prompt, session.id, { enableTools: false, systemInstruction: sysInstr });
+                    // Skip goose routes, use model rotation instead
+                    const rotationResult = await executeWithModelRotation(agentName, prompt, session.id, { 
+                        intentHint: route.intent || 'default',
+                        systemInstruction: sysInstr 
+                    });
                     const routeDuration = Date.now() - routeStartTime;
-                    if (gooseText) {
-                        content = gooseText;
-                        provider = 'goose';
-                        model = route.model || 'github_copilot';
+                    if (rotationResult) {
+                        content = rotationResult;
+                        provider = 'openai_compat';
+                        model = `${agentName}_rotation`;
                         registry.reportSuccess(route, Date.now() - started);
                         executionSuccessful = true;
-                        logMessage('info', `[TIMING] agent=${agentName} route=goose model=${model} ms=${routeDuration} success=true`);
+                        logMessage('info', `[TIMING] agent=${agentName} route=model_rotation model=${model} ms=${routeDuration} success=true`);
                         break;
                     }
-                    registry.reportFailure(route, new Error('Empty response from Goose'));
-                    logMessage('info', `[TIMING] agent=${agentName} route=goose model=${model} ms=${routeDuration} success=false`);
+                    registry.reportFailure(route, new Error('Model rotation failed'));
+                    logMessage('info', `[TIMING] agent=${agentName} route=model_rotation model=${model} ms=${routeDuration} success=false`);
                 } else if (route.provider === 'openai_compat') {
                     const text = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, prompt);
                     const routeDuration = Date.now() - routeStartTime;
@@ -2838,8 +2832,11 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
         ].join('\n');
 
     const grishaSys = `Ти — Гриша, валідаційний агент. Виконуй перевірки інструментально ТА візуально. ПОВЕРТАЙ СТРОГО JSON: { "criteria": [ { "name": string, "result": true|false, "evidence": string } ], "confidence": number, "summary": string, "visual_verification": string }`;
-    const gooseOut = await executeWithFallbackWrapper(verifyPrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
-        const parsed = extractJson(gooseOut);
+    const verificationResult = await executeWithModelRotation('grisha', verifyPrompt, verifySession, { 
+        intentHint: 'verification',
+        systemInstruction: grishaSys 
+    });
+        const parsed = extractJson(verificationResult);
         if (parsed && typeof parsed === 'object') {
             lastResult = parsed;
             confidence = typeof parsed.confidence === 'number' ? parsed.confidence : 0;
@@ -2853,8 +2850,11 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
                     failed,
                     'ПОВЕРНИ ЛИШЕ JSON у тому ж форматі, підтверджуючи або спростовуючи.'
                 ].join('\n');
-                const refine = await executeWithFallbackWrapper(refinePrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
-                const refParsed = extractJson(refine);
+                const refineResult = await executeWithModelRotation('grisha', refinePrompt, verifySession, { 
+                    intentHint: 'verification_refine',
+                    systemInstruction: grishaSys 
+                });
+                const refParsed = extractJson(refineResult);
                 if (refParsed && typeof refParsed === 'object' && typeof refParsed.confidence === 'number') {
                     lastResult = refParsed;
                     confidence = refParsed.confidence;
