@@ -1534,7 +1534,7 @@ async function processAgentCycle(userMessage, session) {
             `План Atlas: ${session.pipeline.atlasPlan}`
         ].join('\n');
         
-        const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
+        const grishaPreRaw = await generateNonBlockingAgentResponse('grisha', precheckPrompt, session);
         const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
         responses.push(grishaPre);
         session.history.push(grishaPre);
@@ -1563,7 +1563,7 @@ async function processAgentCycle(userMessage, session) {
         logMessage('info', `[processAgentCycle] executing tetyana based on nextAction`);
         
         const execPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nПлан Atlas: ${session.pipeline.atlasPlan}\nВимоги Гриші: ${session.pipeline.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
-        const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+        const tetyanaExecRaw = await generateNonBlockingAgentResponse('tetyana', execPrompt, session, { enableTools: true });
         const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
         
         try { 
