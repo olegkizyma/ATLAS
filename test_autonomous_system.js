@@ -144,7 +144,7 @@ async function testPipelineHUD() {
         if (response.status === 200 && response.data) {
             console.log('✅ Pipeline metrics available');
             
-            const metrics = response.data;
+            const metrics = response.data.pipeline || response.data; // Support both formats
             const hasRequiredMetrics = (
                 typeof metrics.messagesTotal === 'number' &&
                 typeof metrics.actionableSessions === 'number' &&
@@ -156,6 +156,7 @@ async function testPipelineHUD() {
                 return true;
             } else {
                 console.log('❌ Missing required pipeline metrics');
+                console.log('📊 Available metrics keys:', Object.keys(metrics));
                 return false;
             }
         }

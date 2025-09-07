@@ -1,0 +1,25 @@
+{
+  "name": "atlas",
+  "version": "1.0.0",
+  "description": "**Повністю інтелігентна система без хардкорів, імітацій та фейків**",
+  "main": "test_autonomous_system.js",
+  "type": "module",
+  "scripts": {
+    "test": "node test_autonomous_system.js",
+    "test-autonomous": "./test_autonomous.sh"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/olegkizyma/ATLAS.git"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/olegkizyma/ATLAS/issues"
+  },
+  "homepage": "https://github.com/olegkizyma/ATLAS#readme",
+  "dependencies": {
+    "axios": "^1.11.0"
+  }
+}

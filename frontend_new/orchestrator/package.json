@@ -24,5 +24,11 @@
   },
   "engines": {
     "node": ">=22.0.0 <23"
-  }
+  },
+  "directories": {
+    "test": "tests"
+  },
+  "keywords": [],
+  "author": "",
+  "license": "ISC"
 }
