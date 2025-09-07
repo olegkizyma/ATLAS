@@ -1,8 +1,11 @@
 // Agent memory persistence (lightweight) using SQLite (better-sqlite3)
 // Stores per-agent key/value facts with recency & simple TTL pruning.
 import Database from 'better-sqlite3';
+import sqlite3 from 'sqlite3';
+import path from 'path';
 import crypto from 'crypto';
 import axios from 'axios';
+import { chatWithModel } from './openai_client.js';
 
 const DB_PATH = process.env.ATLAS_MEMORY_DB || './agent_memory.db';
 const MAX_FACTS_PER_AGENT = parseInt(process.env.ATLAS_MEMORY_MAX_FACTS || '200', 10);
@@ -196,14 +199,31 @@ export function memoryHealth() {
 
 // ---------------- Embeddings Support ----------------
 async function fetchRemoteEmbedding(text) {
-  const apiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || '';
-  const url = `${EMBED_BASE}/embeddings`;
-  const payload = { model: EMBED_MODEL, input: text };
-  const headers = { 'Content-Type':'application/json', ...(apiKey ? { 'Authorization':`Bearer ${apiKey}` }: {}) };
-  const resp = await axios.post(url, payload, { headers, timeout: 15000 });
-  const arr = resp.data?.data?.[0]?.embedding;
-  if (Array.isArray(arr)) return arr.map(Number);
-  throw new Error('invalid embedding response');
+  try {
+    // Використовуємо OpenAI SDK для embeddings
+    const response = await chatWithModel(
+      EMBED_BASE, 
+      EMBED_MODEL, 
+      text, 
+      { 
+        maxTokens: 1,
+        timeout: 15000,
+        isEmbedding: true  // Спеціальний флаг для embeddings
+      }
+    );
+    
+    // Якщо це справжній embedding endpoint, обробляємо відповідь
+    if (response && Array.isArray(response)) {
+      return response.map(Number);
+    }
+    
+    // Fallback до hash embedding якщо не вдалося отримати справжній
+    return hashFallbackEmbedding(text);
+    
+  } catch (error) {
+    console.warn('[EMBEDDINGS] Failed to fetch remote embedding, using fallback:', error.message);
+    return hashFallbackEmbedding(text);
+  }
 }
 
 function hashFallbackEmbedding(text) {

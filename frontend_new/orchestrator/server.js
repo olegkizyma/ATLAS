@@ -19,6 +19,7 @@ import { initMemory, remember, recall, summarizeRecent, summarizeRanked, remembe
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
 import { executeWithFallback, getFallbackStatus } from './github_goose_fallback.js';
 import { IntentCache } from './intent_cache.js';
+import { chatWithModel, chatWithModelTimeout, healthCheck } from './openai_client.js';
 
 // Enhanced execution wrapper with GitHub Goose fallback
 async function executeWithFallbackWrapper(message, sessionId, options = {}) {
@@ -252,18 +253,12 @@ function dynamicLLMTimeout(model, message) {
     return Math.ceil(est);
 }
 
+// Legacy functions replaced with OpenAI SDK equivalents
 async function callOpenAICompatChat(baseUrl, model, userMessage) {
     if (OPENAI_COMPAT_DISABLED || openAICompatDown) return null; // soft-disable
-    const url = `${baseUrl}/chat/completions`;
-    const payload = { model, messages: [ { role: 'user', content: userMessage } ], stream: false };
-    const apiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || '';
-    const headers = { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {}) };
-    const timeoutMs = dynamicLLMTimeout(model, userMessage);
     try {
-        const resp = await axios.post(url, payload, { headers, timeout: timeoutMs });
-        if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
-        const text = resp.data?.choices?.[0]?.message?.content;
-        return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+        const result = await chatWithModel(baseUrl, model, userMessage);
+        return result;
     } catch (e) {
         openAICompatDown = true; // trip circuit breaker
         if (!OPENAI_COMPAT_DISABLED) console.warn('[openai_compat] call failed, disabling further attempts this run:', e.message || e);
@@ -273,16 +268,9 @@ async function callOpenAICompatChat(baseUrl, model, userMessage) {
 
 async function callOpenAICompatChatWithTimeout(baseUrl, model, userMessage, timeoutMs = 1500) {
     if (OPENAI_COMPAT_DISABLED || openAICompatDown) return null;
-    const url = `${baseUrl}/chat/completions`;
-    const payload = { model, messages: [ { role: 'user', content: userMessage } ], stream: false };
-    const apiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || '';
-    const headers = { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {}) };
-    const dyn = Math.min(timeoutMs, dynamicLLMTimeout(model, userMessage));
     try {
-        const resp = await axios.post(url, payload, { headers, timeout: dyn });
-        if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
-        const text = resp.data?.choices?.[0]?.message?.content;
-        return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+        const result = await chatWithModelTimeout(baseUrl, model, userMessage, timeoutMs);
+        return result;
     } catch (e) {
         openAICompatDown = true;
         return null;

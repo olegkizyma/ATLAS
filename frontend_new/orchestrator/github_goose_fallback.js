@@ -6,6 +6,8 @@
 
 import axios from 'axios';
 import { extractEvidence } from './goose_adapter.js';
+import { chatWithModel } from './openai_client.js';
+import OpenAI from 'openai';
 
 // GitHub Copilot/Goose endpoint configuration
 const GITHUB_GOOSE_BASE = process.env.GITHUB_GOOSE_BASE || 'https://api.github.com/copilot';
@@ -70,7 +72,15 @@ async function executeWithGitHubGoose(message, sessionId, options = {}) {
     const { systemInstruction, enableTools } = options;
     
     try {
-        // Prepare messages for GitHub Copilot Chat
+        // Створюємо спеціального клієнта для GitHub Copilot
+        const githubClient = new OpenAI({
+            apiKey: GITHUB_TOKEN,
+            baseURL: `${GITHUB_GOOSE_BASE}/chat/completions`,
+            timeout: FALLBACK_CONFIG.timeoutMs,
+            maxRetries: 2
+        });
+
+        // Підготовка повідомлень
         const messages = [];
         
         if (systemInstruction) {
@@ -80,7 +90,7 @@ async function executeWithGitHubGoose(message, sessionId, options = {}) {
             });
         }
 
-        // Add enhanced system prompt for Tetyana/Grisha style execution
+        // Додаємо покращений системний промпт
         messages.push({
             role: 'system', 
             content: getEnhancedSystemPrompt(enableTools)
@@ -91,29 +101,16 @@ async function executeWithGitHubGoose(message, sessionId, options = {}) {
             content: message
         });
 
-        const payload = {
+        const response = await githubClient.chat.completions.create({
             messages: messages,
             model: 'gpt-4o',
             max_tokens: 4000,
             temperature: 0.1,
             stream: false
-        };
+        });
 
-        const response = await axios.post(
-            `${GITHUB_GOOSE_BASE}/chat/completions`,
-            payload,
-            {
-                headers: {
-                    'Authorization': `Bearer ${GITHUB_TOKEN}`,
-                    'Content-Type': 'application/json',
-                    'User-Agent': 'ATLAS-System/1.0'
-                },
-                timeout: FALLBACK_CONFIG.timeoutMs
-            }
-        );
-
-        if (response.data && response.data.choices && response.data.choices[0]) {
-            const content = response.data.choices[0].message.content;
+        if (response && response.choices && response.choices[0]) {
+            const content = response.choices[0].message.content;
             
             console.log('[GOOSE_FALLBACK] GitHub execution successful');
             
@@ -122,8 +119,8 @@ async function executeWithGitHubGoose(message, sessionId, options = {}) {
                 source: 'github_goose',
                 evidence: extractEvidence(content),
                 metadata: {
-                    model: response.data.model,
-                    usage: response.data.usage
+                    model: response.model,
+                    usage: response.usage
                 }
             };
         } else {
@@ -133,7 +130,7 @@ async function executeWithGitHubGoose(message, sessionId, options = {}) {
     } catch (error) {
         console.error(`[GOOSE_FALLBACK] GitHub execution failed: ${error.message}`);
         
-        // If GitHub also fails, return a structured error response
+        // Якщо GitHub також не працює, повертаємо структуровану помилку
         return {
             content: generateFallbackResponse(message, error),
             source: 'fallback_error',
