@@ -99,6 +99,47 @@ class WebInterface:
                 'engine_initialized': intelligent_engine.is_initialized
             })
 
+        # ==================== GRISHA VISUAL MONITORING (STUBS) ====================
+        # Ці ендпоінти додаються для сумісності з фронтендом, щоб уникнути 404 у
+        # intelligent режимі. Повна візуальна система тут ще не інтегрована.
+
+        @self.app.route('/api/grisha/monitoring-status')
+        def grisha_monitoring_status():
+            """Статус візуального моніторингу (поки не реалізовано)"""
+            return jsonify({
+                'monitoring_active': False,
+                'session_id': None,
+                'screenshots_count': 0,
+                'task_description': None,
+                'visual_monitoring': 'unavailable',
+                'message': 'Visual monitoring not implemented in intelligent mode yet'
+            }), 503
+
+        @self.app.route('/api/grisha/start-monitoring', methods=['POST'])
+        def grisha_start_monitoring():
+            """Спроба старту моніторингу (ще не реалізовано)"""
+            return jsonify({
+                'success': False,
+                'error': 'Grisha visual monitoring not available in intelligent mode'
+            }), 503
+
+        @self.app.route('/api/grisha/stop-monitoring', methods=['POST'])
+        def grisha_stop_monitoring():
+            """Спроба зупинити моніторинг (ще не реалізовано)"""
+            return jsonify({
+                'success': False,
+                'error': 'Grisha visual monitoring not available in intelligent mode'
+            }), 503
+
+        @self.app.route('/api/grisha/visual-evidence')
+        def grisha_visual_evidence():
+            """Отримання візуальних доказів (ще не реалізовано)"""
+            return jsonify({
+                'success': False,
+                'error': 'Grisha visual monitoring not available in intelligent mode',
+                'visual_evidence': []
+            }), 503
+
         @self.app.route('/logs')
         def get_logs():
             """Повертає останні N рядків з головного лог-файлу (спрощено)"""

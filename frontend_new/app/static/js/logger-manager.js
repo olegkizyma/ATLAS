@@ -7,8 +7,11 @@ class AtlasLogger {
         this.logs = [];
         this.maxLogs = 1000;
         this.apiBase = window.location.origin;
-        this.refreshInterval = 15000; // 15 секунд замість 10 - менше навантаження
-        this.fastInterval = 5000; // 5 секунд замість 3 - менше спаму
+    this.refreshInterval = 20000; // 20s базовий інтервал
+    this.fastInterval = 8000; // 8s при активності
+    this.backoffMultiplier = 1.0;
+    this.maxBackoff = 60000; // 60s максимум
+    this.lastEtag = null;
         this.lastRefresh = 0;
         this.lastActivity = Date.now();
         this.isActive = false;
@@ -72,7 +75,8 @@ class AtlasLogger {
             const timeSinceActivity = Date.now() - this.lastActivity;
             const shouldUseFastInterval = timeSinceActivity < 60000; // 1 хвилина
             
-            const currentInterval = shouldUseFastInterval ? this.fastInterval : this.refreshInterval;
+            const baseInterval = shouldUseFastInterval ? this.fastInterval : this.refreshInterval;
+            const currentInterval = Math.min(baseInterval * this.backoffMultiplier, this.maxBackoff);
             const timeSinceRefresh = Date.now() - this.lastRefresh;
             
             if (timeSinceRefresh >= currentInterval) {
@@ -111,21 +115,36 @@ class AtlasLogger {
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд timeout
             
+            const headers = { 'Cache-Control': 'no-cache' };
+            if (this.lastEtag) headers['If-None-Match'] = this.lastEtag;
             const response = await fetch(`${this.apiBase}/logs?limit=100`, {
                 signal: controller.signal,
-                headers: {
-                    'Cache-Control': 'no-cache'
-                }
+                headers
             });
             clearTimeout(timeoutId);
             
-            if (!response.ok) return;
+            if (response.status === 304) {
+                // No changes
+                this.backoffMultiplier = Math.max(1.0, this.backoffMultiplier * 0.9);
+                return;
+            }
+
+            if (!response.ok) {
+                this.backoffMultiplier = Math.min(this.backoffMultiplier * 1.5, this.maxBackoff / this.refreshInterval);
+                return;
+            }
             
             const data = await response.json();
             if (data.logs && Array.isArray(data.logs)) {
                 this.displayLogs(data.logs);
+                // Успішний запит — зменшуємо backoff плавно
+                this.backoffMultiplier = Math.max(1.0, this.backoffMultiplier * 0.8);
+                const etag = response.headers.get('ETag');
+                if (etag) this.lastEtag = etag;
             }
         } catch (error) {
+            // Невдача — збільшуємо інтервал (експоненційний backoff)
+            this.backoffMultiplier = Math.min(this.backoffMultiplier * 1.5, this.maxBackoff / this.refreshInterval);
             // Тихо ігноруємо помилки логів, щоб не спамити консоль
             // console.warn('[LOGGER] Skipping logs update:', error.name);
         }

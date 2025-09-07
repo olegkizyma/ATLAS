@@ -438,8 +438,10 @@ class AtlasIntelligentChatManager {
         this.setInputState(false);
         
         try {
+            // Завжди генеруємо новий clientMessageId (запобігає помилковій дедуплікації)
+            const forcedClientId = this.generateClientMessageId();
             // Потоковий стрім із Node Orchestrator (SSE)
-            await this.streamFromOrchestrator(message);
+            await this.streamFromOrchestrator(message, 0, forcedClientId);
             
         } catch (error) {
             this.log(`[ERROR] Failed to send message: ${error.message}`);
@@ -528,7 +530,7 @@ class AtlasIntelligentChatManager {
         }
     }
     
-    async streamFromOrchestrator(message, retryAttempt = 0) {
+    async streamFromOrchestrator(message, retryAttempt = 0, forcedClientId = null) {
         const maxRetries = 3;
     // Adaptive timeout: start large and increase with retries to accommodate slow local LLMs
     const timeoutDuration = Math.min(120000 + (retryAttempt * 60000), 420000); // 2min -> up to 7min
@@ -545,16 +547,18 @@ class AtlasIntelligentChatManager {
             
             // Send initial user message to Python frontend for intent classification.
             // Python will either handle smalltalk locally or forward to orchestrator.
-            const response = await fetch(`${this.frontendBase}/api/chat`, {
+        const response = await fetch(`${this.frontendBase}/api/chat`, {
                 method: 'POST',
                 headers: { 
-                    'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            // В dev можна вимкнути дедуп у orchestrator (передаємо далі через Flask -> X-Atlas-NoDedup)
+            'X-Atlas-NoDedup': '1'
                 },
                 body: JSON.stringify({ 
                     message, 
                     sessionId: this.getSessionId(),
                     retryAttempt: retryAttempt,
-                    clientMessageId: this.generateClientMessageId?.() || `cmsg_${Date.now()}_${Math.random().toString(36).slice(2,8)}`
+            clientMessageId: forcedClientId || this.generateClientMessageId?.() || `cmsg_${Date.now()}_${Math.random().toString(36).slice(2,8)}`
                 }),
                 signal: controller.signal
             });
@@ -570,6 +574,9 @@ class AtlasIntelligentChatManager {
             const data = await response.json();
             
             if (data.success && data.response && Array.isArray(data.response)) {
+                if (data.response.length === 0) {
+                    this.addMessage('⚠️ Отримано порожню відповідь (можливо, дедуплікація). Спробуйте ще раз.', 'system');
+                }
                 this.log(`Received ${data.response.length} agent responses`);
                 
                 // Process each agent response sequentially

@@ -8,6 +8,7 @@ import os
 import sys
 import logging
 import json
+import hashlib
 from datetime import datetime
 from flask import Flask, render_template, jsonify, request, send_file, make_response
 try:
@@ -110,6 +111,7 @@ goose_client = GooseClient(base_url=GOOSE_BASE_URL, secret_key=GOOSE_SECRET_KEY)
 
 # Configuration
 FRONTEND_PORT = int(os.environ.get('FRONTEND_PORT', 5001))
+STATUS_CACHE_TTL = float(os.environ.get('STATUS_CACHE_TTL', '1.0'))  # seconds
 ORCHESTRATOR_URL = os.environ.get('ORCHESTRATOR_URL', os.environ.get('ATLAS_ORCHESTRATOR_URL', 'http://localhost:5101'))
 # Default TTS points to Ukrainian TTS server on port 3001 (can be overridden via env)
 TTS_SERVER_URL = os.environ.get('TTS_SERVER_URL', os.environ.get('ATLAS_TTS_URL', 'http://127.0.0.1:3001'))
@@ -565,11 +567,17 @@ def chat_with_tetyana():
 def chat():
     """Main chat endpoint: pure proxy to orchestrator for unified LLM intent and replies"""
     try:
-        data = request.get_json()
+        data = request.get_json(silent=True) or {}
         message = data.get('message', '')
         session_id = data.get('sessionId', 'default')
         user_id = data.get('userId', 'user')
         ack_mode = data.get('ackMode', False) or request.headers.get('X-Atlas-Ack') == 'immediate'
+
+        # --- Diagnostic logging (helps detect why UI sends nothing) ---
+        try:
+            logger.info(f"/api/chat received session={session_id} user={user_id} ack={ack_mode} msg_len={len(message)}")
+        except Exception:
+            pass
 
         if not message.strip():
             return jsonify({'error': 'Message cannot be empty'}), 400
@@ -583,6 +591,7 @@ def chat():
             
             # Try immediate ACK from orchestrator
             try:
+                logger.info(f"/api/chat ACK mode forwarding to orchestrator session={session_id}")
                 ack_response = requests.post(
                     f'{ORCHESTRATOR_URL}/chat/stream',
                     json={'message': message, 'sessionId': session_id, 'userId': user_id, 'clientMessageId': client_message_id},
@@ -592,6 +601,7 @@ def chat():
                 if ack_response.status_code == 200:
                     ack_data = ack_response.json()
                     if ack_data.get('accepted'):
+                        logger.info(f"/api/chat ACK accepted by orchestrator session={session_id} clientMessageId={client_message_id}")
                         return jsonify({
                             'success': True,
                             'accepted': True,
@@ -627,9 +637,18 @@ def chat():
         client_message_id = data.get('clientMessageId') or f"py_{uuid.uuid4().hex}"
         for attempt in range(1, max_attempts + 1):
             try:
+                if attempt == 1:
+                    logger.info(f"/api/chat forwarding to orchestrator session={session_id} timeout={orch_timeout}s clientMessageId={client_message_id}")
+                else:
+                    logger.info(f"/api/chat retry attempt={attempt} session={session_id} timeout={orch_timeout}s")
+                extra_headers = {}
+                # Проксируем флаг отключения дедупликации на orchestrator
+                if request.headers.get('X-Atlas-NoDedup') == '1':
+                    extra_headers['X-Atlas-NoDedup'] = '1'
                 response = requests.post(
                     post_url,
                     json={'message': message, 'sessionId': session_id, 'userId': user_id, 'clientMessageId': client_message_id},
+                    headers=extra_headers or None,
                     timeout=orch_timeout
                 )
                 break
@@ -644,8 +663,10 @@ def chat():
             logger.error(f"Orchestrator unreachable after retries: {last_exc}")
             return jsonify({'error': 'Orchestrator unreachable', 'details': str(last_exc)}), 503
         if response.status_code == 200:
+            logger.info(f"/api/chat orchestrator OK session={session_id} status=200")
             return jsonify(response.json())
         else:
+            logger.error(f"/api/chat orchestrator error status={response.status_code} session={session_id}")
             return jsonify({'error': 'Orchestrator error'}), response.status_code
 
     except Exception as e:
@@ -840,23 +861,64 @@ def handle_voice_interrupt():
         logger.error(f"Voice interruption handling error: {e}")
         return jsonify({'error': 'Voice interruption handling failed'}), 500
 
+_STATUS_CACHE = {'data': None, 'ts': 0.0}
+
 @app.route('/api/status')
 def status():
-    """Simple status endpoint for Status Manager"""
+    """Status endpoint (1s cache to reduce health probe load)."""
+    now = time.time()
+    cached = _STATUS_CACHE['data']
+    if cached and (now - _STATUS_CACHE['ts'] < STATUS_CACHE_TTL):
+        return jsonify(cached)
+
     recovery_status = check_recovery_bridge_health()
-    return jsonify({
+    orch_status = check_orchestrator_health()
+    tts_status = check_tts_health()
+    goose_status = check_goose_health()
+    vision_status = check_vision_health()
+
+    payload = {
         'timestamp': datetime.now().isoformat(),
+        'cached': False,
         'processes': {
             'frontend': {'count': 1, 'status': 'running'},
-            'orchestrator': {'count': 1 if check_orchestrator_health() == 'running' else 0, 'status': check_orchestrator_health()},
+            'orchestrator': {'count': 1 if orch_status == 'running' else 0, 'status': orch_status},
             'recovery': {'count': 1 if recovery_status == 'running' else 0, 'status': recovery_status},
-            'tts': {'count': 1 if check_tts_health() == 'running' else 0, 'status': check_tts_health()},
-            'goose': {'count': 1 if check_goose_health() == 'running' else 0, 'status': check_goose_health()},
-            'vision': {'count': 1 if check_vision_health() == 'running' else 0, 'status': check_vision_health()}
+            'tts': {'count': 1 if tts_status == 'running' else 0, 'status': tts_status},
+            'goose': {'count': 1 if goose_status == 'running' else 0, 'status': goose_status},
+            'vision': {'count': 1 if vision_status == 'running' else 0, 'status': vision_status}
         },
-        'memory': {'usage': 50},  # Placeholder
+        'memory': {'usage': 50},
         'network': {'active': True}
-    })
+    }
+    _STATUS_CACHE['data'] = payload
+    _STATUS_CACHE['ts'] = now
+    return jsonify(payload)
+
+@app.route('/api/metrics')
+def metrics():
+    """Aggregated lightweight metrics (JSON) for monitoring panels."""
+    # Reuse (maybe cached) status
+    status_payload = _STATUS_CACHE['data']
+    now = time.time()
+    if not status_payload or (now - _STATUS_CACHE['ts'] >= STATUS_CACHE_TTL):
+        # force refresh by calling status() (will populate cache)
+        status().get_json()
+        status_payload = _STATUS_CACHE['data'] or {}
+
+    proc = status_payload.get('processes', {}) if isinstance(status_payload, dict) else {}
+    metrics = {
+        'timestamp': datetime.now().isoformat(),
+        'uptime_seconds': max(0, int(now - _STATUS_CACHE['ts'])),
+        'services_running': sum(1 for v in proc.values() if v.get('status') == 'running'),
+        'goose_status': proc.get('goose', {}).get('status'),
+        'tts_status': proc.get('tts', {}).get('status'),
+        'orchestrator_status': proc.get('orchestrator', {}).get('status'),
+        'vision_status': proc.get('vision', {}).get('status'),
+        'cache_ttl_seconds': STATUS_CACHE_TTL,
+        'cache_age_seconds': round(now - _STATUS_CACHE['ts'], 3),
+    }
+    return jsonify(metrics)
 
 @app.route('/api/system/status')
 def system_status():
@@ -1010,13 +1072,31 @@ def check_tts_health():
         return 'fallback'  # Can use browser TTS
 
 def check_goose_health():
-    """Check if Goose web server is responding"""
+    """Check if Goose web server is responding.
+    Accept conditions:
+      - 200 on '/health'
+      - 200 on '/' (legacy root-only)
+      - 404 on '/health' but 200 on '/' (treat as running)
+    """
     if not requests:
         return 'unavailable'
+    root_ok = False
     try:
-        response = requests.get('http://localhost:3000/', timeout=3)
-        return 'running' if response.status_code == 200 else 'error'
-    except:
+        try:
+            r_root = requests.get('http://localhost:3000/', timeout=2)
+            root_ok = (r_root.status_code == 200)
+        except Exception:
+            root_ok = False
+        try:
+            r_health = requests.get('http://localhost:3000/health', timeout=2)
+            if r_health.status_code == 200:
+                return 'running'
+            if r_health.status_code == 404 and root_ok:
+                return 'running'
+            return 'error'
+        except Exception:
+            return 'running' if root_ok else 'stopped'
+    except Exception:
         return 'stopped'
 
 def check_recovery_bridge_health():

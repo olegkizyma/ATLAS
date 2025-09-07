@@ -1098,6 +1098,7 @@ app.post('/agent/tetyana', async (req, res) => {
 app.post('/chat/stream', async (req, res) => {
     const startedAt = Date.now();
     const { message, sessionId, userId, clientMessageId } = req.body;
+    const disableDedup = (req.headers['x-atlas-nodedup'] === '1') || process.env.ATLAS_DISABLE_DEDUP === '1';
     
     if (!message) {
         return res.status(400).json({ error: 'Message is required' });
@@ -1140,7 +1141,7 @@ app.post('/chat/stream', async (req, res) => {
     }
     prune();
 
-    if (clientMessageId) {
+    if (clientMessageId && !disableDedup) {
         const key = `${sid}::${clientMessageId}`;
         if (cache.map.has(key)) {
             PIPELINE_METRICS.duplicatesSuppressed++;
@@ -1149,6 +1150,8 @@ app.post('/chat/stream', async (req, res) => {
         }
         cache.map.set(key, { ts: NOW, sessionId: sid });
         touch(key);
+    } else if (clientMessageId && disableDedup) {
+        logMessage('info', `Dedup disabled (header/env). Accepting clientMessageId=${clientMessageId}`);
     }
 
     logMessage('info', `Incoming /chat/stream message (session=${sid} cmsg=${clientMessageId || 'no-id'}): ${String(message).slice(0, 200)}`);

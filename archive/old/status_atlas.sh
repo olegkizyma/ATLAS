@@ -5,12 +5,7 @@ echo "📊 ATLAS 3-Agent System Status"
 echo "=============================="
 
 # Check if ATLAS server is running
-if pgrep -f "atlas_web_server.py" > /dev/null; then
-    PID=$(pgrep -f "atlas_web_server.py")
-    echo "✅ ATLAS Web Server: RUNNING (PID: $PID)"
-else
-    echo "❌ ATLAS Web Server: STOPPED"
-fi
+echo "ℹ️  (Deprecated) atlas_web_server.py no longer used."
 
 echo ""
 echo "🌐 Port Status:"
@@ -46,11 +41,7 @@ else
     echo "   atlas_backend.py               🔴 MISSING"
 fi
 
-if [ -f "atlas_web_server.py" ]; then
-    echo "   atlas_web_server.py            🟢 EXISTS"
-else
-    echo "   atlas_web_server.py            🔴 MISSING"
-fi
+echo "   atlas_web_server.py            (deprecated)"
 
 if [ -f "atlas_prompts.py" ]; then
     echo "   atlas_prompts.py               🟢 EXISTS"
@@ -87,19 +78,4 @@ echo "   Status: ./status_atlas.sh"
 echo "   Logs:   tail -f logs/atlas_system.log"
 
 # Test connectivity if running
-if pgrep -f "atlas_web_server.py" > /dev/null; then
-    echo ""
-    echo "🔗 Quick Tests:"
-    
-    if curl -s http://localhost:5001/api/health > /dev/null; then
-        echo "   Health Check:                  ✅ PASS"
-    else
-        echo "   Health Check:                  ❌ FAIL"
-    fi
-    
-    if curl -s http://localhost:5001/ > /dev/null; then
-        echo "   Web Interface:                 ✅ ACCESSIBLE"
-    else
-        echo "   Web Interface:                 ❌ NOT ACCESSIBLE"
-    fi
-fi
+echo "🔗 Quick Tests: (use new status scripts)"

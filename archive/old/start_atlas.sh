@@ -15,47 +15,30 @@ if ! python3 -c "import flask" 2>/dev/null; then
 fi
 
 # Check if old processes are running
+# Legacy cleanup (atlas_web_server.py removed in modern stack)
 if pgrep -f "atlas_web_server.py" > /dev/null; then
-    echo "⚠️  Stopping existing ATLAS server..."
-    pkill -f "atlas_web_server.py"
-    sleep 2
+    echo "ℹ️  Found legacy atlas_web_server.py process – stopping (deprecated)."
+    pkill -f "atlas_web_server.py" || true
+    sleep 1
 fi
 
 # Create logs directory
 mkdir -p logs
 
 # Start the ATLAS web server
-echo "🔧 Starting ATLAS Web Server (Port 5001)..."
-python3 atlas_web_server.py > logs/atlas_system.log 2>&1 &
-ATLAS_PID=$!
+echo "🔧 (Deprecated) atlas_web_server.py start step skipped. Use new stack scripts instead."
+ATLAS_PID=0
 
 # Wait for server to start
 echo "⏳ Waiting for services to initialize..."
 sleep 5
 
 # Check if server started successfully
-if ps -p $ATLAS_PID > /dev/null; then
-    echo "✅ ATLAS Web Server started (PID: $ATLAS_PID)"
-else
-    echo "❌ Failed to start ATLAS Web Server"
-    exit 1
-fi
+echo "✅ Legacy start script finished (no-op for web server)."
 
 # Test API endpoints
 echo "🔍 Testing system health..."
-if curl -s http://localhost:5001/api/health > /dev/null; then
-    echo "✅ Health check passed"
-else
-    echo "❌ Health check failed"
-    exit 1
-fi
-
-if curl -s http://localhost:5001/api/system/status > /dev/null; then
-    echo "✅ System status check passed"
-else
-    echo "❌ System status check failed"
-    exit 1
-fi
+echo "ℹ️  Skipping health checks in deprecated script. Use ./start_stack_macos.sh and status scripts instead."
 
 echo ""
 echo "🎉 ATLAS System Successfully Started!"
