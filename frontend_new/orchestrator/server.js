@@ -1895,6 +1895,7 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
                 responses.push(atlasClar); session.history.push(atlasClar);
                 session.awaitingClarification = true; PIPELINE_METRICS.clarifications++;
                 markNeedsMore(session, ['additional_context'], grishaPre.content);
+                try { scheduleClarificationAutoFill(session); } catch(e){ logMessage('warn','Clarification auto-fill scheduling failed: '+e.message); }
                 return responses;
             }
         } catch {}
@@ -2357,3 +2358,182 @@ if (process.env.NODE_ENV !== 'test') {
 }
 
 export default app;
+
+// ------------------------------------------------------------
+// Clarification Auto-Fill (post-export to avoid hoist confusion)
+// ------------------------------------------------------------
+// When a clarification is requested and the user stays silent for 30s,
+// Atlas will inject a synthetic "assumed clarification" message to unblock the pipeline.
+// Requirements:
+//  - 30s timeout after entering clarification state
+//  - 10 rotating variants (cyclic)
+//  - After auto-fill: force new actionable cycle (Atlas -> Grisha -> Tetyana)
+//  - Cancel timer if user replies earlier (handled where awaitingClarification is cleared)
+//  - Avoid multiple concurrent timers per session
+
+const CLAR_AUTOFILL_VARIANTS = [
+    'Олег Миколайович, припускаю що мета стандартна: отримати робочий результат за мінімальними ресурсами. Продовжую на базових припущеннях.',
+    'Схоже ви зайняті. Я беру ініціативу: середовище macOS, можна створювати тимчасові файли, зовнішніх секретів немає.',
+    'Не отримав деталей — стартую з гіпотези: ціль — короткий відтворюваний прототип + звіт з доказами.',
+    'Авто-делегація: дозволені базові CLI і Python пакети з requirements.txt. Якщо треба інше — напишете пізніше.',
+    'Приймаю рішення рухатись далі: критерієм успіху буде звіт + артефакти (файли / логи).',
+    'Оскільки відповіді немає — моделюю початковий стан як «чистий робочий каталог без специфічних конфіг».',
+    'Запускаю виконання із стандартними security-обмеженнями (без видалення критичних шляхів).',
+    'Беру на себе уточнення: час на перший корисний результат < 2 хв, далі ітеративне покращення.',
+    'Відсутність відповіді трактую як згоду на автономне продовження. Формую план і переходжу до реалізації.',
+    'Просканую контекст і використаю типові патерни. Якщо зʼявляться контр-вказівки — перебудую.',
+    'Делеговано мовчазно: активую стандартний набір припущень (середовище, інструменти, критерії).',
+    'Автоматичне уточнення: очікуваний вихід — структурований звіт + докази виконання.',
+    'Не бачу реакції — беру гіпотезу що потрібна максимальна прозорість кроків. Додаю перевірки.',
+    'Відсутність уточнень => вважаю що немає прихованих ліцензійних обмежень чи приватних моделей.',
+    'Я ініціюю самостійне формування уточнень: якщо пізніше уточните — адаптую без перезапуску.',
+    'Перехожу до плану: мінімізую ризики, фіксую кожен ключовий артефакт.',
+    'Розцінюю паузу як делегування. Застосовую стандартні практики (логування / короткі цикли).',
+    'Запускаю план без додаткових вводних. Можу призупинити, якщо зʼявиться ваша відповідь.',
+    'Мовчання прийнято: обираю базову стратегію і переходжу до дій.',
+    'Для уникнення простою — автозапуск: припускаю типові параметри. Уточнення можна надати в будь-який момент.'
+];
+
+function nextClarVariant(session) {
+    session._clarVariantIndex = (session._clarVariantIndex || 0) % CLAR_AUTOFILL_VARIANTS.length;
+    const v = CLAR_AUTOFILL_VARIANTS[session._clarVariantIndex];
+    session._clarVariantIndex = (session._clarVariantIndex + 1) % CLAR_AUTOFILL_VARIANTS.length;
+    return v;
+}
+
+function scheduleClarificationAutoFill(session) {
+    try {
+        if (!session || !session.awaitingClarification) return;
+        // If an existing timer exists, do not schedule again
+        if (session._clarTimer) return;
+        const TIMEOUT_MS = parseInt(process.env.ATLAS_CLAR_AUTOFILL_MS || '30000', 10);
+        session._clarTimer = setTimeout(async () => {
+            session._clarTimer = null; // clear reference
+            if (!session.awaitingClarification) return; // user responded in the meantime
+            try {
+                const assumed = nextClarVariant(session);
+                // 1) Atlas системне повідомлення про автоделегацію
+                pushAndBroadcast(session, {
+                    role: 'assistant',
+                    agent: 'atlas',
+                    content: `[AUTO-CLARIFICATION] ${assumed}`,
+                    timestamp: Date.now(),
+                    phase: 'atlas_auto_clarify',
+                    autoClarification: true
+                });
+                // 2) Синтетичний "user" щоб зняти очікування і запустити цикл
+                pushAndBroadcast(session, {
+                    role: 'user',
+                    content: `[auto_assumed_clarification_ack] Прийнято. Рухайся на основі цих припущень.`,
+                    timestamp: Date.now(),
+                    type: 'auto_clarification_ack'
+                });
+                session.awaitingClarification = false;
+                session.forceNewCycle = true;
+                session.clarificationResolvedAt = Date.now();
+                session.autoClarificationsCount = (session.autoClarificationsCount||0)+1;
+                logMessage('info', `[CLAR_AUTOFILL] Injected auto clarification & ack for session=${session.id}`);
+
+                // 3) Автоматично запускаємо новий цикл без очікування HTTP виклику (щоб UI побачив прогрес PLAN->PRECHECK->... при наступному запиті)
+                if (!session._autoCycleRunning) {
+                    session._autoCycleRunning = true;
+                    try {
+                        const syntheticUserMsg = 'Автоцикл: продовжити виконання на основі припущень.';
+                        const autoResponses = await processAgentCycle(syntheticUserMsg, session);
+                        // Позначити що це внутрішній автозапуск (для UI можна відфільтрувати)
+                        autoResponses.forEach(r => { r.internalAutoCycle = true; });
+                        session.lastAutoCycleAt = Date.now();
+                        pushAndBroadcast(session, {
+                            role: 'system',
+                            content: '[auto_cycle_started] План сформовано автономно після відсутності відповіді користувача',
+                            timestamp: Date.now(),
+                            type: 'auto_cycle'
+                        });
+                        PIPELINE_METRICS.autoClarificationCycles = (PIPELINE_METRICS.autoClarificationCycles||0)+1;
+                        logMessage('info', `[CLAR_AUTOFILL] Auto cycle executed responses=${autoResponses.length}`);
+                    } catch (e) {
+                        logMessage('warn', `[CLAR_AUTOFILL] auto cycle failed: ${e.message}`);
+                    } finally {
+                        session._autoCycleRunning = false;
+                    }
+                } else {
+                    logMessage('info', '[CLAR_AUTOFILL] auto cycle already running, skipped duplicate');
+                }
+            } catch (e) {
+                logMessage('warn', '[CLAR_AUTOFILL] error injecting clarification: ' + e.message);
+            }
+        }, TIMEOUT_MS);
+        logMessage('info', `[CLAR_AUTOFILL] Timer scheduled ${TIMEOUT_MS}ms for session=${session.id}`);
+    } catch (e) {
+        logMessage('warn', '[CLAR_AUTOFILL] schedule failed: ' + e.message);
+    }
+}
+
+// Ensure timers are cleared when process exits
+process.on('exit', () => {
+    try { for (const s of sessions.values()) { if (s._clarTimer) clearTimeout(s._clarTimer); } } catch {}
+});
+
+// ------------------------------------------------------------
+// Realtime session history visibility (SSE + history endpoint)
+// ------------------------------------------------------------
+// Maintain lightweight subscriber list for SSE broadcast of new messages.
+const historySubscribers = new Map(); // sessionId -> Set(res)
+
+function sseInit(req, res) {
+    const sessionId = req.params.sessionId;
+    res.writeHead(200, {
+        'Content-Type': 'text/event-stream',
+        'Cache-Control': 'no-cache',
+        'Connection': 'keep-alive',
+        'Access-Control-Allow-Origin': '*'
+    });
+    if (!historySubscribers.has(sessionId)) historySubscribers.set(sessionId, new Set());
+    historySubscribers.get(sessionId).add(res);
+    res.write(`data: {"type":"history_init","sessionId":"${sessionId}"}\n\n`);
+    req.on('close', () => {
+        const set = historySubscribers.get(sessionId);
+        if (set) { set.delete(res); if (set.size === 0) historySubscribers.delete(sessionId); }
+    });
+}
+
+function broadcastHistory(sessionId, payloadObj) {
+    const set = historySubscribers.get(sessionId);
+    if (!set || !set.size) return;
+    const data = 'data: ' + JSON.stringify(payloadObj) + '\n\n';
+    for (const res of set) {
+        try { res.write(data); } catch { /* ignore broken pipe */ }
+    }
+}
+
+// Wrap a push into session history so UI can receive without polling
+function pushAndBroadcast(session, messageObj) {
+    session.history.push(messageObj);
+    try {
+        broadcastHistory(session.id, { type: 'message', message: sanitizeMessageForClient(messageObj) });
+    } catch {}
+}
+
+function sanitizeMessageForClient(m) {
+    // Remove heavy internals
+    const { timing, ...rest } = m || {};
+    return rest;
+}
+
+// Patch existing code paths gradually: monkey-patch session.history.push usage is risky; instead we incrementally adopt pushAndBroadcast where critical.
+// (Future improvement: refactor to central addHistory(session, obj) helper.)
+
+// GET full history (lightweight) — optional trimming via ?since=<ts>
+app.get('/session/:sessionId/history', (req, res) => {
+    const { sessionId } = req.params;
+    const since = parseInt(req.query.since || '0', 10) || 0;
+    const session = sessions.get(sessionId);
+    if (!session) return res.json({ success: false, history: [] });
+    const filtered = since ? session.history.filter(m => (m.timestamp||0) > since) : session.history;
+    res.json({ success: true, history: filtered.map(sanitizeMessageForClient) });
+});
+
+// SSE stream for incremental history
+app.get('/session/:sessionId/history/stream', (req,res) => {
+    sseInit(req,res);
+});

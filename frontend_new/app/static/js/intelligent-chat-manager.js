@@ -266,6 +266,87 @@ class AtlasIntelligentChatManager {
     this.pipelineState = { order: ['atlas_plan','atlas_clarify','tetyana_probe','grisha_probe_review','atlas_feasibility','grisha_precheck','execution','grisha_verdict','grisha_followup'], active: null, seen: new Set() };
     this._clarificationFreeze = false;
         this.buildPipelineHUD();
+
+        // Автопулінг для внутрішніх автосинтетичних циклів (internalAutoCycle)
+        this._autoCyclePollInterval = setInterval(()=>{ this.pollInternalAutoCycles(); }, 5000);
+
+        // Ініціалізуємо отримання всієї історії та SSE для живих оновлень
+        this.initHistorySync();
+    }
+
+    async initHistorySync() {
+        try {
+            const sid = this.getSessionId();
+            // Початкова історія
+            const resp = await fetch(`${this.orchestratorBase}/session/${sid}/history`);
+            if (resp.ok) {
+                const data = await resp.json();
+                if (data.success && Array.isArray(data.history)) {
+                    // Відобразити тільки ті, яких ще немає (за messageId або timestamp+content)
+                    for (const m of data.history) {
+                        this.maybeRenderHistoryMessage(m);
+                    }
+                }
+            }
+            // SSE
+            const es = new EventSource(`${this.orchestratorBase}/session/${sid}/history/stream`);
+            es.onmessage = (evt) => {
+                try {
+                    const payload = JSON.parse(evt.data);
+                    if (payload.type === 'message' && payload.message) {
+                        this.maybeRenderHistoryMessage(payload.message, true);
+                    }
+                } catch(e){ this.log('[HISTORY-SSE] parse error '+e.message); }
+            };
+            es.onerror = () => { /* silent, browser will reconnect */ };
+            this._historyEventSource = es;
+        } catch(e) {
+            this.log('[HISTORY] init failed '+e.message);
+        }
+    }
+
+    historyMessageKey(m) {
+        return m.messageId || `${m.timestamp||0}_${(m.agent||m.role||'')}_${(m.content||'').slice(0,40)}`;
+    }
+
+    maybeRenderHistoryMessage(m, isLive=false) {
+        if (!m) return;
+        // Пропускаємо користувацькі повідомлення (user) — вони вже рендеряться локально
+        if (m.role === 'user') return;
+        // Уникнути дублікатів
+        this._renderedHistoryKeys = this._renderedHistoryKeys || new Set();
+        const key = this.historyMessageKey(m);
+        if (this._renderedHistoryKeys.has(key)) return;
+        this._renderedHistoryKeys.add(key);
+
+        const agent = m.agent || (m.role === 'assistant' ? 'atlas' : 'atlas');
+        const signature = this.voiceSystem.agents[agent]?.signature || `[${agent.toUpperCase()}]`;
+        const phase = m.phase || (m.autoClarification ? 'atlas_auto_clarify' : null);
+        const content = m.content || '';
+        this.addVoiceMessage(content, agent, signature, phase, {});
+
+        // Якщо TTS увімкнено — теж озвучити
+        if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
+            const segments = this.segmentForTTS(content, agent);
+            const batched = this.combineSegmentsForAgent(segments, agent);
+            for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+            this.processTTSQueue();
+        }
+        if (isLive) this.scrollToBottomIfNeeded();
+    }
+
+    async pollInternalAutoCycles() {
+        try {
+            // Використовуємо легкий endpoint orchestrator /chat (ping) без нового повідомлення? — немає.
+            // Тому робимо спеціальний lightweight запит до /chat/stream з ACK (в майбутньому можна оптимізувати)
+            // Тут спростимо: якщо останнє повідомлення в sessionStorage timestamp старіше ніж 4s, повторний запит не потрібен.
+            // Реалізація: отримати весь backlog через повторний останній user message? Надто важко без бекенд підтримки.
+            // Тимчасове рішення: запит до frontend /api/chat з пустим no-op не робимо (щоб не плодити цикл).
+            // TODO: Додати на бекенді endpoint типу /session/:id/history. Зараз пропускаємо якщо неможливо.
+            if (this._pollingDisabled) return;
+            // Якщо автоцикл вже відмічений — пропустити (немає прямого способу дістати нові без нового запиту користувача).
+            // Плейсхолдер: позначено для майбутньої реалізації.
+        } catch(e){ this.log('[AUTO-CYCLE] poll error '+e.message); }
     }
 
     setupTTSEventBridges() {
