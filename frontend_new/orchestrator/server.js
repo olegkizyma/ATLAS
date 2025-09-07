@@ -19,7 +19,7 @@ import { initMemory, remember, recall, summarizeRecent, summarizeRanked, remembe
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
 import { executeWithFallback, getFallbackStatus } from './github_goose_fallback.js';
 import { IntentCache } from './intent_cache.js';
-import { chatWithModel, chatWithModelTimeout, healthCheck } from './openai_client.js';
+import { chatWithModel, chatWithModelTimeout, chatWithModelRotation, healthCheck } from './openai_client.js';
 
 // Enhanced execution wrapper with GitHub Goose fallback
 async function executeWithFallbackWrapper(message, sessionId, options = {}) {
@@ -277,6 +277,64 @@ async function callOpenAICompatChatWithTimeout(baseUrl, model, userMessage, time
     }
 }
 
+/**
+ * Розумна ротація моделей для кращої стабільності
+ * Автоматично пробує різні моделі при помилках 429, 500 тощо
+ */
+async function callWithModelRotation(agentName, userMessage, options = {}) {
+    if (OPENAI_COMPAT_DISABLED || openAICompatDown) return null;
+    
+    try {
+        // Отримуємо список моделей для агента з реєстру
+        const routes = registry.getRoutes(agentName, options) || [];
+        const openaiRoutes = routes.filter(r => r.provider === 'openai_compat');
+        
+        if (openaiRoutes.length === 0) {
+            console.warn(`[ROTATION] No OpenAI-compatible routes for agent: ${agentName}`);
+            return null;
+        }
+        
+        // Витягуємо моделі та базовий URL
+        const models = openaiRoutes.map(r => r.model);
+        const baseUrl = openaiRoutes[0]?.baseUrl || FALLBACK_API_BASE;
+        
+        console.log(`[ROTATION] Starting rotation for ${agentName} with ${models.length} models`);
+        
+        const result = await chatWithModelRotation(baseUrl, models, userMessage, {
+            maxRetries: 2,
+            retryDelay: 1000,
+            ...options
+        });
+        
+        // Звітуємо про успіх у реєстрі
+        if (result?.model) {
+            const successRoute = openaiRoutes.find(r => r.model === result.model);
+            if (successRoute) {
+                registry.reportSuccess(successRoute, 1000); // Приблизна латентність
+            }
+        }
+        
+        openAICompatDown = false; // Скидаємо прапор при успіху
+        return result?.content || null;
+        
+    } catch (error) {
+        console.warn(`[ROTATION] All models failed for ${agentName}:`, error.message);
+        
+        // Звітуємо про помилки у реєстрі
+        const routes = registry.getRoutes(agentName, options) || [];
+        const openaiRoutes = routes.filter(r => r.provider === 'openai_compat');
+        openaiRoutes.forEach(route => {
+            registry.reportFailure(route, error);
+        });
+        
+        if (error.message.includes('ALL_MODELS_FAILED')) {
+            openAICompatDown = true; // Тимчасово вимикаємо при повному провалі
+        }
+        
+        return null;
+    }
+}
+
 // Diagnostics endpoint for openai_compat status
 app.get('/diagnostics/openai_compat_status', (req, res) => {
     res.json({
@@ -285,6 +343,32 @@ app.get('/diagnostics/openai_compat_status', (req, res) => {
         recovered_once: openAICompatRecovered,
         base: FALLBACK_API_BASE
     });
+});
+
+// Test endpoint for model rotation
+app.post('/test/model_rotation', async (req, res) => {
+    try {
+        const { agent = 'atlas', message = 'Привіт!', intent } = req.body;
+        
+        const start = Date.now();
+        const result = await callWithModelRotation(agent, message, { intentHint: intent });
+        const duration = Date.now() - start;
+        
+        res.json({
+            success: !!result,
+            response: result,
+            duration_ms: duration,
+            agent,
+            message,
+            intent
+        });
+    } catch (error) {
+        res.status(500).json({
+            success: false,
+            error: error.message,
+            agent: req.body.agent || 'atlas'
+        });
+    }
 });
 
 // Dynamic model/provider registry

@@ -83,8 +83,8 @@ export async function chatWithModel(baseUrl, model, userMessage, options = {}) {
             messages,
             max_tokens: maxTokens,
             temperature,
-            stream,
-            timeout: finalTimeout
+            stream
+            // Не передаємо timeout в запит, оскільки наш проксі його не підтримує
         });
         
         if (stream) {
@@ -97,15 +97,22 @@ export async function chatWithModel(baseUrl, model, userMessage, options = {}) {
     } catch (error) {
         console.warn(`[OpenAI SDK] Error with model ${model}:`, error.message);
         
-        // Детальніша обробка помилок
+        // Детальніша обробка помилок для ротації моделей
         if (error.status === 429) {
-            throw new Error(`RATE_LIMITED:${error.message}`);
+            const retryAfter = error.headers?.['retry-after'] || error.headers?.['Retry-After'] || 60;
+            throw new Error(`RATE_LIMITED:${model}:${retryAfter}:${error.message}`);
         } else if (error.status === 401 || error.status === 403) {
-            throw new Error(`AUTH_ERROR:${error.message}`);
+            throw new Error(`AUTH_ERROR:${model}:${error.message}`);
         } else if (error.status === 404) {
-            throw new Error(`MODEL_NOT_FOUND:${model}`);
+            throw new Error(`MODEL_NOT_FOUND:${model}:${error.message}`);
+        } else if (error.status === 400) {
+            throw new Error(`BAD_REQUEST:${model}:${error.message}`);
+        } else if (error.status === 500 || error.status === 502 || error.status === 503) {
+            throw new Error(`SERVER_ERROR:${model}:${error.status}:${error.message}`);
         } else if (error.code === 'ECONNREFUSED' || error.code === 'ENOTFOUND') {
-            throw new Error(`CONNECTION_ERROR:${baseUrl}`);
+            throw new Error(`CONNECTION_ERROR:${baseUrl}:${error.message}`);
+        } else if (error.code === 'ETIMEDOUT') {
+            throw new Error(`TIMEOUT:${model}:${error.message}`);
         }
         
         throw error;
@@ -205,12 +212,110 @@ export function clearClients() {
     clients.clear();
 }
 
+/**
+ * Розумна ротація моделей з обробкою помилок та retry логікою
+ * Автоматично пробує наступні моделі при 429, 500 та інших помилках
+ */
+export async function chatWithModelRotation(baseUrl, models, userMessage, options = {}) {
+    if (!Array.isArray(models) || models.length === 0) {
+        throw new Error('Models array cannot be empty');
+    }
+    
+    const {
+        systemMessage = null,
+        maxTokens = 1000,
+        temperature = 0.7,
+        stream = false,
+        timeout = null,
+        maxRetries = 2,
+        retryDelay = 1000
+    } = options;
+    
+    const errors = [];
+    const rateLimitedModels = new Set();
+    
+    for (let i = 0; i < models.length; i++) {
+        const model = models[i];
+        
+        // Пропускаємо rate limited моделі
+        if (rateLimitedModels.has(model)) {
+            console.log(`[ROTATION] Skipping rate limited model: ${model}`);
+            continue;
+        }
+        
+        for (let retry = 0; retry <= maxRetries; retry++) {
+            try {
+                console.log(`[ROTATION] Trying model ${model} (attempt ${retry + 1}/${maxRetries + 1})`);
+                
+                const result = await chatWithModel(baseUrl, model, userMessage, {
+                    systemMessage,
+                    maxTokens,
+                    temperature,
+                    stream,
+                    timeout
+                });
+                
+                console.log(`[ROTATION] ✅ Success with model: ${model}`);
+                return {
+                    content: result,
+                    model: model,
+                    attempt: retry + 1,
+                    totalModelsUsed: i + 1
+                };
+                
+            } catch (error) {
+                const errorType = error.message.split(':')[0];
+                
+                if (errorType === 'RATE_LIMITED') {
+                    const parts = error.message.split(':');
+                    const modelName = parts[1] || model;
+                    const retryAfter = parseInt(parts[2]) || 60;
+                    
+                    console.warn(`[ROTATION] ⚠️ Rate limited: ${modelName}, retry after ${retryAfter}s`);
+                    rateLimitedModels.add(modelName);
+                    errors.push({ model, error: error.message, type: 'rate_limit' });
+                    break; // Переходимо до наступної моделі
+                    
+                } else if (errorType === 'MODEL_NOT_FOUND') {
+                    console.warn(`[ROTATION] ❌ Model not found: ${model}`);
+                    errors.push({ model, error: error.message, type: 'not_found' });
+                    break; // Переходимо до наступної моделі
+                    
+                } else if (errorType === 'AUTH_ERROR') {
+                    console.warn(`[ROTATION] 🔐 Auth error: ${model}`);
+                    errors.push({ model, error: error.message, type: 'auth' });
+                    break; // Переходимо до наступної моделі
+                    
+                } else if (errorType === 'SERVER_ERROR' && retry < maxRetries) {
+                    console.warn(`[ROTATION] 🔄 Server error, retrying ${model} in ${retryDelay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
+                    continue; // Повторюємо ту ж модель
+                    
+                } else if (errorType === 'TIMEOUT' && retry < maxRetries) {
+                    console.warn(`[ROTATION] ⏱️ Timeout, retrying ${model}...`);
+                    continue; // Повторюємо ту ж модель
+                    
+                } else {
+                    console.warn(`[ROTATION] ❌ Other error with ${model}: ${error.message}`);
+                    errors.push({ model, error: error.message, type: 'other' });
+                    break; // Переходимо до наступної моделі
+                }
+            }
+        }
+    }
+    
+    // Всі моделі провалились
+    const errorSummary = errors.map(e => `${e.model}:${e.type}`).join(', ');
+    throw new Error(`ALL_MODELS_FAILED: Tried ${models.length} models - ${errorSummary}`);
+}
+
 // Експорт для зворотної сумісності
 export default {
     chatWithModel,
     chatWithModelTimeout,
     streamChatWithModel,
     batchChatWithModels,
+    chatWithModelRotation,
     healthCheck,
     getAvailableModels,
     clearClients

@@ -6,7 +6,12 @@
   "type": "module",
   "scripts": {
     "test": "node test_autonomous_system.js",
-    "test-autonomous": "./test_autonomous.sh"
+    "test-autonomous": "./test_autonomous.sh",
+    "test-sdk": "node test_openai_sdk.mjs",
+    "test-sdk-python": "python3 test_openai_sdk.py",
+    "test-rotation": "node test_model_rotation.mjs",
+    "start-fallback": "node fallback_llm/server_sdk.js",
+    "start-fallback-old": "node fallback_llm/server.js"
   },
   "repository": {
     "type": "git",
@@ -20,6 +25,7 @@
   },
   "homepage": "https://github.com/olegkizyma/ATLAS#readme",
   "dependencies": {
-    "axios": "^1.11.0"
+    "axios": "^1.11.0",
+    "openai": "^4.104.0"
   }
 }
