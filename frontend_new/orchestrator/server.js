@@ -1690,9 +1690,37 @@ async function processAgentCycle(userMessage, session) {
 
 // Lightweight intent classifier for routing
 // Returns: 'actionable' | 'planning' | 'qa' | 'smalltalk'
-function classifyIntentHeuristic(_userText, _atlasText) {
-    // Heuristic intent removed: default neutral fallback (planning)
-    return 'planning';
+function classifyIntentHeuristic(userText = '', atlasText = '') {
+    try {
+        const txt = (userText || '').toLowerCase().trim();
+        // Extremely lightweight guardrails: treat very short purely social inputs as smalltalk
+        if (/^(hi|hello|привіт|привет|дякую|thanks|ok|ок)$/i.test(txt)) return 'smalltalk';
+
+        // Detect explicit question (QA) — ends with ? and not an imperative create/run pattern
+        if (/[?？]\s*$/.test(txt) && !/(створ|созд|create|запусти|run|execute)/.test(txt)) return 'qa';
+
+        // Filesystem / execution actionable patterns
+        const actionablePatterns = [
+            /(створ(и|ити)|создай|создать|create|make)\s+(нову|новую|new)?\s*(папк|folder|directory)/,
+            /(запиши|додай|append|write)\s+.*(файл|file)/,
+            /(run|запусти|start|execute)\b.*(script|скрипт|server|сервер)/,
+            /(видали|удали|delete|remove|rm)\s+.*(файл|file|папк|folder|directory)/
+        ];
+        if (actionablePatterns.some(r => r.test(txt))) {
+            if (txt.length < 600) { // safety: avoid marking huge specs as immediate actionable
+                logMessage('debug', `[intent_heuristic] actionable matched pattern for text='${txt.slice(0,120)}'`);
+                return 'actionable';
+            }
+        }
+
+        // If Atlas plan already exists referencing concrete steps and user adds nothing new — remain planning
+        if (/крок|step|plan/i.test(atlasText) && txt.split(/\s+/).length < 4) return 'planning';
+
+        // Default fallback
+        return 'planning';
+    } catch (e) {
+        return 'planning';
+    }
 }
 
 // LLM-based intent classification via openai_compat (3010) with fallback to heuristic
@@ -2010,6 +2038,30 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
         const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
         const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
         responses.push(grishaResponse); session.history.push(grishaResponse);
+        // Auto-promotion heuristic: if user initial message clearly contains executable filesystem directive
+        try {
+            const lowerUser = (userMessage||'').toLowerCase();
+            const lowerPlan = (atlasResponse.content||'').toLowerCase();
+            const execSignal = /(створ(и|ити)|создай|create)\s+.*(папк|folder|directory)|\b(запиши|write)\b.*(файл|file)/.test(lowerUser);
+            const notShortage = !/(уточн|потрібн|недостатньо|missing|need more)/.test((grishaResponse.content||'').toLowerCase());
+            if (execSignal && notShortage) {
+                PIPELINE_METRICS.planningPromotions++;
+                session.intent = 'actionable';
+                // Start pipeline immediately so next /chat/continue (or immediate mode) виконає Тетяну
+                startActionablePipeline(session, userMessage, atlasResponse.content, grishaResponse.content);
+                if (shouldImmediateExecute('actionable')) {
+                    const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги Гриші: ${grishaResponse.content}\n\nВиконай кроки та чітко звітуй.`;
+                    const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+                    const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
+                    responses.push(tetyanaExec); session.history.push(tetyanaExec);
+                }
+            } else {
+                // If Grisha explicitly signals shortage twice in planning loop -> escalate clarification metrics
+                if (/(уточн|потрібн|недостатньо|missing|need more)/.test((grishaResponse.content||'').toLowerCase())) {
+                    PIPELINE_METRICS.planningStallClarifications++;
+                }
+            }
+        } catch(_) {}
     }
     return responses;
 }
@@ -2027,6 +2079,12 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     const agentStartTime = Date.now();
     const agent = AGENTS[agentName];
     const messageId = generateMessageId();
+    // If strict TTS mode is enabled, apply TTS gate for this agent's fast summary phase
+    try {
+        if (STRICT_TTS && session) {
+            applyTtsGate(session, `${agentName}_tts`);
+        }
+    } catch (e) {}
     
     // Check circuit breaker state before execution
     if (isCircuitBreakerOpen()) {
@@ -2189,9 +2247,76 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         recordCircuitBreakerSuccess();
     }
     
+    // Attempt to produce a short 3-5 sentence TTS-friendly summary in 'fast' mode.
+    // Use openai_compat routes where available with a short timeout; fall back to truncated content.
+    let ttsSummary = null;
+    let ttsProvider = null;
+    let ttsModel = null;
+    try {
+        const ttsPrompt = `Стисле резюме для швидкого TTS (3-5 речень) українською: ${String(content).slice(0, 3000)}`;
+        const summaryRoutes = (registry.getRoutes(agentName, { intentHint: 'tts_summary' }) || []).filter(r => r.provider === 'openai_compat');
+        for (const route of summaryRoutes) {
+            try {
+                const started = Date.now();
+                const txt = await callOpenAICompatChatWithTimeout(route.baseUrl || FALLBACK_API_BASE, route.model, ttsPrompt, 1200);
+                const dur = Date.now() - started;
+                if (txt) {
+                    ttsSummary = txt.replace(/\s+/g, ' ').trim();
+                    ttsProvider = 'openai_compat';
+                    ttsModel = route.model;
+                    registry.reportSuccess(route, dur);
+                    break;
+                }
+                registry.reportFailure(route, new Error('empty tts summary'));
+            } catch (err) {
+                registry.reportFailure(route, err);
+            }
+        }
+        // If none from prioritized routes, try general openai_compat list
+        if (!ttsSummary) {
+            const fallbackRoutes = (registry.getRoutes(agentName) || []).filter(r => r.provider === 'openai_compat');
+            for (const route of fallbackRoutes) {
+                try {
+                    const started = Date.now();
+                    const txt = await callOpenAICompatChatWithTimeout(route.baseUrl || FALLBACK_API_BASE, route.model, ttsPrompt, 1200);
+                    const dur = Date.now() - started;
+                    if (txt) {
+                        ttsSummary = txt.replace(/\s+/g, ' ').trim();
+                        ttsProvider = 'openai_compat';
+                        ttsModel = route.model;
+                        registry.reportSuccess(route, dur);
+                        break;
+                    }
+                    registry.reportFailure(route, new Error('empty tts summary fallback'));
+                } catch (err) {
+                    registry.reportFailure(route, err);
+                }
+            }
+        }
+    } catch (e) {
+        // swallow - tts summary best-effort only
+    }
+    // If strict TTS gating is active, ensure the gate is cleared only when we have a summary.
+    try {
+        if (STRICT_TTS && session) {
+            session.ttsGate = session.ttsGate || {};
+            const doneKey = `${agentName}_ttsDone`;
+            if (ttsSummary) {
+                session.ttsGate[doneKey] = true;
+                // Clear pendingPhase if it references this agent
+                if (session.ttsGate.pendingPhase === `${agentName}_tts`) delete session.ttsGate.pendingPhase;
+                console.log(`[TTS] fast summary ready for ${agentName}, clearing gate`);
+            } else {
+                // Leave pendingPhase set so pipeline respects TTS requirement
+                session.ttsGate.pendingPhase = session.ttsGate.pendingPhase || `${agentName}_tts`;
+                console.warn(`[TTS] fast summary NOT produced for ${agentName}; pipeline will wait until TTS available`);
+            }
+        }
+    } catch (e) {}
+
     const totalAgentTime = Date.now() - agentStartTime;
     logMessage('info', `[TIMING] agent=${agentName} total_ms=${totalAgentTime} provider=${provider} model=${model} success=${executionSuccessful}`);
-    
+
     return {
         role: 'assistant',
         content: `${agent.signature} ${content.replace(/^\[ТЕТЯНА\]\s*/i, '')}`,
@@ -2202,7 +2327,13 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         color: agent.color,
         provider,
         model,
-        timing: { agentMs: totalAgentTime, provider, model }
+        timing: { agentMs: totalAgentTime, provider, model },
+        tts: {
+            mode: 'fast',
+            summary: ttsSummary || String(content).slice(0, 200).replace(/\s+/g,' ').trim(),
+            provider: ttsProvider,
+            model: ttsModel
+        }
     };
 }
 

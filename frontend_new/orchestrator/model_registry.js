@@ -76,7 +76,6 @@ export class ModelRegistry {
             'openai/gpt-4o',                        // 18 req/min - проверена висока якість
             'xai/grok-3',                           // 6 req/min - найкраще міркування
             'openai/gpt-5-nano',                    // 20 req/min - нова якісна
-            'meta/llama-3.3-70b-instruct',          // 4 req/min - виправлена назва
             'openai/gpt-4.1',                       // 12 req/min
             'mistral-ai/mistral-large-2411',        // 6 req/min
             'microsoft/phi-4',                      // 8 req/min
