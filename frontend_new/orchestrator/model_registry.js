@@ -90,16 +90,18 @@ export class ModelRegistry {
         // Goose has a pseudo-model 'github_copilot' (as used by server.js)
         this.agentPlans = {
             atlas: [
-                { provider: 'openai_compat', models: defaultAtlasModels },
-                { provider: 'goose' }
+                // Re-ordered: goose first (fast, local, deterministic), openai_compat fallback
+                { provider: 'goose' },
+                { provider: 'openai_compat', models: defaultAtlasModels }
             ],
             grisha: [
+                // Re-ordered: goose first (tool + local verification) then remote models
+                { provider: 'goose' },
                 { provider: 'openai_compat', models: [
                     'microsoft/phi-3.5-mini-instruct',
                     'mistral-ai/mistral-nemo',
                     'openai/gpt-4o-mini'
-                ]},
-                { provider: 'goose' }
+                ]}
             ],
             // Tetyana is tool-enabled and designed for Goose only
             tetyana: [

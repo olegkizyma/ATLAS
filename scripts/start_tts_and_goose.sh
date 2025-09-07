@@ -63,16 +63,32 @@ start_tts() {
     return 1
   fi
 
+  # Ensure dedicated virtualenv for TTS (avoid global interpreter usage)
+  TTS_VENV_DIR="$(dirname "$TTS_VENV_PY")/.."  # expect .../.venv/bin/python
+  # Normalize path
+  TTS_VENV_DIR="$(cd "$REPO_ROOT/ukrainian-tts/.venv" 2>/dev/null || true; pwd 2>/dev/null || echo "$REPO_ROOT/ukrainian-tts/.venv")"
+
+  if [ ! -x "$TTS_VENV_PY" ] || [ "${FORCE_TTS_VENV_SETUP:-0}" = "1" ]; then
+    echo "[setup] Creating / updating dedicated TTS virtualenv at $TTS_VENV_DIR"
+    ( cd "$REPO_ROOT/ukrainian-tts" && \
+      python3 -m venv .venv && \
+      . .venv/bin/activate && \
+      python -m pip install --upgrade pip wheel setuptools >/dev/null 2>&1 && \
+      if [ -f requirements.txt ]; then \
+        echo "[setup] Installing TTS requirements..."; \
+        python -m pip install -r requirements.txt >> "$LOG_DIR/tts_setup.log" 2>&1 || echo "[warn] Some TTS dependencies failed (see tts_setup.log)"; \
+      else \
+        echo "[setup] requirements.txt missing, installing minimal deps"; \
+        python -m pip install Flask soundfile numpy >> "$LOG_DIR/tts_setup.log" 2>&1 || true; \
+      fi )
+  fi
+
   if [ -x "$TTS_VENV_PY" ]; then
     PY="$TTS_VENV_PY"
-    echo "[start] Using venv python: $PY"
+    echo "[start] Using dedicated TTS venv python: $PY"
   else
-    PY="$(command -v python3 || true)"
-    if [ -z "$PY" ]; then
-      echo "[error] No python3 found to run TTS"
-      return 1
-    fi
-    echo "[start] venv python not found, falling back to: $PY"
+    echo "[error] Failed to prepare TTS virtualenv (expected $TTS_VENV_PY)"
+    return 1
   fi
 
   # If port already used, skip start
@@ -83,8 +99,25 @@ start_tts() {
     return 0
   fi
 
-  echo "[start] Launching TTS server: $PY $TTS_SCRIPT --host 127.0.0.1 --port $TTS_PORT --device cpu"
-  nohup "$PY" "$TTS_SCRIPT" --host 127.0.0.1 --port "$TTS_PORT" --device cpu > "$LOG_DIR/tts_server.log" 2>&1 &
+  local device_env=${TTS_DEVICE:-auto}
+  local device_arg="--device ${device_env}"
+  # Optional flags from env
+  local strict_flag=""
+  if [ "${TTS_STRICT_GPU:-0}" = "1" ] || [ "${TTS_STRICT_GPU:-}" = "true" ]; then
+    strict_flag="--strict-gpu"
+  fi
+  local nowarmup_flag=""
+  if [ "${TTS_NO_WARMUP:-0}" = "1" ] || [ "${TTS_NO_WARMUP:-}" = "true" ]; then
+    nowarmup_flag="--no-warmup"
+  fi
+
+  echo "[start] Launching TTS server (isolated env): $PY $TTS_SCRIPT --host 127.0.0.1 --port $TTS_PORT $device_arg $strict_flag $nowarmup_flag"
+  ( source "$(dirname "$TTS_VENV_PY")/activate" 2>/dev/null || true; \
+    nohup "$PY" "$TTS_SCRIPT" --host 127.0.0.1 --port "$TTS_PORT" ${device_arg} ${strict_flag} ${nowarmup_flag} > "$LOG_DIR/tts_server.log" 2>&1 & echo $! > "$LOG_DIR/tts.tmp.pid" )
+  if [ -f "$LOG_DIR/tts.tmp.pid" ]; then
+    mv "$LOG_DIR/tts.tmp.pid" "$LOG_DIR/tts.pid" 2>/dev/null || true
+    TTS_PID=$(cat "$LOG_DIR/tts.pid" 2>/dev/null || echo "")
+  fi
   TTS_PID=$!
   echo "$TTS_PID" > "$LOG_DIR/tts.pid"
   echo "[start] TTS PID=$TTS_PID (logs: $LOG_DIR/tts_server.log)"

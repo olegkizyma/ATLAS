@@ -22,6 +22,58 @@ log_error() { echo -e "${RED}[ERROR]${NC} $1"; }
 log_debug() { echo -e "${BLUE}[DEBUG]${NC} $1"; }
 log_restart() { echo -e "${CYAN}[RESTART]${NC} $1"; }
 
+# --- Python 3.11 enforcement helpers ---
+REQUIRED_PY_MAJOR=3
+REQUIRED_PY_MINOR=11
+REQUIRED_PY="${REQUIRED_PY_MAJOR}.${REQUIRED_PY_MINOR}"
+
+find_python311() {
+    if [ -n "${PYTHON311_BIN:-}" ] && [ -x "${PYTHON311_BIN}" ]; then
+        echo "${PYTHON311_BIN}"; return 0
+    fi
+    if command -v python3.11 >/dev/null 2>&1; then
+        command -v python3.11; return 0
+    fi
+    if command -v /opt/homebrew/bin/python3.11 >/dev/null 2>&1; then
+        echo /opt/homebrew/bin/python3.11; return 0
+    fi
+    return 1
+}
+
+ensure_frontend_venv() {
+    local py311
+    if ! py311="$(find_python311)"; then
+        log_error "Python 3.11 не знайдено (потрібен python3.11 у PATH або PYTHON311_BIN)."; return 1
+    fi
+    log_info "Перевірка frontend_new venv з використанням ${py311}";
+    if [ -d "frontend_new/venv" ]; then
+        # Перевіряємо версію інтерпретатора в наявному venv
+        if [ -x "frontend_new/venv/bin/python" ]; then
+            local vver
+            vver="$(frontend_new/venv/bin/python -c 'import sys;print("%d.%d"%sys.version_info[:2])' 2>/dev/null || echo 'unknown')"
+            if [ "${vver}" != "${REQUIRED_PY}" ]; then
+                log_warn "Існуючий venv на Python ${vver} ≠ ${REQUIRED_PY}. Перестворюємо..."
+                rm -rf frontend_new/venv
+            fi
+        else
+            log_warn "Venv існує, але інтерпретатор відсутній. Перестворюємо..."; rm -rf frontend_new/venv
+        fi
+    fi
+    if [ ! -d "frontend_new/venv" ]; then
+        log_info "📦 Створення virtualenv (Python ${REQUIRED_PY})..."
+        (cd frontend_new && "${py311}" -m venv venv && source venv/bin/activate && pip install -r requirements.txt)
+    fi
+    if [ ! -x "frontend_new/venv/bin/python" ]; then
+        log_error "Не вдалося створити venv із Python ${REQUIRED_PY}"; return 1
+    fi
+    local final_ver
+    final_ver="$(frontend_new/venv/bin/python -c 'import sys;print("%d.%d"%sys.version_info[:2])')"
+    if [ "${final_ver}" != "${REQUIRED_PY}" ]; then
+        log_error "Venv створено, але версія ${final_ver} ≠ ${REQUIRED_PY}"; return 1
+    fi
+    log_info "✔ frontend_new venv OK (Python ${final_ver})"
+}
+
 # Repository root and unified logs directory (repo-local)
 REPO_ROOT="$(cd "$(dirname "$0")" && pwd)"
 LOG_DIR="${LOG_DIR:-$REPO_ROOT/logs}"
@@ -35,47 +87,56 @@ check_node_version() {
         log_warn "Node version check skipped via SKIP_NODE_CHECK=1"
         return 0
     fi
+    
+    # Завантажуємо nvm спочатку, якщо доступно
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        # shellcheck disable=SC1090
+        . "$HOME/.nvm/nvm.sh"
+        log_debug "nvm loaded from $HOME/.nvm/nvm.sh"
+    fi
+    
     if ! command -v node >/dev/null 2>&1; then
         log_error "Node.js не знайдено. Встанови nvm та виконай: nvm install 22.17.1"
         return 1
     fi
+    
     local ver full major
     ver="$(node -v 2>/dev/null || echo v0.0.0)"
     full="${ver#v}"
     major="${full%%.*}"
+    
     if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt "$REQUIRED_NODE_MAX" ]; then
         log_warn "Поточна Node версія $ver (major=$major) не у підтримуваному діапазоні ${REQUIRED_NODE_MIN}.x (очікується <23).";
-        # Спроба автоматично активувати nvm та прочитати .nvmrc
-        if command -v nvm >/dev/null 2>&1; then
-            if [ -f "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" ]; then
-                local target
-                target="$(cat "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" | tr -d '\r' | head -n1)"
-                log_info "Спроба перемкнутися на Node $target через nvm..."
+        
+        # Читаємо .nvmrc та активуємо потрібну версію
+        if [ -f "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" ]; then
+            local target
+            target="$(cat "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" | tr -d '\r' | head -n1)"
+            log_info "Спроба перемкнутися на Node $target через nvm..."
+            
+            if command -v nvm >/dev/null 2>&1; then
                 nvm install "$target" >/dev/null 2>&1 || true
                 nvm use "$target" >/dev/null 2>&1 || true
+                # Експортуємо PATH для всього скрипта
+                export PATH="$HOME/.nvm/versions/node/v$target/bin:$PATH"
                 ver="$(node -v 2>/dev/null || echo v0.0.0)"; full="${ver#v}"; major="${full%%.*}";
+                log_info "PATH updated to use Node $target: $(which node)"
+            else
+                log_error "nvm command not available after loading nvm.sh"
+                return 1
             fi
         else
-            # Спроба завантаження nvm якщо директорія існує
-            if [ -s "$HOME/.nvm/nvm.sh" ]; then
-                # shellcheck disable=SC1090
-                . "$HOME/.nvm/nvm.sh"
-                if [ -f "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" ]; then
-                    local target
-                    target="$(cat "$REPO_ROOT/frontend_new/orchestrator/.nvmrc" | tr -d '\r' | head -n1)"
-                    log_info "Спроба перемкнутися на Node $target через nvm (autoload)..."
-                    nvm install "$target" >/dev/null 2>&1 || true
-                    nvm use "$target" >/dev/null 2>&1 || true
-                    ver="$(node -v 2>/dev/null || echo v0.0.0)"; full="${ver#v}"; major="${full%%.*}";
-                fi
-            fi
+            log_error "Файл .nvmrc не знайдено за шляхом $REPO_ROOT/frontend_new/orchestrator/.nvmrc"
+            return 1
         fi
     fi
+    
     if [ "$major" -lt "$REQUIRED_NODE_MIN" ] || [ "$major" -gt 22 ]; then
         log_error "Несумісна Node версія після спроби виправлення: $ver. Використай nvm install 22.17.1 && nvm use 22.17.1"
         return 1
     fi
-    log_info "✔ Node.js версія $ver відповідає вимогам"
+    
+    log_info "✔ Node.js версія $ver відповідає вимогам (шлях: $(which node))"
 }
 
 check_local_ai_api() {
@@ -204,15 +265,8 @@ start_services() {
     # Створюємо директорію логів (repo-local)
     mkdir -p "$LOG_DIR"
     
-    # Перевіряємо наявність Python віртуального середовища
-    if [ ! -d "frontend_new/venv" ]; then
-        log_info "📦 Creating Python virtual environment..."
-        cd frontend_new
-        python3 -m venv venv
-        source venv/bin/activate
-        pip install -r requirements.txt
-        cd ..
-    fi
+    # Створення / валідація Python 3.11 virtualenv
+    ensure_frontend_venv || { log_error "Venv init failed"; return 1; }
     
     # Перевіряємо Node.js залежності
     if [ ! -d "frontend_new/orchestrator/node_modules" ]; then
@@ -226,7 +280,8 @@ start_services() {
     log_info "🐍 Starting Flask frontend (port 5001)..."
     cd frontend_new
     source venv/bin/activate
-    nohup python app/atlas_server.py > "$LOG_DIR/frontend.log" 2>&1 &
+    # Примушуємо використання саме python3.11 усередині venv (якщо shebang пере-лінкований)
+    nohup ./venv/bin/python app/atlas_server.py > "$LOG_DIR/frontend.log" 2>&1 &
     echo $! > "$LOG_DIR/frontend.pid"
     cd ..
     
@@ -236,6 +291,28 @@ start_services() {
     # Запускаємо Node.js orchestrator
     log_info "🟢 Starting Node.js orchestrator (port 5101)..."
     cd frontend_new/orchestrator
+    
+    # Переконуємося, що використовуємо правильну версію Node.js
+    if [ -s "$HOME/.nvm/nvm.sh" ]; then
+        . "$HOME/.nvm/nvm.sh"
+        if [ -f ".nvmrc" ]; then
+            local target_version
+            target_version="$(cat .nvmrc | tr -d '\r' | head -n1)"
+            log_info "Using Node.js version $target_version from .nvmrc"
+            nvm use "$target_version" >/dev/null 2>&1 || true
+        fi
+    fi
+    
+    log_info "Node.js version: $(node --version) at $(which node)"
+    # Rebuild native modules if Node ABI mismatch detected (better-sqlite3 common case)
+    if [ -f node_modules/better-sqlite3/build/Release/better_sqlite3.node ]; then
+        ABI_CUR="$(node -p 'process.versions.modules' 2>/dev/null || echo 'X')"
+        ABI_BUILT="$(strings node_modules/better-sqlite3/build/Release/better_sqlite3.node 2>/dev/null | grep -E 'NODE_MODULE_VERSION [0-9]+' -o | awk '{print $3}' | head -n1 || echo '')"
+        if [ -n "$ABI_BUILT" ] && [ "$ABI_CUR" != "$ABI_BUILT" ]; then
+            log_warn "Native module ABI mismatch (built=$ABI_BUILT current=$ABI_CUR). Running npm rebuild..."
+            npm rebuild better-sqlite3 >/dev/null 2>&1 && log_info "better-sqlite3 rebuilt" || log_warn "better-sqlite3 rebuild failed"
+        fi
+    fi
     nohup node server.js > "$LOG_DIR/orchestrator.log" 2>&1 &
     echo $! > "$LOG_DIR/orchestrator.pid"
     cd ../..
@@ -270,6 +347,13 @@ start_services() {
     
     # Перевірка та опціональний запуск Goose і TTS (тільки якщо відсутні)
     log_info "🔍 Checking optional services..."
+    
+    # Set optimal TTS configuration for Mac Studio M1 Max
+    # Note: MPS has float64 compatibility issues with ukrainian-tts library 
+    # CPU performs well at 2.4x real-time, graceful fallback from MPS attempts
+    export TTS_DEVICE="${TTS_DEVICE:-cpu}"  # Changed from mps to cpu due to float64 issues
+    export TTS_STRICT_GPU="${TTS_STRICT_GPU:-0}"  # Non-strict for graceful fallback
+    log_info "🎯 TTS configured: device=$TTS_DEVICE, strict=$TTS_STRICT_GPU (MPS fallback available)"
     
     # Перевірка Goose
     if curl -s --max-time 3 "http://127.0.0.1:3000/health" > /dev/null 2>&1; then
@@ -479,6 +563,25 @@ main() {
             log_info "TTS running (PID $TTS_PID)"
         else
             log_warn "TTS pid file present ($TTS_PID) but process not alive"
+        fi
+    fi
+
+    # Live log stream (optional, only if interactive TTY and not disabled)
+    if [ "${NO_LOG_STREAM:-0}" != "1" ] && [ -t 1 ]; then
+        echo ""
+        log_restart "📡 Starting live log stream (last 500 lines of each *.log). Ctrl+C to exit. (Set NO_LOG_STREAM=1 to disable)"
+        STREAMER_PY="$REPO_ROOT/scripts/stream_logs.py"
+        PY_INT="$REPO_ROOT/frontend_new/venv/bin/python"
+        if [ -f "$STREAMER_PY" ]; then
+            if [ -x "$PY_INT" ]; then
+                "$PY_INT" "$STREAMER_PY" --dir "$LOG_DIR" --lines 500 || true
+            elif command -v python3 >/dev/null 2>&1; then
+                python3 "$STREAMER_PY" --dir "$LOG_DIR" --lines 500 || true
+            else
+                log_warn "Python interpreter not found for log streaming"
+            fi
+        else
+            log_warn "Log streaming module not found at $STREAMER_PY"
         fi
     fi
 }

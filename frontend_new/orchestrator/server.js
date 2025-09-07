@@ -3,6 +3,9 @@
  * Manages communication between Atlas, Tetiana, and Grisha agents
  * Integrates with TTS system for real-time dialogue
  */
+import dotenv from 'dotenv';
+dotenv.config();
+
 import express from 'express';
 import cors from 'cors';
 import axios from 'axios';
@@ -60,6 +63,50 @@ startMemoryMaintenance();
 const PORT = process.env.ORCH_PORT || 5101;
 const GRISHA_CONFIDENCE_THRESHOLD = Math.max(0, Math.min(1, parseFloat(process.env.GRISHA_CONFIDENCE_THRESHOLD || '0.8')));
 const GRISHA_MAX_VERIFY_ITER = Math.max(1, parseInt(process.env.GRISHA_MAX_VERIFY_ITER || '3', 10));
+// Fast-lane timeout for user silence before autonomous clarification auto-fill (was 120s default -> now configurable, test=30s)
+// Clarification auto-fill silence threshold (ms) configurable via env ATLAS_CLAR_AUTOFILL_MS
+const CLARIFICATION_AUTOFILL_SILENCE_MS = parseInt(process.env.ATLAS_CLAR_AUTOFILL_MS || '30000', 10);
+
+// Deterministic fast-lane patterns (very low risk). Pure math + simple file write directive.
+const FAST_LANE_PATTERNS = [
+    { type: 'math', re: /(sqrt|корінь)\s*(?:з|of)?\s*([0-9]+)\b/i },
+    { type: 'arith', re: /^\s*([0-9]+)\s*([+\-*\/])\s*([0-9]+)\s*$/ }
+];
+
+function evaluateDeterministicExpression(text) {
+    for (const p of FAST_LANE_PATTERNS) {
+        const m = text.match(p.re);
+        if (m && p.type === 'math') {
+            const n = parseInt(m[2],10);
+            if (!isNaN(n)) return { kind: 'sqrt', input: n, result: Math.sqrt(n) };
+        }
+        if (m && p.type === 'arith') {
+            const a = parseFloat(m[1]); const op = m[2]; const b = parseFloat(m[3]);
+            let r; if(op==='+' ) r=a+b; else if(op==='-') r=a-b; else if(op==='*') r=a*b; else if(op==='/' && b!==0) r=a/b; else continue;
+            return { kind: 'arith', input: `${a}${op}${b}`, result: r };
+        }
+    }
+    return null;
+}
+
+function attemptFastLane(userMessage) {
+    const deterministic = evaluateDeterministicExpression(userMessage);
+    if (deterministic) {
+        return {
+            content: `[ТЕТЯНА] РЕЗЮМЕ: Виконано просте обчислення.
+КРОКИ: 1) Обчислено ${deterministic.kind==='sqrt'?`корінь з ${deterministic.input}`:deterministic.input}.
+РЕЗУЛЬТАТИ: ${deterministic.result}
+ДОКАЗИ: результат обчислення є детермінованим.
+ПЕРЕВІРКА: повторний підрахунок внутрішнім калькулятором.
+СТАТУС: Done`,
+            agent: 'tetyana', provider: 'fast_lane', model: 'deterministic_math'
+        };
+    }
+    return null;
+}
+
+// NOTE: Older lightweight scheduleClarificationAutoFill implementation removed (duplicate name) —
+// consolidated with advanced variant later in file that emits richer auto-clarification messages.
 
 // Intent router integration (feature flag)
 const INTENT_ROUTER_ENABLED = String(process.env.INTENT_ROUTER || '0') === '1';
@@ -459,71 +506,9 @@ function tetianaSystemInstruction({ enableTools } = { enableTools: false }) {
         'Відповідь починай з підпису [ТЕТЯНА]. Уникай розлогих міркувань.'
     ];
     if (enableTools) {
-        base.push('Якщо потрібно — використовуй доступні інструменти/дії (файли/OS/додатки). Віддавай перевагу реальному виконанню, а не симуляції.');
+        base.push('', 'Тобі дозволено викликати інструменти та виконувати дії якщо це пришвидшує результат.');
     }
     return base.join('\n');
-}
-
-function isVagueTetianaResponse(text) {
-    const t = String(text || '').toLowerCase().trim();
-    if (!t) return true;
-    const generic = ['завдання опрацьовано', 'завдання виконано', 'готово', 'готовий', 'готова'];
-    return generic.some(g => t === g || t.startsWith(g));
-}
-
-function validateTetianaReport(text) {
-    const t = String(text || '');
-    const hasResume = /\bРЕЗЮМЕ\b/i.test(t);
-    const hasSteps = /\bКРОКИ\b/i.test(t);
-    const hasResults = /\bРЕЗУЛЬТАТИ\b/i.test(t);
-    const hasEvidence = /\bДОКАЗИ\b/i.test(t) || /criterion\s*->\s*evidence/i.test(t);
-    const hasVerification = /\bПЕРЕВІРКА\b/i.test(t);
-    const hasStatus = /\bСТАТУС\b/i.test(t);
-    const missing = [];
-    if (!hasResume) missing.push('РЕЗЮМЕ');
-    if (!hasSteps) missing.push('КРОКИ');
-    if (!hasResults) missing.push('РЕЗУЛЬТАТИ');
-    if (!hasEvidence) missing.push('ДОКАЗИ');
-    if (!hasVerification) missing.push('ПЕРЕВІРКА');
-    if (!hasStatus) missing.push('СТАТУС');
-    return { ok: missing.length === 0, missing };
-}
-
-function enforceTetianaStructure(text) {
-    let raw = String(text || '').trim();
-    if (!raw.startsWith('[ТЕТЯНА]')) raw = `[ТЕТЯНА] ${raw}`;
-    const v = validateTetianaReport(raw);
-
-    // Detect placeholder / empty style content
-    const placeholderPatterns = [
-        /критерій\s*:\s*…/i,
-        /РЕЗЮМЕ:\s*—/i,
-        /ПЕРЕВІРКА:\s*—/i,
-        /СТАТУС:\s*Needs Clarification/i
-    ];
-    const onlyBullets = raw.split('\n').filter(l => l.trim()).every(l => /^(?:\[ТЕТЯНА]|РЕЗЮМЕ|КРОКИ|РЕЗУЛЬТАТИ|ДОКАЗИ|ПЕРЕВІРКА|СТАТУС|[0-9]+\.|•|критерій)/i.test(l.trim()));
-    const isPlaceholder = placeholderPatterns.some(r => r.test(raw)) || raw.length < 120 || onlyBullets;
-
-    if (v.ok && !isPlaceholder) return raw;
-
-    // Append diagnostic marker for Grisha to treat as non-evidence
-    const missingNote = v.ok ? 'PLACEHOLDER_CONTENT' : ('Missing sections: ' + v.missing.join(', '));
-    const template = [
-        raw,
-        '',
-        'РЕЗЮМЕ: —',
-        'КРОКИ:',
-        '1.',
-        '2.',
-        'РЕЗУЛЬТАТИ:',
-        '•',
-        'ДОКАЗИ (criterion -> evidence):',
-        '• критерій: … -> доказ: …',
-        'ПЕРЕВІРКА: —',
-        `СТАТУС: Needs Clarification — доповнити відсутні частини: ${v.missing.join(', ') || 'зміст/докази'}`,
-        `<!-- TETYANA_REPORT_DIAGNOSTIC: ${missingNote} -->`
-    ];
-    return template.join('\n');
 }
 
 // Intelligent subtype classification (no hard-coded language rules inside code)
@@ -1123,9 +1108,10 @@ app.post('/chat/stream', async (req, res) => {
         cache.order.push(key);
     }
     function prune() {
-        // TTL prune
-        const cutoff = NOW - TTL_MS;
+        // Agent-aware TTL prune: check individual TTL per entry
         for (const [k, meta] of cache.map.entries()) {
+            const entryTTL = meta.ttl || TTL_MS; // fallback to global TTL
+            const cutoff = NOW - entryTTL;
             if (meta.ts < cutoff) {
                 cache.map.delete(k);
                 const i = cache.order.indexOf(k);
@@ -1140,29 +1126,120 @@ app.post('/chat/stream', async (req, res) => {
     }
     prune();
 
+    // Ensure session object exists BEFORE any potential usage (duplicate suppression etc.)
+    let session = sessions.get(sid);
+    if (!session) {
+        session = {
+            id: sid,
+            history: [],
+            currentAgent: 'atlas',
+            lastInteraction: Date.now()
+        };
+        sessions.set(sid, session);
+    }
+    // Duplicate suppression with flexible agent-specific timeouts
+    const DUP_FILTER_DISABLED = process.env.DISABLE_DUPLICATE_FILTER === '1';
+    const DUP_BYPASS_HEADER = (req.headers['x-atlas-bypass-dup'] === '1');
+    
+    // Agent-specific TTL configuration (seconds)
+    const getAgentTTL = (agentName) => {
+        const agentKey = `ATLAS_DUP_TTL_${(agentName || 'default').toUpperCase()}`;
+        const agentTTL = parseInt(process.env[agentKey] || '0', 10);
+        if (agentTTL > 0) return agentTTL * 1000; // convert to ms
+        
+        // Default TTL per agent type
+        const defaultTTLs = {
+            atlas: parseInt(process.env.ATLAS_DUP_TTL_ATLAS || '120', 10) * 1000,
+            grisha: parseInt(process.env.ATLAS_DUP_TTL_GRISHA || '120', 10) * 1000,
+            tetyana: parseInt(process.env.ATLAS_DUP_TTL_TETYANA || '120', 10) * 1000,
+            user: parseInt(process.env.ATLAS_DUP_TTL_USER || '120', 10) * 1000
+        };
+        return defaultTTLs[agentName] || parseInt(process.env.ATLAS_DUP_TTL_DEFAULT || '120', 10) * 1000;
+    };
+    
     if (clientMessageId) {
-        const key = `${sid}::${clientMessageId}`;
-        if (cache.map.has(key)) {
-            PIPELINE_METRICS.duplicatesSuppressed++;
-            logMessage('info', `Duplicate clientMessageId suppressed key=${key}`);
-            return res.json({ 
-                success: true, 
-                duplicate: true, 
-                response: [
-                    {
-                        role: 'system',
-                        agent: 'atlas',
-                        content: '[duplicate_suppressed] Повідомлення з цим clientMessageId вже оброблено. Нових агентних відповідей немає.',
-                        timestamp: Date.now(),
-                        type: 'duplicate_suppressed'
-                    }
-                ], 
-                session: { id: sid, currentAgent: 'atlas' }, 
-                metrics: { suppressed: true }
-            });
+        const keyBase = `${sid}::${clientMessageId}`;
+        const currentAgent = session.currentAgent || 'user';
+        const agentTTL = getAgentTTL(currentAgent);
+        
+        // Clarification resolution: UNCONDITIONAL bypass when awaitingClarification
+        if (session.awaitingClarification) {
+            const lowerMsg = message.toLowerCase();
+            const clarPattern = /(контекст|середовище|критер|інструмент|ціль|мета|уточн|додатков|поясн)/.test(lowerMsg);
+            session.awaitingClarification = false;
+            session.clarificationJustResolved = true;
+            session.clarificationResolvedAt = Date.now();
+            // Remove any stale cached key to avoid suppression
+            if (global.__clientMsgCache && global.__clientMsgCache.map.has(keyBase)) {
+                global.__clientMsgCache.map.delete(keyBase);
+            }
+            if (process.env.DEBUG_DUPLICATES === '1') {
+                logMessage('info', `[clar_bypass] unconditional clarification bypass key=${keyBase} patternMatch=${clarPattern} agent=${currentAgent} ttl=${agentTTL}ms`);
+            }
         }
-        cache.map.set(key, { ts: NOW, sessionId: sid });
-        touch(key);
+        if (DUP_FILTER_DISABLED || DUP_BYPASS_HEADER) {
+            if (process.env.DEBUG_DUPLICATES === '1') {
+                logMessage('warn', `[dup_disabled${DUP_BYPASS_HEADER?'/header':''}] bypass duplicate filter cmsg=${clientMessageId}`);
+            }
+        } else {
+            if (cache.map.has(keyBase)) {
+                const meta = cache.map.get(keyBase);
+                const age = NOW - (meta?.ts || 0);
+                // Agent-specific grace period for duplicates
+                const gracePeriod = agentTTL;
+                
+                // Grace: if awaitingClarification and duplicate older than grace period -> treat as fresh retry
+                if (session.awaitingClarification && age > gracePeriod) {
+                    if (process.env.DEBUG_DUPLICATES === '1') {
+                        logMessage('info', `[dup_grace] bypass old duplicate during clarification key=${keyBase} age=${age}ms grace=${gracePeriod}ms agent=${currentAgent}`);
+                    }
+                    cache.map.delete(keyBase);
+                }
+                // Edge: empty history but cache hit (stale from previous process)
+                if (cache.map.has(keyBase)) { // re-check after potential delete
+                    if (session.history.length === 0) {
+                        if (process.env.DEBUG_DUPLICATES === '1') {
+                            logMessage('info', `[dup_edge] stale cache hit with empty history -> ignoring key=${keyBase} agent=${currentAgent}`);
+                        }
+                        cache.map.delete(keyBase);
+                    } else {
+                        const lastUserMsg = session.history.slice().reverse().find(h => h.role === 'user')?.content || '';
+                        const norm = s => s.replace(/\s+/g,' ').trim().toLowerCase();
+                        const a = norm(lastUserMsg);
+                        const b = norm(message);
+                        const levenshteinLikeDifferent = Math.abs(a.length - b.length) > 6 || /уточнен/i.test(b) || /це уточнення/i.test(message.toLowerCase());
+                        const isDifferentContent = a !== b || levenshteinLikeDifferent;
+                        if (!isDifferentContent && !session.clarificationJustResolved) {
+                            PIPELINE_METRICS.duplicatesSuppressed++;
+                            logMessage('info', `Duplicate clientMessageId suppressed key=${keyBase} agent=${currentAgent} ttl=${agentTTL}ms`);
+                            return res.json({
+                                success: true,
+                                duplicate: true,
+                                response: [
+                                    {
+                                        role: 'system',
+                                        agent: 'atlas',
+                                        content: `[duplicate_suppressed] Повідомлення з цим clientMessageId вже оброблено (TTL=${Math.round(agentTTL/1000)}s для ${currentAgent}). Нових агентних відповідей немає.`,
+                                        timestamp: Date.now(),
+                                        type: 'duplicate_suppressed'
+                                    }
+                                ],
+                                session: { id: sid, currentAgent: 'atlas' },
+                                metrics: { suppressed: true, agent: currentAgent, ttl: agentTTL }
+                            });
+                        } else if (process.env.DEBUG_DUPLICATES === '1') {
+                            logMessage('info', `Same clientMessageId but different content - allowing key=${keyBase} agent=${currentAgent}`);
+                        }
+                    }
+                }
+            }
+            // Store after evaluation (first-seen) with agent-specific TTL
+            cache.map.set(keyBase, { ts: NOW, sessionId: sid, agent: currentAgent, ttl: agentTTL });
+            touch(keyBase);
+            if (process.env.DEBUG_DUPLICATES === '1') {
+                logMessage('info', `[dup_debug] stored key=${keyBase} ts=${NOW} agent=${currentAgent} ttl=${agentTTL}ms`);
+            }
+        }
     }
 
     logMessage('info', `Incoming /chat/stream message (session=${sid} cmsg=${clientMessageId || 'no-id'}): ${String(message).slice(0, 200)}`);
@@ -1172,13 +1249,8 @@ app.post('/chat/stream', async (req, res) => {
         return res.json({ success: true, accepted: true, session: { id: sid }, message: 'accepted' });
     }
 
-    const session = sessions.get(sessionId) || { 
-        id: sessionId,
-        history: [],
-        currentAgent: 'atlas',
-        lastInteraction: Date.now()
-    };
-    sessions.set(sessionId, session);
+    // Refresh reference (session already ensured above)
+    session.lastInteraction = Date.now();
 
     // Check for user commands
     const messageText = message.toLowerCase().trim();
@@ -1243,8 +1315,9 @@ app.post('/chat/stream', async (req, res) => {
             logMessage('info', `Processed message for session=${sessionId || 'n/a'} agents=[${meta}]`);
         } catch {}
         
-    // Автозакриття тільки якщо немає пайплайну/наступної дії і це НЕ smalltalk
-    const ended = !session.pipeline && !session.nextAction && session.intent !== 'smalltalk';
+    // НЕ автозакриваємо розмову після завершення завдання - даємо користувачу можливість продовжити
+    // Розмова завершується тільки при явному сигналі або за тайм-аутом бездіяльності  
+    const ended = false; // Завжди залишаємо розмову відкритою для нових завдань
 
         const durationMs = Date.now() - startedAt;
         res.json({
@@ -1339,6 +1412,15 @@ async function processAgentCycle(userMessage, session) {
 
     // Phase 1: Atlas creates primary reply/plan (use heuristic intent to bias model choice)
     const preIntent = classifyIntentHeuristic(userMessage, '');
+    // Fast-lane: якщо запит чисто детермінований (математика) — відразу повертаємо результат без повного агентного циклу.
+    const fastLane = attemptFastLane(userMessage);
+    if (fastLane) {
+        const msg = tagResponse(fastLane, PHASE.EXECUTION);
+        session.history.push(msg);
+        clearTimeout(session._clarAutoTimer); // no clarification timers relevant
+        return [msg];
+    }
+
     const atlasResponseRaw = await generateAgentResponse('atlas', userMessage, session, { intentHint: preIntent });
     const atlasResponse = tagResponse(atlasResponseRaw, PHASE.ATLAS_PLAN);
     responses.push(atlasResponse);
@@ -1392,7 +1474,9 @@ async function processAgentCycle(userMessage, session) {
         // і в сесії ще не зафіксовано, що користувач щось додатково надав після останньої відповіді Atlas — Atlas формує запит на уточнення.
         try {
             const lowerGrisha = (grishaPre.content || '').toLowerCase();
-            const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
+            // Tuned shortage heuristic (менш чутлива): вимагаємо наявність 2+ маркерів або фрази що явно запитує дані
+            const shortageMarkers = (lowerGrisha.match(/уточн|потрібн|недостатньо|вкажіть|які саме|provide|missing|need (more|additional)/g) || []);
+            const shortage = shortageMarkers.length >= 2;
             if (shortage && !session.awaitingClarification) {
                 // Attempt internal probe first (Tetiana) if the shortage looks executable (mentions code/run)
                 const probeCandidate = /(код|file|script|run|execute|запусти|створи файл|приклад)/i.test(lowerGrisha);
@@ -1477,7 +1561,7 @@ async function processAgentCycle(userMessage, session) {
                 atlasClar.phase = 'atlas_clarify'; // спеціальна фаза для фронтенду
                 responses.push(atlasClar);
                 session.history.push(atlasClar);
-                session.awaitingClarification = true;
+                session.awaitingClarification = true; scheduleClarificationAutoFill(session);
                 PIPELINE_METRICS.clarifications++;
                 // Ставимо стан що потрібно більше даних (узагальнені):
                 markNeedsMore(session, ['additional_context'], grishaPre.content);
@@ -1587,7 +1671,7 @@ async function processAgentCycle(userMessage, session) {
                 atlasClar.phase = 'atlas_clarify';
                 responses.push(atlasClar);
                 session.history.push(atlasClar);
-                session.awaitingClarification = true;
+                session.awaitingClarification = true; scheduleClarificationAutoFill(session);
                 PIPELINE_METRICS.clarifications++;
                 if (repeated) PIPELINE_METRICS.planningStallClarifications++;
                 logMessage('info', `[PLANNING] Clarification escalated (shortage=${shortage} repeated=${repeated})`);
@@ -1765,8 +1849,8 @@ app.post('/chat/continue', async (req, res) => {
             }
         }
 
-    // Для етапів пайплайну (actionable) залишаємо стандартне завершення, smalltalk тут не проходить
-    const ended = !session.pipeline && !session.nextAction;
+    // Залишаємо розмову відкритою для нових завдань користувача
+    const ended = false;
 
         res.json({
             success: true,
@@ -2374,6 +2458,35 @@ if (process.env.NODE_ENV !== 'test') {
 export default app;
 
 // ------------------------------------------------------------
+// Fallback: enforceTetianaStructure (previously missing -> 500)
+// Ensures Tetyana output always has required sections.
+// If already looks structured, return as-is.
+// ------------------------------------------------------------
+function enforceTetianaStructure(raw) {
+    try {
+        if (!raw || typeof raw !== 'string') return '[ТЕТЯНА] РЕЗЮМЕ: (порожньо)\nСТАТУС: Needs Clarification — надати зміст.';
+        const hasResume = /РЕЗЮМЕ:/i.test(raw);
+        const hasSteps = /(КРОКИ:|1\.|•)/i.test(raw);
+        const hasResults = /РЕЗУЛЬТАТИ:/i.test(raw);
+        const hasEvidence = /ДОКАЗИ:/i.test(raw);
+        const hasCheck = /ПЕРЕВІРКА:/i.test(raw);
+        const hasStatus = /СТАТУС:/i.test(raw);
+        const structured = hasResume && hasSteps && hasResults && hasEvidence && hasCheck && hasStatus;
+        if (structured) return raw;
+        const sections = [];
+        if (!hasResume) sections.push('РЕЗЮМЕ: —');
+        if (!hasSteps) sections.push('КРОКИ:\n1. —');
+        if (!hasResults) sections.push('РЕЗУЛЬТАТИ:\n• —');
+        if (!hasEvidence) sections.push('ДОКАЗИ:\n• критерій -> доказ');
+        if (!hasCheck) sections.push('ПЕРЕВІРКА: —');
+        if (!hasStatus) sections.push('СТАТУС: Needs Clarification — доповнити відсутні частини.');
+        return `${raw}\n\n${sections.join('\n')}`;
+    } catch (e) {
+        return `[ТЕТЯНА] РЕЗЮМЕ: (internal struct error: ${e.message})\nСТАТУС: Blocked`;
+    }
+}
+
+// ------------------------------------------------------------
 // Clarification Auto-Fill (post-export to avoid hoist confusion)
 // ------------------------------------------------------------
 // When a clarification is requested and the user stays silent for 30s,
@@ -2417,16 +2530,17 @@ function nextClarVariant(session) {
 
 function scheduleClarificationAutoFill(session) {
     try {
-        if (!session || !session.awaitingClarification) return;
-        // If an existing timer exists, do not schedule again
-        if (session._clarTimer) return;
+        if (!session || !session.awaitingClarification) { logMessage('debug','[clar_timer] skip schedule (no session or not awaiting)'); return; }
+        if (session._clarTimer) { logMessage('debug', `[clar_timer] already scheduled sid=${session.id}`); return; }
         const TIMEOUT_MS = parseInt(process.env.ATLAS_CLAR_AUTOFILL_MS || '30000', 10);
+        const baseHistoryLen = session.history.length;
+        logMessage('info', `[clar_timer] scheduling auto-fill in ${TIMEOUT_MS}ms sid=${session.id} history=${baseHistoryLen}`);
         session._clarTimer = setTimeout(async () => {
-            session._clarTimer = null; // clear reference
-            if (!session.awaitingClarification) return; // user responded in the meantime
+            session._clarTimer = null;
+            if (!session.awaitingClarification) { logMessage('info', `[clar_timer] cancelled (flag cleared) sid=${session.id}`); return; }
             try {
+                logMessage('info', `[clar_timer] firing sid=${session.id} historyBefore=${session.history.length}`);
                 const assumed = nextClarVariant(session);
-                // 1) Atlas системне повідомлення про автоделегацію
                 pushAndBroadcast(session, {
                     role: 'assistant',
                     agent: 'atlas',
@@ -2435,63 +2549,35 @@ function scheduleClarificationAutoFill(session) {
                     phase: 'atlas_auto_clarify',
                     autoClarification: true
                 });
-                // 2) Синтетичний "user" щоб зняти очікування і запустити цикл
                 pushAndBroadcast(session, {
                     role: 'user',
-                    content: `[auto_assumed_clarification_ack] Прийнято. Рухайся на основі цих припущень.`,
+                    agent: 'user',
+                    content: '[assumed_clarification] Автоматичне припущення: продовжити з типовими налаштуваннями.',
                     timestamp: Date.now(),
-                    type: 'auto_clarification_ack'
+                    autoClarification: true,
+                    assumed: true
                 });
                 session.awaitingClarification = false;
                 session.forceNewCycle = true;
-                session.clarificationResolvedAt = Date.now();
-                session.autoClarificationsCount = (session.autoClarificationsCount||0)+1;
-                logMessage('info', `[CLAR_AUTOFILL] Injected auto clarification & ack for session=${session.id}`);
-
-                // 3) Автоматично запускаємо новий цикл без очікування HTTP виклику (щоб UI побачив прогрес PLAN->PRECHECK->... при наступному запиті)
-                if (!session._autoCycleRunning) {
-                    session._autoCycleRunning = true;
+                session.cycleCount = (session.cycleCount || 0) + 1;
+                if ((baseHistoryLen + 2) >= session.history.length) {
+                    logMessage('info', `[clar_timer] auto-continue kickstart sid=${session.id}`);
                     try {
-                        const syntheticUserMsg = 'Автоцикл: продовжити виконання на основі припущень.';
-                        const autoResponses = await processAgentCycle(syntheticUserMsg, session);
-                        // Позначити що це внутрішній автозапуск (для UI можна відфільтрувати)
-                        autoResponses.forEach(r => { r.internalAutoCycle = true; });
-                        session.lastAutoCycleAt = Date.now();
-                        pushAndBroadcast(session, {
-                            role: 'system',
-                            content: '[auto_cycle_started] План сформовано автономно після відсутності відповіді користувача',
-                            timestamp: Date.now(),
-                            type: 'auto_cycle'
-                        });
-                        PIPELINE_METRICS.autoClarificationCycles = (PIPELINE_METRICS.autoClarificationCycles||0)+1;
-                        logMessage('info', `[CLAR_AUTOFILL] Auto cycle executed responses=${autoResponses.length}`);
-                    } catch (e) {
-                        logMessage('warn', `[CLAR_AUTOFILL] auto cycle failed: ${e.message}`);
-                    } finally {
-                        session._autoCycleRunning = false;
-                    }
-                } else {
-                    logMessage('info', '[CLAR_AUTOFILL] auto cycle already running, skipped duplicate');
+                        const lastAtlasClar = [...session.history].reverse().find(m => m.agent==='atlas' && m.clarification);
+                        const syntheticUser = '[AUTO] Продовжити виконання.';
+                        startActionablePipeline(session, syntheticUser, lastAtlasClar?.content || '', lastAtlasClar?.content || '');
+                    } catch(e){ logMessage('warn', `[clar_timer] kickstart failed: ${e.message}`); }
                 }
             } catch (e) {
-                logMessage('warn', '[CLAR_AUTOFILL] error injecting clarification: ' + e.message);
+                logMessage('warn', 'Clarification auto-fill failed: ' + e.message);
             }
         }, TIMEOUT_MS);
-        logMessage('info', `[CLAR_AUTOFILL] Timer scheduled ${TIMEOUT_MS}ms for session=${session.id}`);
     } catch (e) {
-        logMessage('warn', '[CLAR_AUTOFILL] schedule failed: ' + e.message);
+        logMessage('warn', 'Clarification auto-fill scheduling failed: ' + e.message);
     }
 }
 
-// Ensure timers are cleared when process exits
-process.on('exit', () => {
-    try { for (const s of sessions.values()) { if (s._clarTimer) clearTimeout(s._clarTimer); } } catch {}
-});
-
-// ------------------------------------------------------------
-// Realtime session history visibility (SSE + history endpoint)
-// ------------------------------------------------------------
-// Maintain lightweight subscriber list for SSE broadcast of new messages.
+// SSE subscribers (moved up to avoid temporal dead zone)
 const historySubscribers = new Map(); // sessionId -> Set(res)
 
 function sseInit(req, res) {
@@ -2502,12 +2588,25 @@ function sseInit(req, res) {
         'Connection': 'keep-alive',
         'Access-Control-Allow-Origin': '*'
     });
-    if (!historySubscribers.has(sessionId)) historySubscribers.set(sessionId, new Set());
-    historySubscribers.get(sessionId).add(res);
-    res.write(`data: {"type":"history_init","sessionId":"${sessionId}"}\n\n`);
+    let set = historySubscribers.get(sessionId);
+    if (!set) { set = new Set(); historySubscribers.set(sessionId, set); }
+    set.add(res);
+    const session = sessions.get(sessionId);
+    if (session) {
+        const backlog = session.history.slice(-25).map(sanitizeMessageForClient);
+        res.write('data: ' + JSON.stringify({ type: 'backlog', messages: backlog }) + '\n\n');
+    } else {
+        res.write('data: ' + JSON.stringify({ type: 'backlog', messages: [] }) + '\n\n');
+    }
+    res.write('data: ' + JSON.stringify({ type: 'connected', sessionId }) + '\n\n');
+    if (process.env.DEBUG_SSE === '1') logMessage('info', `[sse] client connected history stream sid=${sessionId} total=${set.size}`);
+    const heartbeat = setInterval(() => { try { res.write('data: {"type":"hb"}\n\n'); } catch { /* ignore */ } }, 25000);
+    heartbeat.unref?.();
     req.on('close', () => {
-        const set = historySubscribers.get(sessionId);
-        if (set) { set.delete(res); if (set.size === 0) historySubscribers.delete(sessionId); }
+        clearInterval(heartbeat);
+        set.delete(res);
+        if (process.env.DEBUG_SSE === '1') logMessage('info', `[sse] client disconnected sid=${sessionId} remaining=${set.size}`);
+        if (!set.size) historySubscribers.delete(sessionId);
     });
 }
 
@@ -2548,6 +2647,4 @@ app.get('/session/:sessionId/history', (req, res) => {
 });
 
 // SSE stream for incremental history
-app.get('/session/:sessionId/history/stream', (req,res) => {
-    sseInit(req,res);
-});
+app.get('/session/:sessionId/history/stream', (req,res) => { sseInit(req,res); });

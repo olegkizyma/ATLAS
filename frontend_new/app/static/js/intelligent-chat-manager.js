@@ -122,12 +122,12 @@ class AtlasIntelligentChatManager {
     }
 
     generateClientMessageId() {
-        const id = `cmsg_${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+        const id = `cmsg_${Date.now()}_${Math.random().toString(36).slice(2,6)}_${this._incrementalId || 0}`;
+        this._incrementalId = (this._incrementalId || 0) + 1;
+        this.log && this.log(`[CHAT] Generated clientMessageId=${id}`);
         this._lastClientMessageId = id;
         return id;
-    }
-
-    isDuplicateUserMessage(msg) {
+    }    isDuplicateUserMessage(msg) {
         if (!msg) return false;
         if (!this._recentUserMessages) this._recentUserMessages = [];
         const norm = msg.trim().toLowerCase();
@@ -485,6 +485,14 @@ class AtlasIntelligentChatManager {
             this.log('[CHAT] Message blocked: streaming or waiting for TTS');
             return;
         }
+
+        // Anti-spam debounce: prevent rapid consecutive sends
+        const now = Date.now();
+        if (this._lastSendTime && (now - this._lastSendTime) < 500) {
+            this.log('[CHAT] Message blocked: too rapid (debounce)');
+            return;
+        }
+        this._lastSendTime = now;
 
         // Відкидаємо точний дублікат останніх повідомлень користувача
         if (this.isDuplicateUserMessage && this.isDuplicateUserMessage(message)) {

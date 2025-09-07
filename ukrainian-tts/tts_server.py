@@ -19,6 +19,11 @@ import soundfile as sf
 import numpy as np
 import librosa
 
+try:  # Torch optional import guard (fail gracefully if missing)
+    import torch  # type: ignore
+except Exception:  # pragma: no cover
+    torch = None  # type: ignore
+
 # Налаштування логування
 logging.basicConfig(
     level=logging.INFO,
@@ -26,11 +31,62 @@ logging.basicConfig(
 )
 logger = logging.getLogger('ukrainian-tts-server')
 
+def gpu_capabilities():
+    """Return detected GPU / accelerator capabilities."""
+    caps = {
+        'torch_imported': torch is not None,
+        'cuda_available': False,
+        'mps_available': False,
+        'cuda_device_count': 0,
+    }
+    if torch is None:
+        return caps
+    try:
+        caps['cuda_available'] = bool(torch.cuda.is_available())
+        if caps['cuda_available']:
+            caps['cuda_device_count'] = torch.cuda.device_count()
+    except Exception:
+        pass
+    try:
+        caps['mps_available'] = bool(getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available())
+    except Exception:
+        pass
+    return caps
+
+def select_device(requested: str, strict_gpu: bool = False) -> str:
+    """Resolve device selection (CUDA > MPS > CPU) with optional strict mode."""
+    req = requested.lower()
+    if req not in {"auto", "gpu"}:
+        if req == "cuda" and (torch is None or not getattr(torch, 'cuda', None) or not torch.cuda.is_available()):
+            if strict_gpu:
+                raise RuntimeError("Requested CUDA but not available in strict GPU mode")
+            return "cpu"
+        if req == "mps":
+            if torch is None:
+                if strict_gpu:
+                    raise RuntimeError("Torch not available for MPS in strict GPU mode")
+                return "cpu"
+            if not (getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available()):
+                if strict_gpu:
+                    raise RuntimeError("MPS backend not available in strict GPU mode")
+                return "cpu"
+        return req
+    caps = gpu_capabilities()
+    if caps['cuda_available']:
+        return 'cuda'
+    if caps['mps_available']:
+        return 'mps'
+    if strict_gpu:
+        raise RuntimeError("No GPU (CUDA/MPS) available in strict GPU mode")
+    return 'cpu'
+
+
 class UkrainianTTSServer:
-    def __init__(self, host='127.0.0.1', port=3001, device='cpu'):
+    def __init__(self, host='127.0.0.1', port=3001, device='cpu', warmup_text: str | None = None, strict_gpu: bool = False):
         self.host = host
         self.port = port
         self.device = device
+        self.strict_gpu = strict_gpu
         
         # Створюємо Flask app
         self.app = Flask(__name__)
@@ -49,40 +105,76 @@ class UkrainianTTSServer:
         """Ініціалізуємо TTS систему"""
         try:
             logger.info(f"Initializing Ukrainian TTS on device: {self.device}")
+            init_device = self.device
             
-            # Спробуємо з заданим девайсом, fallback до CPU якщо помилка
+            # Set default tensor types for MPS compatibility
+            if init_device == "mps":
+                try:
+                    import torch
+                    # Force float32 for MPS compatibility
+                    torch.set_default_dtype(torch.float32)
+                    logger.info("Set default dtype to float32 for MPS compatibility")
+                except Exception as dtype_error:
+                    logger.warning(f"Could not set default dtype: {dtype_error}")
+            
+            # Attempt initialization; handle MPS float64 issues gracefully.
             try:
-                self.tts = TTS(device=self.device)
+                self.tts = TTS(device=init_device)
             except Exception as e:
-                if self.device == "mps" and "float64" in str(e).lower():
-                    logger.warning("MPS doesn't support float64, falling back to CPU")
-                    self.tts = TTS(device="cpu")
-                    self.device = "cpu"
+                if init_device == "mps" and ("float64" in str(e).lower() or "dtype" in str(e).lower() or "mps" in str(e).lower()):
+                    logger.warning(f"MPS precision issue detected: {e}")
+                    try:
+                        # Try to force float32 conversion and retry
+                        import torch
+                        torch.set_default_dtype(torch.float32)
+                        logger.info("Forcing float32 for MPS and retrying...")
+                        self.tts = TTS(device=init_device)
+                        logger.info("✅ MPS initialization successful with float32")
+                    except Exception as e2:
+                        if self.strict_gpu:
+                            raise RuntimeError(f"MPS init (precision) failed under strict GPU mode: {e2}")
+                        logger.warning("MPS precision issue persists. Falling back to CPU.")
+                        self.tts = TTS(device="cpu")
+                        self.device = "cpu"
+                elif init_device == "cuda":
+                    # Try MPS then maybe CPU (unless strict)
+                    logger.warning(f"CUDA init failed ({e}); trying MPS")
+                    if torch is not None and getattr(torch.backends, 'mps', None) and torch.backends.mps.is_available():
+                        try:
+                            self.tts = TTS(device='mps')
+                            self.device = 'mps'
+                        except Exception as e2:
+                            if self.strict_gpu:
+                                raise RuntimeError(f"MPS fallback failed under strict GPU mode: {e2}")
+                            logger.warning("MPS fallback also failed; using CPU")
+                            self.tts = TTS(device='cpu')
+                            self.device = 'cpu'
+                    else:
+                        if self.strict_gpu:
+                            raise RuntimeError("No alternative GPU backend (MPS) present in strict GPU mode")
+                        self.tts = TTS(device='cpu')
+                        self.device = 'cpu'
                 else:
                     raise
-            
+
             logger.info("Ukrainian TTS initialized successfully")
-            
         except Exception as e:
             logger.error(f"Failed to initialize Ukrainian TTS: {e}")
             self.tts = None
     
     def _register_routes(self):
         """Реєструємо API маршрути"""
-        
         @self.app.route('/health', methods=['GET'])
         def health():
-            """Health check endpoint"""
             return jsonify({
                 'status': 'ok' if self.tts else 'error',
                 'tts_ready': self.tts is not None,
                 'device': self.device,
                 'timestamp': time.time()
             })
-        
+
         @self.app.route('/voices', methods=['GET'])
         def get_voices():
-            """Список доступних голосів"""
             try:
                 voices = [v.value for v in Voices]
                 return jsonify({
@@ -93,7 +185,28 @@ class UkrainianTTSServer:
             except Exception as e:
                 logger.error(f"Error getting voices: {e}")
                 return jsonify({'error': str(e)}), 500
-        
+
+        @self.app.route('/info', methods=['GET'])
+        def info():
+            caps = gpu_capabilities()
+            caps['selected'] = self.device
+            return jsonify({
+                'status': 'ok' if self.tts else 'error',
+                'device': self.device,
+                'strict_gpu': self.strict_gpu,
+                'gpu': caps,
+                'torch_version': getattr(torch, '__version__', None) if torch else None,
+                'voices': [v.value for v in Voices],
+                'pid': os.getpid(),
+                'cwd': str(Path.cwd()),
+                'python': sys.version.split()[0],
+                'env_flags': {
+                    'TTS_STRICT_GPU': os.getenv('TTS_STRICT_GPU'),
+                    'TTS_DEVICE': os.getenv('TTS_DEVICE'),
+                },
+                'timestamp': time.time()
+            })
+
         @self.app.route('/tts', methods=['POST'])
         def synthesize_text():
             """Основний ендпойнт для синтезу мови"""
@@ -177,13 +290,12 @@ class UkrainianTTSServer:
         
         @self.app.route('/speak', methods=['POST'])
         def speak_text():
-            """Альтернативний ендпойнт (сумісність)"""
             return synthesize_text()
-        
+
         @self.app.errorhandler(404)
         def not_found(error):
             return jsonify({'error': 'Endpoint not found'}), 404
-        
+
         @self.app.errorhandler(500)
         def internal_error(error):
             logger.error(f"Internal server error: {error}")
@@ -215,17 +327,38 @@ def main():
     parser = argparse.ArgumentParser(description="Ukrainian TTS HTTP Server")
     parser.add_argument("--host", default="127.0.0.1", help="Host to bind to")
     parser.add_argument("--port", type=int, default=3001, help="Port to bind to")
-    parser.add_argument("--device", default="cpu", choices=["cpu", "mps", "gpu"], help="Device to use")
+    parser.add_argument("--device", default="auto", choices=["auto", "cpu", "mps", "gpu", "cuda"], help="Device to use (auto detects cuda > mps > cpu)")
+    parser.add_argument("--strict-gpu", action="store_true", help="Fail to start if neither CUDA nor MPS available")
     parser.add_argument("--debug", action="store_true", help="Enable debug mode")
+    parser.add_argument("--no-warmup", action="store_true", help="Skip initial warmup synthesis")
     
     args = parser.parse_args()
     
     # Створюємо і запускаємо сервер
+    try:
+        resolved_device = select_device(args.device, strict_gpu=args.strict_gpu)
+    except Exception as e:
+        logger.error(f"Device selection failed: {e}")
+        sys.exit(2)
+    logger.info(f"Resolved device selection: requested={args.device} strict={args.strict_gpu} => using={resolved_device}")
     server = UkrainianTTSServer(
         host=args.host,
         port=args.port,
-        device=args.device
+        device=resolved_device,
+        strict_gpu=args.strict_gpu
     )
+
+    # Optional warmup to reduce first-request latency
+    if server.tts and not args.no_warmup:
+        try:
+            _t = "Привіт, система Ukrainian TTS готова до роботи."[:80]
+            start_w = time.time()
+            buf = io.BytesIO()
+            server.tts.tts(_t, 'dmytro', Stress.Dictionary.value, buf)
+            dt = time.time() - start_w
+            logger.info(f"Warmup synthesis completed in {dt:.2f}s")
+        except Exception as e:  # pragma: no cover
+            logger.warning(f"Warmup failed: {e}")
     server.run(debug=args.debug)
 
 if __name__ == '__main__':
