@@ -657,32 +657,6 @@ def chat():
 
 @app.route('/api/chat/status/<session_id>')
 def chat_status(session_id):
-    """Get processing status for ACK mode requests"""
-    try:
-        if not requests:
-            return jsonify({'error': 'Requests module unavailable'}), 500
-            
-        # Forward to orchestrator for session status
-        response = requests.get(f'{ORCHESTRATOR_URL}/session/{session_id}/status', timeout=10)
-        if response.status_code == 200:
-            return jsonify(response.json())
-        else:
-            return jsonify({
-                'sessionId': session_id,
-                'status': 'unknown',
-                'message': 'Could not retrieve status from orchestrator'
-            }), response.status_code
-            
-    except Exception as e:
-        logger.error(f"Chat status error: {e}")
-        return jsonify({
-            'sessionId': session_id, 
-            'status': 'error',
-            'error': str(e)
-        }), 500
-
-@app.route('/api/chat/status/<session_id>')
-def chat_status(session_id):
     """Get processing status for ACK mode"""
     try:
         if not requests:
