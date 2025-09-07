@@ -252,15 +252,15 @@ class AtlasIntelligentChatManager {
         this.log('[CHAT] Intelligent Atlas Chat Manager with Voice and Speech Systems initialized');
         // Phase tracking (pipeline visualization)
         this.phaseMeta = {
-            atlas_plan: { label: 'PLAN', color: '#1e90ff' },
-            atlas_clarify: { label: 'CLARIFY', color: '#ff66ff' },
-            grisha_precheck: { label: 'PRECHECK', color: '#ffd700' },
-            execution: { label: 'EXEC', color: '#00ffa5' },
-            grisha_verdict: { label: 'VERDICT', color: '#ff8c00' },
-            grisha_followup: { label: 'FOLLOW-UP', color: '#ff4d4d' },
-            tetyana_probe: { label: 'PROBE', color: '#00b3b3' },
-            grisha_probe_review: { label: 'PROBE-REV', color: '#b3a500' },
-            atlas_feasibility: { label: 'FEASIBILITY', color: '#7d5fff' }
+            atlas_plan: { label: 'ATLAS: PLAN', color: '#1e90ff' },
+            atlas_clarify: { label: 'ATLAS: CLARIFY', color: '#ff66ff' },
+            grisha_precheck: { label: 'GRISHA: PRECHECK', color: '#ffd700' },
+            execution: { label: 'TETYANA: EXEC', color: '#00ffa5' },
+            grisha_verdict: { label: 'GRISHA: VERDICT', color: '#ff8c00' },
+            grisha_followup: { label: 'GRISHA: FOLLOW-UP', color: '#ff4d4d' },
+            tetyana_probe: { label: 'TETYANA: PROBE', color: '#00b3b3' },
+            grisha_probe_review: { label: 'GRISHA: PROBE-REV', color: '#b3a500' },
+            atlas_feasibility: { label: 'ATLAS: FEASIBILITY', color: '#7d5fff' }
         };
         this.lastAgentPhaseKey = new Map();
     this.pipelineState = { order: ['atlas_plan','atlas_clarify','tetyana_probe','grisha_probe_review','atlas_feasibility','grisha_precheck','execution','grisha_verdict','grisha_followup'], active: null, seen: new Set() };
@@ -2673,12 +2673,15 @@ class AtlasIntelligentChatManager {
     }
 
     _handleMicDoubleClick(e) {
-        // Подвійний клік: скасовуємо відкладений single та вмикаємо/вимикаємо wake-режим
+        // Подвійний клік: скасовуємо відкладений single та вмикаємо/вимикаємо wake-режим + активуємо Atlas Vision
         if (this.speechSystem._micClickTimer) {
             clearTimeout(this.speechSystem._micClickTimer);
             this.speechSystem._micClickTimer = null;
         }
         this._toggleWakeMode();
+        
+        // Активуємо Atlas Vision (очі для Atlas)
+        this._activateAtlasVision();
     }
 
     _performSingleClickAction() {
@@ -2906,6 +2909,169 @@ class AtlasIntelligentChatManager {
         if (/говори\s+коротко/.test(t)) { this.setTTSMode('quick'); this.addVoiceMessage('Добре, озвучую коротко.', 'atlas', this.voiceSystem.agents.atlas.signature); return true; }
         if (/говори\s+детально|говори\s+повно/.test(t)) { this.setTTSMode('standard'); this.addVoiceMessage('Гаразд, озвучую повний текст.', 'atlas', this.voiceSystem.agents.atlas.signature); return true; }
         return false;
+    }
+
+    // ====== Atlas Vision Integration ======
+    
+    async _activateAtlasVision() {
+        try {
+            this.log('[ATLAS VISION] Activating Atlas Eyes - camera and screen monitoring');
+            
+            // Запитуємо дозвіл на камеру
+            const cameraStream = await this._requestCameraAccess();
+            if (cameraStream) {
+                this.log('[ATLAS VISION] Camera access granted - Atlas can now see');
+                this._setupCameraMonitoring(cameraStream);
+            }
+            
+            // Запускаємо Grisha screen monitoring
+            await this._startGrishaScreenMonitoring();
+            
+            // Оновлюємо інтерфейс для показу стану Vision
+            this._updateVisionStatus(true);
+            
+        } catch (error) {
+            this.log(`[ATLAS VISION] Failed to activate vision: ${error.message}`);
+            this._updateVisionStatus(false);
+        }
+    }
+    
+    async _requestCameraAccess() {
+        try {
+            if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+                throw new Error('Camera access not supported in this browser');
+            }
+            
+            const stream = await navigator.mediaDevices.getUserMedia({ 
+                video: { 
+                    width: { ideal: 640 }, 
+                    height: { ideal: 480 },
+                    facingMode: 'user' 
+                } 
+            });
+            
+            this.log('[ATLAS VISION] Camera stream obtained');
+            return stream;
+            
+        } catch (error) {
+            this.log(`[ATLAS VISION] Camera access denied or failed: ${error.message}`);
+            return null;
+        }
+    }
+    
+    _setupCameraMonitoring(stream) {
+        // Створюємо приховане відео для захоплення кадрів
+        if (!this.visionVideo) {
+            this.visionVideo = document.createElement('video');
+            this.visionVideo.style.display = 'none';
+            this.visionVideo.autoplay = true;
+            this.visionVideo.muted = true;
+            document.body.appendChild(this.visionVideo);
+        }
+        
+        this.visionVideo.srcObject = stream;
+        
+        // Створюємо canvas для захоплення кадрів
+        if (!this.visionCanvas) {
+            this.visionCanvas = document.createElement('canvas');
+            this.visionCanvas.style.display = 'none';
+            this.visionCanvas.width = 640;
+            this.visionCanvas.height = 480;
+            document.body.appendChild(this.visionCanvas);
+        }
+        
+        this.visionStream = stream;
+        this.log('[ATLAS VISION] Camera monitoring setup complete');
+    }
+    
+    async _startGrishaScreenMonitoring() {
+        try {
+            const response = await fetch(`${this.frontendBase}/api/grisha/start-monitoring`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    task_description: 'Atlas Visual Monitoring - Enhanced validation through screen observation'
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.log('[ATLAS VISION] Grisha screen monitoring started');
+                return result;
+            } else {
+                throw new Error(`Failed to start monitoring: ${response.status}`);
+            }
+        } catch (error) {
+            this.log(`[ATLAS VISION] Failed to start Grisha monitoring: ${error.message}`);
+            throw error;
+        }
+    }
+    
+    _updateVisionStatus(isActive) {
+        // Оновлюємо кнопку мікрофона для показу статусу Vision
+        const microphoneBtn = document.getElementById('microphone-btn');
+        const micBtnText = microphoneBtn?.querySelector('.btn-text');
+        
+        if (microphoneBtn && micBtnText && isActive) {
+            // Додаємо візуальний індикатор активності Vision
+            if (!microphoneBtn.querySelector('.vision-indicator')) {
+                const visionIndicator = document.createElement('span');
+                visionIndicator.className = 'vision-indicator';
+                visionIndicator.textContent = '👁️';
+                visionIndicator.style.cssText = 'position:absolute;top:-5px;right:-5px;font-size:12px;';
+                microphoneBtn.style.position = 'relative';
+                microphoneBtn.appendChild(visionIndicator);
+            }
+            microphoneBtn.title = '🎤 + 👁️ Atlas Mode: Voice + Vision Active';
+        }
+    }
+    
+    // Захоплення кадру з камери для аналізу
+    async captureFrame() {
+        if (!this.visionVideo || !this.visionCanvas || !this.visionStream) {
+            throw new Error('Vision system not activated');
+        }
+        
+        const context = this.visionCanvas.getContext('2d');
+        context.drawImage(this.visionVideo, 0, 0, 640, 480);
+        
+        return new Promise((resolve) => {
+            this.visionCanvas.toBlob((blob) => {
+                const reader = new FileReader();
+                reader.onload = () => resolve(reader.result);
+                reader.readAsDataURL(blob);
+            }, 'image/jpeg', 0.8);
+        });
+    }
+    
+    // Аналіз того, що бачить Atlas
+    async analyzeVision(query = null) {
+        try {
+            // Захоплюємо кадр з камери
+            const frameData = await this.captureFrame();
+            
+            // Відправляємо на аналіз
+            const response = await fetch(`${this.frontendBase}/api/vision/analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    image: frameData,
+                    query: query || 'Що ти бачиш? Опиши те, що відбувається.',
+                    generate_video: false
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.log('[ATLAS VISION] Vision analysis completed');
+                return result;
+            } else {
+                throw new Error(`Vision analysis failed: ${response.status}`);
+            }
+        } catch (error) {
+            this.log(`[ATLAS VISION] Vision analysis error: ${error.message}`);
+            throw error;
+        }
     }
 }
 

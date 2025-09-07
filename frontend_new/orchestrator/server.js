@@ -17,7 +17,25 @@ import ModelRegistry from './model_registry.js';
 import { PHASE, initSession, startActionablePipeline, startPendingPrecheck, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
 import { initMemory, remember, recall, summarizeRecent, summarizeRanked, rememberSafe, summarizeForPrompt, memoryHealth, semanticContext, startMemoryMaintenance } from './agent_memory.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
+import { executeWithFallback, getFallbackStatus } from './github_goose_fallback.js';
 import { IntentCache } from './intent_cache.js';
+
+// Enhanced execution wrapper with GitHub Goose fallback
+async function executeWithFallbackWrapper(message, sessionId, options = {}) {
+    try {
+        const result = await executeWithFallback(message, sessionId, options);
+        if (result && result.content) {
+            // Log the execution source for metrics
+            logMessage('info', `[EXECUTION] source=${result.source} success=true`);
+            return result.content;
+        } else {
+            throw new Error('No content returned from execution');
+        }
+    } catch (error) {
+        logMessage('error', `[EXECUTION] fallback failed: ${error.message}`);
+        return null;
+    }
+}
 
 // In-memory pipeline metrics (ephemeral – resets on orchestrator restart)
 const PIPELINE_METRICS = {
@@ -845,6 +863,12 @@ app.get('/session/:sessionId/status', (req, res) => {
 });
 
 // Routes
+// Fallback status endpoint
+app.get('/fallback/status', (req, res) => {
+    const status = getFallbackStatus();
+    res.json(status);
+});
+
 app.get('/health', (req, res) => {
     res.json({ status: 'ok', timestamp: new Date().toISOString() });
 });
@@ -1020,8 +1044,8 @@ app.post('/agent/tetyana', async (req, res) => {
 
         // 1) Виконання: Тетяна працює ТІЛЬКИ через Goose (без провайдерних фолбеків)
         const sys = tetianaSystemInstruction({ enableTools: true });
-    // Replaced undefined callGooseAgent with runExecution (same pattern as generateAgentResponse for Tetyana)
-    const gooseExec = await runExecution(message, sessionId, { enableTools: true, systemInstruction: sys });
+    // Replaced undefined callGooseAgent with executeWithFallbackWrapper for enhanced reliability
+    const gooseExec = await executeWithFallbackWrapper(message, sessionId, { enableTools: true, systemInstruction: sys });
         if (!gooseExec) {
             return res.status(502).json({ error: 'Goose is unavailable for Tetiana' });
         }
@@ -1039,7 +1063,7 @@ app.post('/agent/tetyana', async (req, res) => {
                 `Виконання (сирий вивід): ${String(gooseExec).slice(0, 6000)}`
             ].join('\n');
             
-            const gooseReport = await runExecution(reportPrompt, sessionId, { 
+            const gooseReport = await executeWithFallbackWrapper(reportPrompt, sessionId, { 
                 enableTools: false, 
                 systemInstruction: 'Ти експерт з аналізу та структурування звітів. Створюй чіткі, короткі звіти українською мовою.' 
             });
@@ -2168,7 +2192,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         
         // Execution via Goose only (no provider fallbacks for execution)
         const execStartTime = Date.now();
-        const execNotes = await runExecution(prompt, session.id, {
+        const execNotes = await executeWithFallbackWrapper(prompt, session.id, {
             enableTools: options.enableTools === true,
             systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true })
         });
@@ -2202,8 +2226,8 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             let reportText = null;
             
             try {
-                // Primary: Use Goose for report generation
-                const gooseReport = await runExecution(reportPrompt, session.id, { 
+                // Primary: Use enhanced execution with GitHub fallback
+                const gooseReport = await executeWithFallbackWrapper(reportPrompt, session.id, { 
                     enableTools: false, 
                     systemInstruction: 'Ти експерт з аналізу та структурування звітів. Створюй чіткі, короткі звіти українською мовою.' 
                 });
@@ -2272,7 +2296,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             const started = Date.now();
             try {
                 if (route.provider === 'goose') {
-                    const gooseText = await runExecution(prompt, session.id, { enableTools: false, systemInstruction: sysInstr });
+                    const gooseText = await executeWithFallbackWrapper(prompt, session.id, { enableTools: false, systemInstruction: sysInstr });
                     const routeDuration = Date.now() - routeStartTime;
                     if (gooseText) {
                         content = gooseText;
@@ -2595,7 +2619,7 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
         ].join('\n');
 
     const grishaSys = `Ти — Гриша, валідаційний агент. Виконуй перевірки інструментально ТА візуально. ПОВЕРТАЙ СТРОГО JSON: { "criteria": [ { "name": string, "result": true|false, "evidence": string } ], "confidence": number, "summary": string, "visual_verification": string }`;
-    const gooseOut = await runExecution(verifyPrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
+    const gooseOut = await executeWithFallbackWrapper(verifyPrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
         const parsed = extractJson(gooseOut);
         if (parsed && typeof parsed === 'object') {
             lastResult = parsed;
@@ -2610,7 +2634,7 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
                     failed,
                     'ПОВЕРНИ ЛИШЕ JSON у тому ж форматі, підтверджуючи або спростовуючи.'
                 ].join('\n');
-                const refine = await runExecution(refinePrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
+                const refine = await executeWithFallbackWrapper(refinePrompt, verifySession, { enableTools: true, systemInstruction: grishaSys });
                 const refParsed = extractJson(refine);
                 if (refParsed && typeof refParsed === 'object' && typeof refParsed.confidence === 'number') {
                     lastResult = refParsed;
