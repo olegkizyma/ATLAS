@@ -367,6 +367,8 @@ class AtlasIntelligentChatManager {
                 <span class="status-dot" id="dot-orchestrator" data-tooltip="Orchestrator: connecting" title="Orchestrator: connecting"></span>
                 <span class="status-dot" id="dot-recovery" data-tooltip="Recovery: connecting" title="Recovery: connecting"></span>
                 <span class="status-dot" id="dot-tts" data-tooltip="TTS: checking" title="TTS: checking"></span>
+                <span class="status-dot" id="dot-goose" data-tooltip="Goose: checking" title="Goose: checking"></span>
+                <span class="status-dot" id="dot-vision" data-tooltip="Vision: checking" title="Vision: checking"></span>
             `;
             agentIndicator.parentElement.insertBefore(statusDots, agentIndicator);
             // Попросимо статус-менеджер негайно оновити стан точок

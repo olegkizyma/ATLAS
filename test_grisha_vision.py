@@ -3,11 +3,26 @@
 Тестовий скрипт для перевірки інтеграції Гриши з візуальним моніторингом
 """
 
-import requests
-import json
-import time
 import sys
-import threading
+import os
+
+# Додаємо шлях до віртуального середовища ATLAS
+repo_root = os.path.dirname(os.path.abspath(__file__))
+venv_path = os.path.join(repo_root, 'frontend_new', 'venv', 'lib', 'python3.11', 'site-packages')
+if os.path.exists(venv_path):
+    sys.path.insert(0, venv_path)
+
+# Тепер імпортуємо залежності
+try:
+    import requests
+    import json
+    import time
+    import threading
+except ImportError as e:
+    print(f"❌ Помилка імпорту: {e}")
+    print("🔧 Запустіть скрипт через віртуальне середовище:")
+    print("   cd frontend_new && source venv/bin/activate && cd .. && python test_grisha_vision.py")
+    sys.exit(1)
 
 # Конфігурація серверів
 ATLAS_SERVER = "http://localhost:5001"

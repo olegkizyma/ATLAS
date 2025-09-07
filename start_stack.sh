@@ -87,20 +87,19 @@ check_linux_requirements() {
         log_warn "⚠️  No recognized package manager found"
     fi
     
-    # Перевірка Python 3.8+
+    # Перевірка Python 3.11+ (рекомендована версія для ATLAS)
     if command -v python3 &> /dev/null; then
         local python_version=$(python3 --version | cut -d' ' -f2)
-        if python3 -c "import sys; exit(0 if sys.version_info >= (3,8) else 1)" 2>/dev/null; then
-            log_info "✅ Python ${python_version} - OK"
+        if python3 -c "import sys; exit(0 if sys.version_info >= (3,11) else 1)" 2>/dev/null; then
+            log_info "✅ Python ${python_version} - OK (3.11+ compatible)"
         else
-            log_error "❌ Python 3.8+ required, found: $python_version"
-            log_error "   Install: sudo apt install python3.8 python3.8-venv (Ubuntu/Debian)"
-            log_error "   Install: sudo yum install python38 python38-venv (CentOS/RHEL)"
-            exit 1
+            log_warn "⚠️  Python ${python_version} - Рекомендовано 3.11+, але може працювати"
+            log_warn "   Розглядьте оновлення: sudo apt install python3.11 python3.11-venv (Ubuntu/Debian)"
+            log_warn "   Або: sudo yum install python311 python311-venv (CentOS/RHEL)"
         fi
     else
         log_error "❌ Python 3 required but not found"
-        log_error "   Install: sudo apt install python3 python3-venv python3-pip"
+        log_error "   Install: sudo apt install python3.11 python3.11-venv python3.11-pip"
         exit 1
     fi
     

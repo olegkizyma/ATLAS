@@ -83,13 +83,18 @@ check_macos_requirements() {
         log_warn "⚠️  Homebrew not found - install recommended: /bin/bash -c \"\$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)\""
     fi
     
-    # Перевірка Python 3.8+
+    # Перевірка Python 3.11+ (рекомендована версія для ATLAS)
     if command -v python3 &> /dev/null; then
         local python_version=$(python3 --version | cut -d' ' -f2)
-        log_info "✅ Python ${python_version} - OK"
+        local major_minor=$(echo "$python_version" | cut -d'.' -f1,2)
+        if [[ $(echo "$major_minor >= 3.11" | bc -l 2>/dev/null || echo 0) -eq 1 ]] || [[ "$major_minor" == "3.11" ]] || [[ "$major_minor" > "3.11" ]]; then
+            log_info "✅ Python ${python_version} - OK (3.11+ compatible)"
+        else
+            log_warn "⚠️  Python ${python_version} - Рекомендовано 3.11+, але може працювати"
+        fi
     else
         log_error "❌ Python 3 required but not found"
-        log_error "   Install: brew install python3"
+        log_error "   Install: brew install python@3.11"
         exit 1
     fi
     

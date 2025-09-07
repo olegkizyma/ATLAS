@@ -75,6 +75,30 @@ app.use(express.json({ limit: '10mb' }));
 
 // OpenAI-compatible fallback API base (used for Atlas/Grisha only)
 const FALLBACK_API_BASE = (process.env.FALLBACK_API_BASE || 'http://127.0.0.1:3010/v1').replace(/\/$/, '');
+// Allow disabling or fast-skip of openai_compat provider to avoid long stalls when service (port 3010) is absent
+let OPENAI_COMPAT_DISABLED = (process.env.DISABLE_OPENAI_COMPAT === '1') || (process.env.NO_OPENAI_COMPAT === '1') || (process.env.FAST_NO_OPENAI === '1');
+let openAICompatDown = false;      // true when last probe/call failed
+let openAICompatRecovered = false; // becomes true if service comes back after being down
+
+// Periodic fast probe (circuit breaker with auto-recovery)
+(async () => {
+    if (OPENAI_COMPAT_DISABLED) return;
+    const probe = async () => {
+        try {
+            await axios.get(FALLBACK_API_BASE + '/models', { timeout: 800 });
+            if (openAICompatDown) {
+                openAICompatDown = false;
+                openAICompatRecovered = true;
+                console.log('[openai_compat] service recovered; re-enabled');
+            }
+        } catch (e) {
+            if (!openAICompatDown) console.warn('[openai_compat] probe failed; soft-disabling');
+            openAICompatDown = true;
+        }
+    };
+    await probe();
+    setInterval(() => { if (!OPENAI_COMPAT_DISABLED) probe(); }, 30000).unref?.();
+})();
 
 function estimateTokens(str) {
     if (!str) return 0;
@@ -83,59 +107,67 @@ function estimateTokens(str) {
 }
 
 function dynamicLLMTimeout(model, message) {
+    // If disabled or down, return ultra-short timeout (fast-fail)
+    if (OPENAI_COMPAT_DISABLED || openAICompatDown) return 250; // 250ms guard
     const baseMs = parseInt(process.env.LLM_BASE_TIMEOUT_MS || '8000', 10); // 8s base
     const perTokMs = parseFloat(process.env.LLM_PER_TOKEN_TIMEOUT_MS || '18'); // 18ms per token heuristic
     const maxMs = parseInt(process.env.LLM_MAX_TIMEOUT_MS || process.env.OPENAI_COMPAT_TIMEOUT_MS || '60000', 10);
     const tokens = estimateTokens(message);
     let est = baseMs + tokens * perTokMs;
-    // Model-specific adjustments (bigger models slower)
     const lower = model?.toLowerCase() || '';
     if (/70b|gpt-5|deepseek-v3/.test(lower)) est *= 1.6;
     else if (/llama-3\.3|gemma-2|deepseek-r1/.test(lower)) est *= 1.25;
-    // Clamp
     if (est > maxMs) est = maxMs;
     if (est < baseMs) est = baseMs;
     return Math.ceil(est);
 }
 
 async function callOpenAICompatChat(baseUrl, model, userMessage) {
+    if (OPENAI_COMPAT_DISABLED || openAICompatDown) return null; // soft-disable
     const url = `${baseUrl}/chat/completions`;
-    const payload = {
-        model,
-        messages: [ { role: 'user', content: userMessage } ],
-        stream: false
-    };
+    const payload = { model, messages: [ { role: 'user', content: userMessage } ], stream: false };
     const apiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || '';
-    const headers = {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {})
-    };
+    const headers = { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {}) };
     const timeoutMs = dynamicLLMTimeout(model, userMessage);
-    const resp = await axios.post(url, payload, { headers, timeout: timeoutMs });
-    if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
-    const text = resp.data?.choices?.[0]?.message?.content;
-    return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+    try {
+        const resp = await axios.post(url, payload, { headers, timeout: timeoutMs });
+        if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
+        const text = resp.data?.choices?.[0]?.message?.content;
+        return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+    } catch (e) {
+        openAICompatDown = true; // trip circuit breaker
+        if (!OPENAI_COMPAT_DISABLED) console.warn('[openai_compat] call failed, disabling further attempts this run:', e.message || e);
+        return null;
+    }
 }
 
 async function callOpenAICompatChatWithTimeout(baseUrl, model, userMessage, timeoutMs = 1500) {
+    if (OPENAI_COMPAT_DISABLED || openAICompatDown) return null;
     const url = `${baseUrl}/chat/completions`;
-    const payload = {
-        model,
-        messages: [ { role: 'user', content: userMessage } ],
-        stream: false
-    };
+    const payload = { model, messages: [ { role: 'user', content: userMessage } ], stream: false };
     const apiKey = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || '';
-    const headers = {
-        'Content-Type': 'application/json',
-        ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {})
-    };
-    // For short probes allow dynamic scaling but cap at provided timeoutMs (acts as upper bound)
+    const headers = { 'Content-Type': 'application/json', ...(apiKey ? { 'Authorization': `Bearer ${apiKey}`, 'X-API-Key': apiKey } : {}) };
     const dyn = Math.min(timeoutMs, dynamicLLMTimeout(model, userMessage));
-    const resp = await axios.post(url, payload, { headers, timeout: dyn });
-    if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
-    const text = resp.data?.choices?.[0]?.message?.content;
-    return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+    try {
+        const resp = await axios.post(url, payload, { headers, timeout: dyn });
+        if (resp.status !== 200) throw new Error(`OpenAI-compat HTTP ${resp.status}`);
+        const text = resp.data?.choices?.[0]?.message?.content;
+        return (typeof text === 'string' && text.trim()) ? text.trim() : null;
+    } catch (e) {
+        openAICompatDown = true;
+        return null;
+    }
 }
+
+// Diagnostics endpoint for openai_compat status
+app.get('/diagnostics/openai_compat_status', (req, res) => {
+    res.json({
+        disabled: OPENAI_COMPAT_DISABLED,
+        down: openAICompatDown,
+        recovered_once: openAICompatRecovered,
+        base: FALLBACK_API_BASE
+    });
+});
 
 // Dynamic model/provider registry
 const registry = new ModelRegistry();

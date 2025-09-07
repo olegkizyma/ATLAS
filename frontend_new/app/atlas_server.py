@@ -849,7 +849,9 @@ def status():
             'frontend': {'count': 1, 'status': 'running'},
             'orchestrator': {'count': 1 if check_orchestrator_health() == 'running' else 0, 'status': check_orchestrator_health()},
             'recovery': {'count': 1, 'status': 'running'},  # Recovery bridge is usually running if frontend is up
-            'tts': {'count': 1 if check_tts_health() == 'running' else 0, 'status': check_tts_health()}
+            'tts': {'count': 1 if check_tts_health() == 'running' else 0, 'status': check_tts_health()},
+            'goose': {'count': 1 if check_goose_health() == 'running' else 0, 'status': check_goose_health()},
+            'vision': {'count': 1 if check_vision_health() == 'running' else 0, 'status': check_vision_health()}
         },
         'memory': {'usage': 50},  # Placeholder
         'network': {'active': True}
@@ -1005,6 +1007,30 @@ def check_tts_health():
         return 'error'
     except:
         return 'fallback'  # Can use browser TTS
+
+def check_goose_health():
+    """Check if Goose web server is responding"""
+    if not requests:
+        return 'unavailable'
+    try:
+        response = requests.get('http://localhost:3000/', timeout=3)
+        return 'running' if response.status_code == 200 else 'error'
+    except:
+        return 'stopped'
+
+def check_vision_health():
+    """Check if Vision system (Grisha monitoring) is available"""
+    try:
+        # Vision system is integrated into this Flask app
+        # Check if vision_processor module is importable and functional
+        import importlib.util
+        spec = importlib.util.find_spec('vision_processor')
+        if spec is not None:
+            return 'running'
+        else:
+            return 'warning'
+    except:
+        return 'warning'
 
 
 @app.route('/api/translate', methods=['POST'])

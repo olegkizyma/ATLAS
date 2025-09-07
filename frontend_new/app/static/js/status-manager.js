@@ -42,7 +42,7 @@ class AtlasStatusManager {
         
         try {
             // Якщо точки ще не ініціалізовані (створюються пізніше праворуч) — пробуємо прив'язатися знову
-            if (!this.dotFrontend || !this.dotOrchestrator || !this.dotRecovery || !this.dotTts) {
+            if (!this.dotFrontend || !this.dotOrchestrator || !this.dotRecovery || !this.dotTts || !this.dotGoose || !this.dotVision) {
                 this.bindDots();
                 this.attachDotListeners();
             }
@@ -87,6 +87,8 @@ class AtlasStatusManager {
             setDot(this.dotOrchestrator, 'warning', 'Orchestrator: unknown');
             setDot(this.dotRecovery, 'warning', 'Recovery: unknown');
             setDot(this.dotTts, 'warning', 'TTS: unknown');
+            setDot(this.dotGoose, 'warning', 'Goose: unknown');
+            setDot(this.dotVision, 'warning', 'Vision: unknown');
             return;
         }
 
@@ -103,6 +105,8 @@ class AtlasStatusManager {
         setDot(this.dotOrchestrator, mapState(p.orchestrator), `Orchestrator: ${p.orchestrator?.status || 'unknown'}`);
         setDot(this.dotRecovery, mapState(p.recovery), `Recovery: ${p.recovery?.status || 'unknown'}`);
         setDot(this.dotTts, mapState(p.tts), `TTS: ${p.tts?.status || 'unknown'}`);
+        setDot(this.dotGoose, mapState(p.goose), `Goose: ${p.goose?.status || 'unknown'}`);
+        setDot(this.dotVision, mapState(p.vision), `Vision (Grisha): ${p.vision?.status || 'unknown'}`);
     }
 
     bindDots() {
@@ -110,6 +114,8 @@ class AtlasStatusManager {
         this.dotOrchestrator = document.getElementById('dot-orchestrator');
         this.dotRecovery = document.getElementById('dot-recovery');
         this.dotTts = document.getElementById('dot-tts');
+        this.dotGoose = document.getElementById('dot-goose');
+        this.dotVision = document.getElementById('dot-vision');
     }
 
     attachDotListeners() {
@@ -117,7 +123,9 @@ class AtlasStatusManager {
             [this.dotFrontend, 'Frontend'],
             [this.dotOrchestrator, 'Orchestrator'],
             [this.dotRecovery, 'Recovery'],
-            [this.dotTts, 'TTS']
+            [this.dotTts, 'TTS'],
+            [this.dotGoose, 'Goose'],
+            [this.dotVision, 'Vision (Grisha)']
         ].forEach(([el, name]) => {
             if (!el || el._hasListener) return;
             el.addEventListener('click', () => {

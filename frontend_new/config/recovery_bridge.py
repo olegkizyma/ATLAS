@@ -12,6 +12,7 @@ from typing import Dict, Any, Optional
 from pathlib import Path
 import websockets
 import aiohttp
+from aiohttp import web
 from intelligent_recovery import IntelligentRecoverySystem
 
 logger = logging.getLogger('atlas.recovery_bridge')
@@ -226,6 +227,26 @@ class RecoveryBridge:
         
         logger.info(f"Starting recovery bridge WebSocket server on port {self.ws_port}")
         return await websockets.serve(handle_websocket, "127.0.0.1", self.ws_port)
+
+    async def start_health_http(self, http_port: int = 5102):
+        """Легкий HTTP health endpoint поверх того ж порта недоступний (WS вже слухає 5102),
+        тому відкриваємо сусідній порт 5103 для /health."""
+        app = web.Application()
+
+        async def health(request):
+            try:
+                health = self.recovery_system.get_system_health_report()
+            except Exception as e:
+                return web.json_response({ 'status': 'error', 'error': str(e) }, status=500)
+            return web.json_response({ 'status': 'ok', 'bridge': 'recovery', 'health': health })
+
+        app.router.add_get('/health', health)
+        runner = web.AppRunner(app)
+        await runner.setup()
+        site = web.TCPSite(runner, '127.0.0.1', http_port + 1)  # 5103
+        await site.start()
+        logger.info(f"Recovery bridge HTTP health on 127.0.0.1:{http_port+1}/health")
+        return runner
     
     async def notify_clients(self, message: Dict[str, Any]):
         """Сповіщає всіх підключених клієнтів"""

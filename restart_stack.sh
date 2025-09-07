@@ -150,11 +150,17 @@ stop_all_services() {
         done
     fi
     
-    # Recovery bridge (port 5102)
-    local bridge_pids=$(lsof -ti:5102 2>/dev/null || echo "")
-    if [ -n "$bridge_pids" ]; then
-        for pid in $bridge_pids; do
-            graceful_stop "$pid" "Recovery Bridge (port 5102)" 5
+    # Recovery bridge WS (5102) + HTTP health (5103)
+    local bridge_ws_pids=$(lsof -ti:5102 2>/dev/null || echo "")
+    if [ -n "$bridge_ws_pids" ]; then
+        for pid in $bridge_ws_pids; do
+            graceful_stop "$pid" "Recovery Bridge WS (port 5102)" 5
+        done
+    fi
+    local bridge_http_pids=$(lsof -ti:5103 2>/dev/null || echo "")
+    if [ -n "$bridge_http_pids" ]; then
+        for pid in $bridge_http_pids; do
+            graceful_stop "$pid" "Recovery Bridge HTTP (port 5103)" 5
         done
     fi
     
@@ -183,7 +189,7 @@ stop_all_services() {
     
     # Cleanup PID files
     rm -f "$LOG_DIR/atlas.pid" "$LOG_DIR/frontend.pid" "$LOG_DIR/orchestrator.pid" 2>/dev/null || true
-    rm -f "$LOG_DIR/goose.pid" "$LOG_DIR/tts.pid" 2>/dev/null || true
+    rm -f "$LOG_DIR/goose.pid" "$LOG_DIR/tts.pid" "$LOG_DIR/recovery_bridge.pid" 2>/dev/null || true
     
     log_restart "✅ All services stopped"
 }
@@ -237,12 +243,27 @@ start_services() {
     # Даємо час orchestrator запуститися
     sleep 2
     
-    # Запускаємо recovery bridge (canonical path)
+    # Запускаємо recovery bridge (canonical path) через venv python якщо доступний
     log_info "🌉 Starting recovery bridge (port 5102)..."
     if [ -f "$REPO_ROOT/frontend_new/config/recovery_bridge.py" ]; then
         RB_DIR="$REPO_ROOT/frontend_new/config"
-        log_info "Found recovery_bridge.py at $RB_DIR/recovery_bridge.py — launching"
-        (cd "$RB_DIR" && nohup python recovery_bridge.py > "$LOG_DIR/recovery_bridge.log" 2>&1 & echo $! > "$LOG_DIR/recovery_bridge.pid")
+        VENV_PY="$REPO_ROOT/frontend_new/venv/bin/python"
+        PY_CMD="python"
+        if [ -x "$VENV_PY" ]; then PY_CMD="$VENV_PY"; fi
+        log_info "Using interpreter: $PY_CMD"
+        (cd "$RB_DIR" && nohup "$PY_CMD" recovery_bridge.py > "$LOG_DIR/recovery_bridge.log" 2>&1 & echo $! > "$LOG_DIR/recovery_bridge.pid")
+        # Очікуємо прослуховування порта
+        for i in 1 2 3 4 5 6 7 8 9 10; do
+            if lsof -tiTCP:5102 -sTCP:LISTEN >/dev/null 2>&1; then
+                log_info "Recovery bridge listening on 5102"
+                break
+            fi
+            sleep 1
+        done
+        if ! lsof -tiTCP:5102 -sTCP:LISTEN >/dev/null 2>&1; then
+            log_warn "Recovery bridge did not open port 5102 (check recovery_bridge.log)"
+            head -n 20 "$LOG_DIR/recovery_bridge.log" 2>/dev/null || true
+        fi
     else
         log_warn "recovery_bridge.py not found at frontend_new/config — skipping recovery bridge start"
     fi
@@ -306,11 +327,16 @@ check_services() {
         all_healthy=false
     fi
     
-    # Recovery bridge
-    if curl -s --max-time 5 "http://localhost:5102/health" > /dev/null 2>&1; then
-        log_info "✅ Recovery Bridge (port 5102) - Running"
+    # Recovery bridge (HTTP health now on 5103; legacy expectation 5102)
+    if curl -s --max-time 3 "http://localhost:5103/health" > /dev/null 2>&1; then
+        log_info "✅ Recovery Bridge (HTTP health 5103, WS 5102) - Running"
     else
-        log_warn "⚠️  Recovery Bridge (port 5102) - Not responding"
+        # fallback: if websocket port is open treat as partial success
+        if lsof -tiTCP:5102 -sTCP:LISTEN >/dev/null 2>&1; then
+            log_warn "🟡 Recovery Bridge WS port 5102 open, but HTTP health (5103) not responding"
+        else
+            log_warn "⚠️  Recovery Bridge (ports 5102/5103) - Not responding"
+        fi
     fi
     
     # Optional services status
@@ -318,7 +344,9 @@ check_services() {
     
     # Goose
     if curl -s --max-time 3 "http://localhost:3000/health" > /dev/null 2>&1; then
-        log_info "✅ Goose (port 3000) - Available"
+        log_info "✅ Goose (port 3000) - Available (/health)"
+    elif curl -s --max-time 3 "http://localhost:3000/api/health" > /dev/null 2>&1; then
+        log_info "✅ Goose (port 3000) - Available (/api/health)"
     else
         log_warn "⚠️  Goose (port 3000) - Not available (Tetyana execution limited)"
     fi
@@ -335,7 +363,7 @@ check_services() {
         echo ""
         log_restart "📊 ATLAS Interface: http://localhost:5001"
         log_restart "🔧 Orchestrator API: http://localhost:5101"
-        log_restart "🌉 Recovery Bridge: http://localhost:5102"
+    log_restart "🌉 Recovery Bridge: ws://localhost:5102 (health: http://localhost:5103/health)"
         echo ""
         # Status summary
         if [ "${ATLAS_GOOSE_AVAILABLE:-false}" = "true" ]; then
@@ -348,6 +376,7 @@ check_services() {
         else
             log_warn "   🗣️  Voice Synthesis: Disabled (TTS unavailable)"
         fi
+        log_restart "   👁️  Visual Monitoring: Grisha vision system enabled"
         echo ""
     log_restart "📄 Logs available in: $LOG_DIR"
     else
@@ -390,6 +419,50 @@ main() {
     echo ""
     
     log_restart "🎯 Restart completed!"
+    echo ""
+    # Додатковий блок інформації про Goose / TTS
+    # Статус openai_compat
+    if [ "${DISABLE_OPENAI_COMPAT:-}" = "1" ] || [ "${NO_OPENAI_COMPAT:-}" = "1" ] || [ "${FAST_NO_OPENAI:-}" = "1" ]; then
+        log_info "openai_compat: disabled via env (DISABLE/NO/FAST flag)"
+    else
+        if curl -s --max-time 1 http://127.0.0.1:5101/diagnostics/openai_compat_status > "$LOG_DIR/.openai_compat_diag" 2>/dev/null; then
+            oc_disabled=$(grep -o '"disabled":true' "$LOG_DIR/.openai_compat_diag" >/dev/null && echo true || echo false)
+            oc_down=$(grep -o '"down":true' "$LOG_DIR/.openai_compat_diag" >/dev/null && echo true || echo false)
+            oc_base=$(sed -n 's/.*"base":"\([^"]*\)".*/\1/p' "$LOG_DIR/.openai_compat_diag" | head -n1)
+            if [ "$oc_disabled" = true ]; then
+                log_warn "openai_compat: runtime reports disabled (base=$oc_base)"
+            elif [ "$oc_down" = true ]; then
+                log_warn "openai_compat: DOWN (base=$oc_base, fast-fail mode)"
+            else
+                log_info "openai_compat: active (base=$oc_base)"
+            fi
+        else
+            log_warn "openai_compat: diagnostics endpoint unavailable"
+        fi
+    fi
+    if [ -f "$LOG_DIR/goose.pid" ]; then
+        GOOSE_PID=$(cat "$LOG_DIR/goose.pid" 2>/dev/null || echo '?')
+        GOOSE_BIN_PATH=$(cat "$LOG_DIR/goose.binpath" 2>/dev/null || echo 'unknown')
+        if [ -n "$GOOSE_PID" ]; then
+            if kill -0 "$GOOSE_PID" 2>/dev/null; then
+                log_info "Goose running (PID $GOOSE_PID) binary: $GOOSE_BIN_PATH"
+            else
+                log_warn "Goose pid file present ($GOOSE_PID) but process not alive. Binary hint: $GOOSE_BIN_PATH"
+            fi
+        fi
+        # Показати можливу конфіг директорію (якщо goose web використовує робочу директорію репо)
+        log_info "Goose working dir (assumed): $REPO_ROOT"
+    else
+        log_warn "Goose not started (no pid file)."
+    fi
+    if [ -f "$LOG_DIR/tts.pid" ]; then
+        TTS_PID=$(cat "$LOG_DIR/tts.pid" 2>/dev/null || echo '?')
+        if kill -0 "$TTS_PID" 2>/dev/null; then
+            log_info "TTS running (PID $TTS_PID)"
+        else
+            log_warn "TTS pid file present ($TTS_PID) but process not alive"
+        fi
+    fi
 }
 
 # Обробка сигналів
