@@ -303,8 +303,7 @@ main() {
     log_intelligent "  🎭 All agents (Atlas, Tetyana, Grisha)"
     log_intelligent ""
     log_intelligent "To restart:"
-    log_intelligent "  🚀 macOS: ./start_stack_macos.sh"
-    log_intelligent "  🐧 Linux: ./start_stack.sh"
+    log_intelligent "  � Simple: ./restart_simple.sh"
     log_intelligent ""
     log_intelligent "📄 Logs preserved in logs/ directory"
 }

@@ -29,7 +29,27 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(name)s] %(levelname)s: %(message)s'
 )
+
+# Custom filter to reduce health check noise in logs
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record):
+        # Suppress frequent health check logs
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            message = str(record.msg)
+            # Skip health check related logs at INFO level
+            if any(pattern in message for pattern in [
+                'GET /health HTTP',
+                'GET /voices HTTP',
+                'GET /status HTTP'
+            ]):
+                return False
+        return True
+
 logger = logging.getLogger('ukrainian-tts-server')
+
+# Apply health check filter to werkzeug logger to reduce noise
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.addFilter(HealthCheckFilter())
 
 def gpu_capabilities():
     """Return detected GPU / accelerator capabilities."""

@@ -35,6 +35,7 @@ import time
 import math
 import uuid
 import base64
+from logging.handlers import RotatingFileHandler
 
 # Computer Vision imports (optional)
 try:
@@ -79,11 +80,89 @@ def setup_unified_logging():
 
 setup_unified_logging()
 
+# Rate limiter for repeated warnings
+from collections import defaultdict
+
+WARNING_CACHE = defaultdict(lambda: {'count': 0, 'last_logged': 0, 'first_seen': 0})
+WARNING_RATE_LIMIT = 5  # seconds between repeated warnings
+WARNING_MAX_OCCURRENCES = 3  # max times to show same warning
+
+class RateLimitedWarningFilter(logging.Filter):
+    def filter(self, record):
+        if record.levelno >= logging.WARNING and hasattr(record, 'msg'):
+            msg_key = str(record.msg)[:100]  # Use first 100 chars as key
+            now = time.time()
+            warning_data = WARNING_CACHE[msg_key]
+            
+            if warning_data['count'] == 0:
+                # First occurrence
+                warning_data['first_seen'] = now
+                warning_data['last_logged'] = now
+                warning_data['count'] = 1
+                return True
+            elif warning_data['count'] < WARNING_MAX_OCCURRENCES:
+                # Allow if enough time passed
+                if now - warning_data['last_logged'] >= WARNING_RATE_LIMIT:
+                    warning_data['last_logged'] = now
+                    warning_data['count'] += 1
+                    return True
+                else:
+                    warning_data['count'] += 1
+                    return False
+            else:
+                # Suppress after max occurrences
+                warning_data['count'] += 1
+                return False
+        return True
+
+# Custom filter to reduce health check noise in logs
+class HealthCheckFilter(logging.Filter):
+    def filter(self, record):
+        # Suppress frequent health check logs
+        if hasattr(record, 'msg') and isinstance(record.msg, str):
+            message = str(record.msg)
+            # Skip health check related logs at INFO level
+            if any(pattern in message for pattern in [
+                'GET /api/status HTTP',
+                'GET /api/health HTTP', 
+                'GET /health HTTP',
+                'GET /logs?limit=',
+                'GET /api/vision/status HTTP'
+            ]):
+                return False
+        return True
+
 logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s [%(levelname)s] %(name)s: %(message)s'
 )
+
+# Apply health check filter to werkzeug logger to reduce noise
+werkzeug_logger = logging.getLogger('werkzeug')
+werkzeug_logger.addFilter(HealthCheckFilter())
+
+# Apply rate limiting to root logger for repeated warnings
+root_logger = logging.getLogger()
+root_logger.addFilter(RateLimitedWarningFilter())
+
 logger = logging.getLogger('atlas.frontend')
+
+# Add rotating file handler to prevent log growth
+LOG_DIR = Path(__file__).parent.parent.parent / 'logs'
+LOG_DIR.mkdir(exist_ok=True)
+log_file = LOG_DIR / 'frontend.log'
+
+# Create rotating file handler (max 10MB per file, keep 5 backups)
+if not any(isinstance(h, RotatingFileHandler) for h in logger.handlers):
+    rotating_handler = RotatingFileHandler(
+        log_file, 
+        maxBytes=10*1024*1024,  # 10MB 
+        backupCount=5
+    )
+    rotating_handler.setFormatter(logging.Formatter('%(asctime)s [%(levelname)s] %(name)s: %(message)s'))
+    rotating_handler.addFilter(HealthCheckFilter())
+    rotating_handler.addFilter(RateLimitedWarningFilter())
+    logger.addHandler(rotating_handler)
 
 # Get paths
 CURRENT_DIR = Path(__file__).parent
@@ -516,6 +595,39 @@ def get_logs():
     except Exception as e:
         logger.error(f"Error getting logs: {e}")
         return jsonify({'error': 'Failed to get logs', 'logs': []}), 500
+
+@app.route('/api/unified-logs')
+def get_unified_logs():
+    """Get unified logs using centralized logging system"""
+    try:
+        import subprocess
+        import os
+        
+        tail_count = int(request.args.get('tail', 20))
+        
+        # Читаємо unified log файл напряму
+        unified_log_path = os.path.join(os.path.dirname(__file__), '../../logs/atlas_unified.log')
+        if not os.path.exists(unified_log_path):
+            return jsonify({'error': 'Unified log not available', 'logs': []}), 404
+            
+        # Використовуємо tail для отримання останніх записів
+        result = subprocess.run([
+            'tail', '-n', str(tail_count), unified_log_path
+        ], capture_output=True, text=True, timeout=3, cwd=os.path.dirname(unified_log_path))
+        
+        if result.returncode != 0:
+            return jsonify({'error': 'Failed to get unified logs', 'logs': []}), 500
+            
+        # Розбиваємо output на рядки і фільтруємо порожні
+        log_lines = [line.strip() for line in result.stdout.split('\n') if line.strip()]
+        
+        return jsonify({'logs': log_lines})
+        
+    except subprocess.TimeoutExpired:
+        return jsonify({'error': 'Timeout getting unified logs', 'logs': []}), 408
+    except Exception as e:
+        logger.error(f"Error getting unified logs: {e}")
+        return jsonify({'error': 'Failed to get unified logs', 'logs': []}), 500
 
 @app.route('/api/voice/health')
 def voice_health():
@@ -1614,8 +1726,28 @@ def grisha_monitoring_status():
         return jsonify({'error': 'Failed to get monitoring status', 'details': str(e)}), 500
 
 if __name__ == '__main__':
+    # Print startup summary
+    import platform
+    print("\n" + "="*60)
+    print("ATLAS FRONTEND SERVER - STARTUP SUMMARY")
+    print("="*60)
+    print(f"Python Version: {sys.version.split()[0]}")
+    print(f"Platform: {platform.system()} {platform.release()}")
+    print(f"Flask Version: {Flask.__version__}" if hasattr(Flask, '__version__') else "Flask: Unknown")
+    print(f"Vision Available: {VISION_AVAILABLE}")
+    print(f"Frontend Port: {FRONTEND_PORT}")
+    print(f"Orchestrator URL: {ORCHESTRATOR_URL}")
+    print(f"TTS Server URL: {TTS_SERVER_URL}")
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('true', '1', 'yes')
+    print(f"Debug Mode: {debug_mode}")
+    print(f"Log Rotation: Enabled (10MB, 5 backups)")
+    print("="*60)
+    print("Starting server...\n")
+    
     logger.info(f"Starting ATLAS Frontend Server on port {FRONTEND_PORT}")
     logger.info(f"Orchestrator URL: {ORCHESTRATOR_URL}")
     logger.info(f"TTS Server URL: {TTS_SERVER_URL}")
     
-    app.run(host='0.0.0.0', port=FRONTEND_PORT, debug=True)
+    # Use debug mode based on environment variable for production safety
+    debug_mode = os.environ.get('FLASK_DEBUG', 'False').lower() in ('true', '1', 'yes')
+    app.run(host='0.0.0.0', port=FRONTEND_PORT, debug=debug_mode)

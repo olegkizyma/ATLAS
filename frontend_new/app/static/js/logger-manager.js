@@ -111,13 +111,13 @@ class AtlasLogger {
         this.lastRefresh = now;
         
         try {
-            // Додаємо timeout для запитів
+            // Використовуємо новий unified logging endpoint замість окремих логів
             const controller = new AbortController();
             const timeoutId = setTimeout(() => controller.abort(), 5000); // 5 секунд timeout
             
             const headers = { 'Cache-Control': 'no-cache' };
             if (this.lastEtag) headers['If-None-Match'] = this.lastEtag;
-            const response = await fetch(`${this.apiBase}/logs?limit=100`, {
+            const response = await fetch(`${this.apiBase}/api/unified-logs?tail=20`, {
                 signal: controller.signal,
                 headers
             });
@@ -136,7 +136,7 @@ class AtlasLogger {
             
             const data = await response.json();
             if (data.logs && Array.isArray(data.logs)) {
-                this.displayLogs(data.logs);
+                this.displayUnifiedLogs(data.logs);
                 // Успішний запит — зменшуємо backoff плавно
                 this.backoffMultiplier = Math.max(1.0, this.backoffMultiplier * 0.8);
                 const etag = response.headers.get('ETag');
@@ -150,6 +150,63 @@ class AtlasLogger {
         }
     }
     
+    displayUnifiedLogs(unifiedLogs) {
+        // Парсимо unified log формат і показуємо красиво
+        let appended = 0;
+        for (const logLine of unifiedLogs) {
+            // Парсимо формат: [2025-09-08 16:34:30] [INFO] [frontend] message
+            const match = logLine.match(/\[([^\]]+)\]\s+\[([^\]]+)\]\s+\[([^\]]+)\]\s+(.+)/);
+            if (!match) {
+                // Якщо не вдалося розпарсити - показуємо як є
+                const el = document.createElement('div');
+                el.className = 'log-line info';
+                el.textContent = logLine.substring(0, 120); // Обрізаємо довгі рядки
+                this.logsContainer.appendChild(el);
+                appended++;
+                continue;
+            }
+
+            const [_, timestamp, level, service, message] = match;
+            
+            // Скорочуємо timestamp (залишаємо тільки час)
+            const shortTime = timestamp.split(' ')[1] || timestamp;
+            
+            // Очищуємо message від werkzeug деталей і дублювання дати
+            let cleanMessage = message;
+            
+            // Прибираємо werkzeug префікс і деталі
+            cleanMessage = cleanMessage.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} \[INFO\] werkzeug: /, '');
+            
+            // Прибираємо IP та дублювання дати в werkzeug логах
+            cleanMessage = cleanMessage.replace(/127\.0\.0\.1 - - \[\d{2}\/\w{3}\/\d{4} \d{2}:\d{2}:\d{2}\] /, '');
+            
+            // Для інших типів логів - прибираємо повторні дати
+            cleanMessage = cleanMessage.replace(/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3} \[.+?\] /, '');
+            
+            // Скорочуємо повідомлення якщо довге
+            const shortMessage = cleanMessage.length > 80 ? cleanMessage.substring(0, 80) + '...' : cleanMessage;
+            
+            // Створюємо елемент
+            const el = document.createElement('div');
+            el.className = `log-line ${level.toLowerCase()}`;
+            el.textContent = `[${shortTime}] [${service}] ${shortMessage}`;
+
+            this.logsContainer.appendChild(el);
+            appended++;
+        }
+
+        // Якщо переповнились, видаляємо лишнє зверху
+        while (this.logsContainer.children.length > this.maxLogs) {
+            this.logsContainer.removeChild(this.logsContainer.firstChild);
+        }
+
+        if (appended > 0) {
+            this.lastActivity = Date.now();
+            // Автоскрол вниз для нових логів
+            this.logsContainer.scrollTop = this.logsContainer.scrollHeight;
+        }
+    }
+
     displayLogs(newLogs) {
         // Не очищуємо контейнер! Логи повинні накопичуватися
         // Нормализуем и сортируем по времени по возрастанию, чтобы порядок был корректным
