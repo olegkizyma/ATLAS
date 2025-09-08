@@ -56,29 +56,35 @@ export class ModelRegistry {
             // Speed tier 1: Ultra-fast models (40+ req/min)
             'mistral-ai/ministral-3b',              // 45 req/min - найшвидший для звітів
             'microsoft/phi-3-mini-4k-instruct',     // 40 req/min - швидкі summaries
+            'microsoft/phi-4-mini-instruct',        // 40 req/min - нова швидка модель
             'mistral-ai/mistral-small-2503',        // 40 req/min - швидкі звіти
             
             // Speed tier 2: Fast models (30-39 req/min)
             'microsoft/phi-3.5-mini-instruct',      // 38 req/min
             'microsoft/phi-3-mini-128k-instruct',   // 35 req/min
             'meta/meta-llama-3.1-8b-instruct',     // 30 req/min
-            'openai/gpt-4.1-mini',                  // 30 req/min
+            'openai/gpt-4o-mini',                   // 30 req/min
             'microsoft/phi-3-small-8k-instruct',   // 30 req/min
+            'microsoft/phi-4-mini-reasoning',       // 30 req/min - нова reasoning модель
             
             // Speed tier 3: Medium models (20-29 req/min)
             'microsoft/phi-3-small-128k-instruct',  // 28 req/min
             'ai21-labs/ai21-jamba-1.5-mini',       // 25 req/min
-            'microsoft/phi-4-mini-instruct',        // 22 req/min
+            'microsoft/phi-3.5-moe-instruct',      // 22 req/min - нова MoE модель
+            'microsoft/phi-3.5-vision-instruct',   // 22 req/min - vision модель
             
             // Quality tier: High-quality models for important summaries (15-20 req/min)
             'openai/gpt-4o',                        // 18 req/min - висока якість
-            'mistral-ai/mistral-medium-2505',       // 18 req/min
+            'microsoft/phi-4',                      // 18 req/min - топова Phi модель
+            'mistral-ai/mistral-large-2411',        // 18 req/min
             'mistral-ai/mistral-nemo',              // 14 req/min
-            'openai/gpt-4.1',                       // 12 req/min
+            'ai21-labs/ai21-jamba-1.5-large',      // 12 req/min - більша Jamba модель
             
-            // Premium tier: Best reasoning for complex reports (6-8 req/min)
-            'microsoft/phi-4',                      // 8 req/min
-            'mistral-ai/mistral-large-2411',        // 6 req/min
+            // Premium tier: Best reasoning for complex reports (6-10 req/min)
+            'microsoft/phi-4-reasoning',            // 10 req/min - топова reasoning
+            'microsoft/phi-4-multimodal-instruct',  // 8 req/min - multimodal
+            'mistral-ai/codestral-2501',            // 8 req/min - code-спеціалізована
+            'deepseek/deepseek-r1',                 // 6 req/min - нова reasoning модель
         ];
 
         // Load extended list for Tetyana short-report summarization
@@ -86,13 +92,23 @@ export class ModelRegistry {
 
         // Atlas advanced reasoning models - якість перш за все
         const defaultAtlasModels = parseModels(['ATLAS_TEXT_MODELS'], [
-            // Removed: 'openai/o3' (http_error)
+            // Top-tier reasoning models
             'openai/gpt-4o',                        // 18 req/min - проверена висока якість
-            // Removed: 'openai/gpt-5-nano' (http_error)
-            'openai/gpt-4.1',                       // 12 req/min
-            'mistral-ai/mistral-large-2411',        // 6 req/min
-            'microsoft/phi-4'                       // 8 req/min
-            // Removed: 'openai/o1-mini' (http_error)
+            'microsoft/phi-4',                      // 18 req/min - топова Phi модель
+            'microsoft/phi-4-reasoning',            // 10 req/min - спеціалізована reasoning
+            'mistral-ai/mistral-large-2411',        // 6 req/min - топова Mistral
+            'deepseek/deepseek-r1',                 // 6 req/min - нова reasoning модель
+            'ai21-labs/ai21-jamba-1.5-large',      // 12 req/min - велика контекстна модель
+            
+            // Vision and multimodal capabilities
+            'microsoft/phi-4-multimodal-instruct',  // 8 req/min - multimodal
+            'microsoft/phi-3.5-vision-instruct',   // 22 req/min - vision модель
+            'meta/llama-3.2-11b-vision-instruct',  // vision Llama
+            'meta/llama-3.2-90b-vision-instruct',  // топова vision модель
+            
+            // Fast fallback models
+            'openai/gpt-4o-mini',                   // 30 req/min - швидкий fallback
+            'microsoft/phi-4-mini-instruct',        // 40 req/min - швидкий Phi
         ]);
 
     this.providers = {
@@ -139,11 +155,13 @@ export class ModelRegistry {
                 { provider: 'goose' },
                 { provider: 'openai_compat', models: [
                     'openai/gpt-4o',                    // 18 req/min - висока якість верифікації
+                    'microsoft/phi-4',                  // 18 req/min - топова Phi
                     'mistral-ai/ministral-3b',          // 45 req/min - найшвидший
                     'microsoft/phi-3.5-mini-instruct',  // 38 req/min
                     'microsoft/phi-3-mini-128k-instruct', // 35 req/min
                     'meta/meta-llama-3.1-8b-instruct', // 30 req/min
-                    'mistral-ai/mistral-nemo'           // 14 req/min
+                    'mistral-ai/mistral-nemo',          // 14 req/min
+                    'ai21-labs/ai21-jamba-1.5-mini',   // 25 req/min - швидка Jamba
                 ]}
             ],
             // Tetyana is tool-enabled and designed for Goose only
@@ -160,11 +178,11 @@ export class ModelRegistry {
             atlas: {
                 smalltalk: [
                     'openai/gpt-4o',                    // Якісна для smalltalk
-                    // Removed: 'openai/gpt-5-nano' (http_error)
+                    'microsoft/phi-4-mini-instruct',    // 40 req/min - швидкий Phi
                     'mistral-ai/ministral-3b',          // 45 req/min - швидкий для smalltalk
                     'microsoft/phi-3.5-mini-instruct',  // 38 req/min
                     'microsoft/phi-3-mini-4k-instruct', // 40 req/min
-                    // removed gpt-4o-mini
+                    'openai/gpt-4o-mini',               // 30 req/min - швидкий OpenAI
                 ]
             },
             // For Tetyana, when intentHint === 'short_report', prioritize the configured list (up to 58 models)
