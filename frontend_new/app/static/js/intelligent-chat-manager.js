@@ -1833,6 +1833,18 @@ class AtlasIntelligentChatManager {
             if (document.getElementById('pipeline-hud')) return;
             const hud = document.createElement('div');
             hud.id = 'pipeline-hud';
+
+            // Підключаємо CSS файл для pipeline HUD
+            if (!document.getElementById('pipeline-hud-css')) {
+                const link = document.createElement('link');
+                link.id = 'pipeline-hud-css';
+                link.rel = 'stylesheet';
+                link.type = 'text/css';
+                link.href = '/static/css/pipeline-hud.css';
+                document.head.appendChild(link);
+            }
+
+            
             // Progress bar container
             const prog = document.createElement('div');
             prog.id = 'pipeline-progress';
@@ -1848,8 +1860,17 @@ class AtlasIntelligentChatManager {
                 const step = document.createElement('div');
                 step.className = 'ph-step';
                 step.dataset.phase = ph;
-                step.textContent = meta.label;
                 step.style.color = meta.color;
+                // Split label into individual words for 180° rotation
+                const label = String(meta.label || '');
+                const words = label.split(/\s+/).filter(Boolean);
+                for (let i = 0; i < words.length; i++) {
+                    const word = words[i];
+                    const span = document.createElement('span');
+                    span.className = 'ph-word';
+                    span.textContent = word;
+                    step.appendChild(span);
+                }
                 if (ph === 'grisha_verdict') {
                     const mini = document.createElement('span');
                     mini.className = 'verdict-mini';

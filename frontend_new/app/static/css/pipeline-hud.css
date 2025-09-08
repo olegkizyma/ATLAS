@@ -1,0 +1,158 @@
+/* Pipeline HUD - Vertical Right-Aligned Layout */
+
+#pipeline-hud {
+    /* Positioning - full height on right edge */
+    position: fixed;
+    right: 0;
+    top: 0;
+    bottom: 0;
+    
+    /* Basic styling */
+    background: rgba(0, 0, 0, 0.15);
+    color: #eaffea;
+    padding: 12px 4px;
+    z-index: 9997;
+    font-family: system-ui, Arial, sans-serif;
+    
+    /* Vertical layout - full height */
+    display: flex;
+    flex-direction: column;
+    justify-content: space-evenly;
+    align-items: stretch;
+    
+    /* Very narrow width */
+    width: 45px;
+    
+    /* Subtle border */
+    border-left: 1px solid rgba(0, 255, 127, 0.2);
+    backdrop-filter: blur(2px);
+}
+
+.ph-step {
+    /* Basic styling */
+    display: flex;
+    width: 100%;
+    padding: 1px 2px;
+    font-size: 5px !important;
+    font-weight: 700;
+    text-align: center;
+    white-space: nowrap;
+    
+    /* Visual appearance */
+    background: rgba(0, 20, 10, 0.15);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 2px;
+    color: inherit;
+    
+    /* Transitions */
+    transition: all 0.2s ease;
+    
+    /* Text overflow handling */
+    overflow: hidden;
+    text-overflow: ellipsis;
+    
+    /* Flex item - prevent overlap */
+    flex: 1;
+    align-items: center;
+    justify-content: center;
+    min-height: 40px;
+    
+    /* Transform for rotated text */
+    transform: rotate(90deg) !important;
+    transform-origin: center;
+    white-space: nowrap;
+    
+    /* Remove writing mode since it's not working */
+    /* writing-mode: vertical-lr;
+    text-orientation: upright;
+    letter-spacing: 2px; */
+}
+
+.ph-step.active {
+    background: rgba(0, 255, 127, 0.2);
+    border-color: rgba(0, 255, 127, 0.5);
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.ph-step.done {
+    background: rgba(0, 80, 40, 0.3);
+    border-color: rgba(0, 200, 100, 0.3);
+    color: #b8ffb8;
+    opacity: 0.7;
+}
+
+.ph-step.processing {
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.6; }
+}
+
+/* Phase separators */
+.ph-sep {
+    width: 60%;
+    height: 1px;
+    background: rgba(0, 255, 127, 0.15);
+    margin: 1px auto;
+    align-self: center;
+}
+
+/* Progress bar at bottom */
+#pipeline-progress {
+    position: absolute;
+    left: 3px;
+    right: 3px;
+    bottom: 3px;
+    height: 1px;
+    background: rgba(0, 255, 127, 0.08);
+    border-radius: 1px;
+    overflow: hidden;
+}
+
+#pipeline-progress-bar {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #00ff9d, #1e90ff);
+    box-shadow: 0 0 4px rgba(0, 255, 157, 0.6);
+    transition: width 0.4s ease;
+    border-radius: 1px;
+}
+
+/* Mini indicators */
+.verdict-mini,
+.confidence-mini {
+    display: inline-block;
+    margin-left: 4px;
+    font-weight: 600;
+    font-size: 8px;
+}
+
+/* Mobile responsiveness */
+@media (max-width: 768px) {
+    #pipeline-hud {
+        width: 35px;
+        padding: 6px 1px;
+    }
+    
+    .ph-step {
+        font-size: 6px;
+        padding: 1px;
+        min-height: 35px;
+    }
+}
+
+/* Word styling with 180° rotation */
+.ph-step .ph-word {
+    display: block;
+    transform: rotate(180deg) !important;
+    transform-origin: center;
+    line-height: 1.2;
+    font-size: 10px;
+    margin: 3px 0;
+    letter-spacing: 0.8px;
+    font-weight: 700;
+    text-shadow: 0 0 2px rgba(0, 255, 127, 0.5);
+}

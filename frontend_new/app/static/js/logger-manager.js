@@ -161,7 +161,7 @@ class AtlasLogger {
                 const el = document.createElement('div');
                 el.className = 'log-line info';
                 // make logs half size, not bold, dim and green-blue
-                el.style.cssText = 'font-size:0.85em;font-weight:normal;opacity:0.9;color:#0fa3a3;line-height:1.25;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
+                el.style.cssText = 'font-size:14px;font-weight:400;opacity:0.95;color:#0fa3a3;line-height:1.3;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
                 el.textContent = logLine.substring(0, 120); // Обрізаємо довгі рядки
                 this.logsContainer.appendChild(el);
                 appended++;
@@ -192,7 +192,7 @@ class AtlasLogger {
             const el = document.createElement('div');
             el.className = `log-line ${level.toLowerCase()}`;
             // make logs half size, not bold, dim and green-blue
-            el.style.cssText = 'font-size:0.85em;font-weight:normal;opacity:0.9;color:#0fa3a3;line-height:1.25;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
+            el.style.cssText = 'font-size:14px;font-weight:400;opacity:0.95;color:#0fa3a3;line-height:1.3;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
             el.textContent = `[${shortTime}] [${service}] ${shortMessage}`;
 
             this.logsContainer.appendChild(el);
@@ -230,7 +230,7 @@ class AtlasLogger {
             const el = document.createElement('div');
             el.className = `log-line ${log.level || 'info'}`;
             // make logs half size, not bold, dim and green-blue
-            el.style.cssText = 'font-size:0.85em;font-weight:normal;opacity:0.9;color:#0fa3a3;line-height:1.25;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
+            el.style.cssText = 'font-size:14px;font-weight:400;opacity:0.95;color:#0fa3a3;line-height:1.3;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
             el.textContent = `${tsStr} ${source} ${message}`;
 
             // Добавляем вниз (хронологически), чтобы порядок сохранялся
@@ -268,7 +268,7 @@ class AtlasLogger {
     const logElement = document.createElement('div');
     logElement.className = `log-line ${level}`;
     // make logs half size, not bold, dim and green-blue
-    logElement.style.cssText = 'font-size:0.85em;font-weight:normal;opacity:0.9;color:#0fa3a3;line-height:1.25;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
+    logElement.style.cssText = 'font-size:14px;font-weight:400;opacity:0.95;color:#0fa3a3;line-height:1.3;font-family:system-ui, "Segoe UI", Arial, sans-serif;';
     logElement.textContent = `${logEntry.timestamp} [${source}] ${message}`;
         
         // Вставляємо новий лог зверху (як перший елемент)

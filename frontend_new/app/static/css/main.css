@@ -21,8 +21,62 @@ body {
 .phase-badge { font-weight:600; text-shadow:0 0 3px rgba(0,0,0,.6); }
 
 /* === Pipeline HUD === */
-#pipeline-hud { position:fixed; top:52px; right:8px; z-index:1200; display:flex; gap:4px; background:rgba(0,20,10,0.55); padding:4px 6px; border:1px solid rgba(0,255,127,0.25); border-radius:6px; backdrop-filter:blur(4px); font-size:10px; }
-#pipeline-hud .ph-step { position:relative; padding:3px 6px; border-radius:4px; font-weight:600; letter-spacing:.5px; opacity:.35; transition:opacity .25s, box-shadow .25s; cursor:default; }
+#pipeline-hud {
+    position: fixed;
+    top: 0;
+    right: 5px; /* attach to right wall with 5px offset */
+    height: 100vh; /* full vertical */
+    width: 96px; /* thickness */
+    z-index: 1200;
+    display: flex;
+    flex-direction: column;
+    gap: 0; /* remove gaps */
+    align-items: center;
+    justify-content: flex-start;
+    background: rgba(0,20,10,0.65);
+    padding: 5px 4px; /* minimal padding */
+    border: 1px solid rgba(0,255,127,0.25);
+    border-radius: 6px;
+    backdrop-filter: blur(4px);
+    font-size: 12px;
+}
+#pipeline-hud .ph-step {
+    width: 100%;
+    box-sizing: border-box;
+    text-align: center;
+    padding: 8px 6px; /* larger padding for readability */
+    border-radius: 6px;
+    font-weight: 600;
+    letter-spacing: .3px;
+    opacity: .6;
+    transition: opacity .2s, box-shadow .2s, background .2s;
+    cursor: default;
+    display: block;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* vertical spacing: remove extra gaps */
+#pipeline-hud .ph-step + .ph-step { margin-top: 0; }
+
+/* hide visual separators created in DOM */
+.ph-sep { display: none !important; }
+
+/* hide artificial gaps between words */
+.rot-gap { display: block !important; height: 6px; }
+
+/* Rotate each word inside a ph-step by 90deg */
+.rot-word {
+    display: block; /* stack words internally for clearer vertical stretch */
+    transform: rotate(90deg) scaleY(1.25); /* stretch vertically */
+    transform-origin: center center;
+    white-space: nowrap;
+    font-size: 12px;
+    line-height: 1.05;
+    margin-bottom: 4px; /* ensure a small gap so words don't overlap */
+}
+.rot-gap { width: 6px; }
 #pipeline-hud .ph-step.active { opacity:1; box-shadow:0 0 6px currentColor; }
 #pipeline-hud .ph-step.done { opacity:.75; }
 #pipeline-hud .ph-sep { width:12px; height:2px; margin:8px -2px 0 -2px; background:linear-gradient(90deg,rgba(0,255,127,.2),rgba(0,255,127,.55)); border-radius:1px; opacity:.4; }
