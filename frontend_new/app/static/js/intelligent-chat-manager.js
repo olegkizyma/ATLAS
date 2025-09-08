@@ -75,16 +75,24 @@ class AtlasIntelligentChatManager {
             fallbackLanguage: 'en-US',
             confidenceThreshold: 0.5, // Знижено з 0.7 до 0.5 для кращого розпізнання
             
-            // Whisper STT configuration
+            // Enhanced Whisper STT configuration for mobile and desktop
             preferWhisper: true, // Віддавати перевагу Whisper замість Web Speech API
             whisperAvailable: false,
             recordingTimeout: 10000, // 10 секунд макс. запис для Whisper
             isRecording: false,
             mediaRecorder: null,
             audioChunks: [],
-
-            // One-shot vs wake-word modes
-            currentBeamSize: 5, // 5 для одиночного запису ("віспер 5"), 3 для після гарячого слова ("віспер 3")
+            
+            // Intelligent beam size selection based on device and context
+            beamSizes: {
+                mobile: 3,        // Faster on mobile devices
+                desktop: 5,       // Standard quality
+                highQuality: 8    // Best quality for important commands
+            },
+            deviceType: 'desktop', // Will be detected
+            currentBeamSize: 5,    // Dynamic based on context
+            
+            // Enhanced wake word system
             wakeModeActive: false,
             resumeWakeAfterTranscribe: false,
             wakeWord: 'атлас',
@@ -101,10 +109,10 @@ class AtlasIntelligentChatManager {
             ]
         };
         
-        // Поведінка синхронізації TTS з наступними повідомленнями та кроками виконання
+        // Enhanced TTS synchronization system for natural agent flow
         this.ttsSync = {
             // Якщо true — нові повідомлення користувача будуть чекати завершення поточного озвучування
-            blockNextMessageUntilTTSComplete: false,
+            blockNextMessageUntilTTSComplete: true,
             // Диспатчити DOM-події для інтеграції сторонніх модулів (кроки виконання, аналітика)
             dispatchEvents: true,
             // Хуки керування кроками виконання (за потреби заміни цими методами зовні)
@@ -115,10 +123,142 @@ class AtlasIntelligentChatManager {
             // Максимальний час очікування завершення TTS перед форсуванням (мс)
             maxWaitTime: 45000,
             // Прапорець для відстеження стану синхронізації
-            isWaitingForTTS: false
+            isWaitingForTTS: false,
+            // Запобігати одночасному мовленню агентів
+            preventSimultaneousVoices: true,
+            // Природна пауза між агентами (мс) для природнього діалогу
+            naturalPauseBetweenAgents: 800,
+            // Таймаут для автовідповіді Atlas (30 секунд)
+            autoResponseTimeout: 30000
         };
         
         this.init();
+    }
+
+    detectDeviceType() {
+        /**
+         * Detects device type for optimal Whisper configuration
+         */
+        try {
+            // Check for mobile user agent
+            const userAgent = navigator.userAgent.toLowerCase();
+            const isMobile = /mobile|android|iphone|ipad|tablet|blackberry|windows phone/.test(userAgent);
+            
+            // Check hardware concurrency (CPU cores)
+            const cores = navigator.hardwareConcurrency || 4;
+            
+            // Check available memory (if available)
+            const memory = navigator.deviceMemory || 4;
+            
+            // Mobile detection logic
+            if (isMobile || cores <= 4 || memory <= 4) {
+                this.speechSystem.deviceType = 'mobile';
+                this.speechSystem.currentBeamSize = this.speechSystem.beamSizes.mobile;
+            } else {
+                this.speechSystem.deviceType = 'desktop';
+                this.speechSystem.currentBeamSize = this.speechSystem.beamSizes.desktop;
+            }
+            
+            this.log(`[STT] Device detected: ${this.speechSystem.deviceType} (cores: ${cores}, memory: ${memory}GB)`);
+            this.log(`[STT] Optimal beam size: ${this.speechSystem.currentBeamSize}`);
+            
+        } catch (error) {
+            this.log(`[STT] Device detection failed: ${error.message}, defaulting to desktop`);
+            this.speechSystem.deviceType = 'desktop';
+            this.speechSystem.currentBeamSize = this.speechSystem.beamSizes.desktop;
+        }
+    }
+
+    getOptimalBeamSize(context = 'standard') {
+        /**
+         * Returns optimal beam size based on context and device
+         */
+        switch (context) {
+            case 'wake':
+                // Wake word responses should be fast
+                return this.speechSystem.beamSizes.mobile;
+            case 'command':
+                // Important commands need better accuracy
+                return this.speechSystem.deviceType === 'mobile' 
+                    ? this.speechSystem.beamSizes.desktop 
+                    : this.speechSystem.beamSizes.highQuality;
+            case 'standard':
+            default:
+                // Use device-optimized setting
+                return this.speechSystem.currentBeamSize;
+        }
+    }
+
+    startClarificationCountdown() {
+        /**
+         * Shows a countdown to user indicating when Atlas will auto-respond
+         */
+        if (this._clarificationCountdownTimer) {
+            clearInterval(this._clarificationCountdownTimer);
+        }
+        
+        const autoResponseTimeout = this.ttsSync.autoResponseTimeout || 30000;
+        const startTime = Date.now();
+        let remainingTime = autoResponseTimeout;
+        
+        // Show initial countdown
+        this.updateClarificationCountdown(remainingTime);
+        
+        this._clarificationCountdownTimer = setInterval(() => {
+            remainingTime = autoResponseTimeout - (Date.now() - startTime);
+            
+            if (remainingTime <= 0) {
+                clearInterval(this._clarificationCountdownTimer);
+                this._clarificationCountdownTimer = null;
+                this.hideClarificationCountdown();
+                return;
+            }
+            
+            this.updateClarificationCountdown(remainingTime);
+        }, 1000);
+    }
+    
+    updateClarificationCountdown(remainingMs) {
+        /**
+         * Updates the clarification countdown display
+         */
+        try {
+            const banner = document.querySelector('.clarification-banner');
+            if (!banner) return;
+            
+            let countdownEl = banner.querySelector('.countdown');
+            if (!countdownEl) {
+                countdownEl = document.createElement('div');
+                countdownEl.className = 'countdown';
+                countdownEl.style.cssText = 'font-size: 12px; color: #ffaa00; margin-top: 5px;';
+                banner.appendChild(countdownEl);
+            }
+            
+            const seconds = Math.ceil(remainingMs / 1000);
+            countdownEl.textContent = `Atlas автоматично відповість через ${seconds} сек.`;
+            
+        } catch (error) {
+            this.log(`[UI] Countdown update error: ${error.message}`);
+        }
+    }
+    
+    hideClarificationCountdown() {
+        /**
+         * Hides the clarification countdown
+         */
+        try {
+            if (this._clarificationCountdownTimer) {
+                clearInterval(this._clarificationCountdownTimer);
+                this._clarificationCountdownTimer = null;
+            }
+            
+            const countdownEl = document.querySelector('.clarification-banner .countdown');
+            if (countdownEl) {
+                countdownEl.remove();
+            }
+        } catch (error) {
+            this.log(`[UI] Countdown hide error: ${error.message}`);
+        }
     }
 
     generateClientMessageId() {
@@ -720,8 +860,12 @@ class AtlasIntelligentChatManager {
                     this.showClarificationBanner();
                     this._clarificationFreeze = true;
                     try { this.updatePipelineHUD('atlas_clarify'); } catch(_) {}
+                    
+                    // Start auto-response countdown for user awareness
+                    this.startClarificationCountdown();
                 } else if (data.session && data.session.clarificationJustResolved) {
                     this.hideClarificationBanner();
+                    this.hideClarificationCountdown();
                     this._clarificationFreeze = false;
                 } else if (data.endOfConversation === true) {
                     // No follow-up actions and orchestrator signaled end
@@ -828,9 +972,11 @@ class AtlasIntelligentChatManager {
             } else if (data.session && data.session.awaitingClarification) {
                 this.showClarificationBanner();
                 this._clarificationFreeze = true;
+                this.startClarificationCountdown();
                 try { this.updatePipelineHUD('atlas_clarify'); } catch(_) {}
             } else if (data.session && data.session.clarificationJustResolved) {
                 this.hideClarificationBanner();
+                this.hideClarificationCountdown();
                 this._clarificationFreeze = false;
             } else if (data.endOfConversation === true) {
                 this.log('[CHAT] Conversation ended by orchestrator (continue)');
@@ -1068,10 +1214,11 @@ class AtlasIntelligentChatManager {
             while (this.voiceSystem.ttsQueue.length > 0) {
                 const ttsItem = this.voiceSystem.ttsQueue.shift();
                 this.log(`[TTS] Processing queue item for ${ttsItem.agent}: "${ttsItem.text.substring(0, 50)}..."`);
-                // small subtitle hint before playback
+                
+                // Show subtitle hint before playback
                 this.showSubtitles(ttsItem.text);
                 
-                // Wait for current TTS to finish if strict ordering is enabled
+                // Enhanced strict ordering with natural pauses
                 if (this.ttsSync.strictAgentOrder && this.voiceSystem.currentAudio && !this.voiceSystem.currentAudio.paused) {
                     this.log('[TTS] Waiting for current audio to finish (strict ordering)');
                     await new Promise(resolve => {
@@ -1097,12 +1244,19 @@ class AtlasIntelligentChatManager {
                     });
                 }
 
+                // Prevent simultaneous voices - wait for any ongoing speech
+                if (this.ttsSync.preventSimultaneousVoices) {
+                    await this.ensureNoSimultaneousVoices();
+                }
+
                 // Synthesize the text with agent-specific settings
                 await this.synthesizeAndPlay(ttsItem.text, ttsItem.agent);
                 
-                // Add delay between agents for natural flow
+                // Natural pause between agents for office-like flow
                 if (this.ttsSync.strictAgentOrder && this.voiceSystem.ttsQueue.length > 0) {
-                    await new Promise(resolve => setTimeout(resolve, 500));
+                    const pauseDuration = this.ttsSync.naturalPauseBetweenAgents || 800;
+                    this.log(`[TTS] Natural pause between agents: ${pauseDuration}ms`);
+                    await new Promise(resolve => setTimeout(resolve, pauseDuration));
                 }
             }
         } catch (error) {
@@ -1115,6 +1269,55 @@ class AtlasIntelligentChatManager {
             if (this.ttsSync.dispatchEvents) {
                 window.dispatchEvent(new CustomEvent('atlas-tts-queue-complete'));
             }
+        }
+    }
+
+    async ensureNoSimultaneousVoices() {
+        /**
+         * Ensures no simultaneous voices are playing for natural office-like conversation
+         */
+        if (!this.ttsSync.preventSimultaneousVoices) {
+            return;
+        }
+
+        // Check if any audio is currently playing
+        const isAnyAudioPlaying = () => {
+            if (this.voiceSystem.currentAudio && 
+                !this.voiceSystem.currentAudio.paused && 
+                !this.voiceSystem.currentAudio.ended) {
+                return true;
+            }
+            
+            // Check for any other audio elements that might be playing
+            const audioElements = document.querySelectorAll('audio');
+            for (const audio of audioElements) {
+                if (!audio.paused && !audio.ended) {
+                    return true;
+                }
+            }
+            
+            return false;
+        };
+
+        // Wait for any ongoing audio to finish
+        if (isAnyAudioPlaying()) {
+            this.log('[TTS] Waiting for ongoing audio to finish to prevent simultaneous voices');
+            await new Promise(resolve => {
+                const checkFinished = () => {
+                    if (!isAnyAudioPlaying()) {
+                        resolve();
+                    } else {
+                        setTimeout(checkFinished, 100);
+                    }
+                };
+                
+                // Timeout after 15 seconds
+                setTimeout(resolve, 15000);
+                checkFinished();
+            });
+            
+            // Brief pause after audio finishes for natural flow
+            await new Promise(resolve => setTimeout(resolve, 300));
         }
     }
 
@@ -2107,6 +2310,9 @@ class AtlasIntelligentChatManager {
 
     async initSpeechSystem() {
         try {
+            // Detect device type first for optimal configuration
+            this.detectDeviceType();
+            
             // Check Whisper availability first
             if (this.speechSystem.preferWhisper) {
                 await this.checkWhisperAvailability();
@@ -2355,13 +2561,14 @@ class AtlasIntelligentChatManager {
 
             this.log(`[STT] Processing audio with Whisper (${audioBlob.size} bytes)`);
 
-            // Create form data for upload
+            // Create form data for upload with enhanced mobile support
             const formData = new FormData();
             formData.append('file', audioBlob, 'recording.webm');
             formData.append('language', 'uk'); // Ukrainian
-            const beam = String(this.speechSystem.currentBeamSize || 5);
+            const beam = String(this.speechSystem.currentBeamSize || this.getOptimalBeamSize());
             formData.append('beam_size', beam);
             formData.append('temperature', '0.0');
+            formData.append('optimize_for_mobile', this.speechSystem.deviceType === 'mobile' ? 'true' : 'false');
 
             // Send to Whisper endpoint
             const response = await fetch(`${this.frontendBase}/api/stt/transcribe`, {
@@ -2794,8 +3001,8 @@ class AtlasIntelligentChatManager {
             this.disableWakeMode(true);
             return;
         }
-        // Інакше — запускаємо одноразовий запис через Whisper (beam_size=5)
-        this.speechSystem.currentBeamSize = 5;
+        // Інакше — запускаємо одноразовий запис через Whisper з оптимальним beam size
+        this.speechSystem.currentBeamSize = this.getOptimalBeamSize('standard');
         if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
             this.startWhisperRecording();
         } else {
@@ -2874,8 +3081,8 @@ class AtlasIntelligentChatManager {
             } catch(_) {}
         }
 
-        // Після підтвердження — одноразовий запис для запиту користувача (beam_size=3)
-        this.speechSystem.currentBeamSize = 3;
+        // Після підтвердження — одноразовий запис для запиту користувача з швидким beam size
+        this.speechSystem.currentBeamSize = this.getOptimalBeamSize('wake');
         this.speechSystem.resumeWakeAfterTranscribe = true;
         if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
             this.startWhisperRecording();

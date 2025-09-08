@@ -40,12 +40,47 @@ class STTManager:
             self.compute_type = 'float16' if self.device == 'cuda' else 'int8'
         self.temp_dir = os.getenv('WHISPER_TEMP_DIR', tempfile.gettempdir())
 
-        # Підтримувані формати
+        # Enhanced mobile and desktop support
+        self.default_beam_size = {
+            'mobile': 3,      # Lower beam size for mobile performance
+            'desktop': 5,     # Standard beam size for desktop
+            'high_quality': 8 # High quality for critical transcriptions
+        }
+        
+        # Device-specific optimizations
+        self.device_type = self._detect_device_type()
+        self.optimal_beam_size = self._get_optimal_beam_size()
+
+        # Підтримувані формати (enhanced for mobile)
         self.allowed_extensions = {
             'wav', 'mp3', 'mp4', 'm4a', 'aac', 'ogg', 'flac', 'webm', 'opus'
         }
 
         self._init_whisper()
+    
+    def _detect_device_type(self) -> str:
+        """Detects if running on mobile or desktop for optimization"""
+        try:
+            # Simple heuristic: check CPU count and available memory
+            import psutil
+            cpu_count = psutil.cpu_count()
+            memory_gb = psutil.virtual_memory().total / (1024**3)
+            
+            # Mobile typically has fewer cores and less memory
+            if cpu_count <= 4 and memory_gb <= 8:
+                return 'mobile'
+            else:
+                return 'desktop'
+        except ImportError:
+            # Fallback to desktop if psutil not available
+            return 'desktop'
+    
+    def _get_optimal_beam_size(self) -> int:
+        """Gets optimal beam size based on device type"""
+        if self.device_type == 'mobile':
+            return self.default_beam_size['mobile']
+        else:
+            return self.default_beam_size['desktop']
     
     def _init_whisper(self) -> bool:
         """Ініціалізує модель Whisper."""
@@ -78,16 +113,18 @@ class STTManager:
     def transcribe_file(self, 
                        file_path: str, 
                        language: Optional[str] = None,
-                       beam_size: int = 5,
-                       temperature: float = 0.0) -> Dict[str, Any]:
+                       beam_size: Optional[int] = None,
+                       temperature: float = 0.0,
+                       optimize_for_mobile: bool = False) -> Dict[str, Any]:
         """
-        Транскрибує аудіофайл за допомогою Whisper.
+        Транскрибує аудіофайл за допомогою Whisper з оптимізацією для мобільних та десктоп пристроїв.
         
         Args:
             file_path: Шлях до аудіофайлу
             language: Код мови (None для автовизначення)
-            beam_size: Розмір beam для пошуку
+            beam_size: Розмір beam для пошуку (None для автовибору)
             temperature: Температура для sampling
+            optimize_for_mobile: Форсувати мобільні оптимізації
         
         Returns:
             Dict з результатом транскрибації
@@ -96,14 +133,35 @@ class STTManager:
             raise ValueError("Whisper модель недоступна")
         
         try:
-            logger.info(f"Транскрибую файл: {file_path}")
+            # Determine optimal beam size
+            if beam_size is None:
+                if optimize_for_mobile:
+                    beam_size = self.default_beam_size['mobile']
+                else:
+                    beam_size = self.optimal_beam_size
+            
+            logger.info(f"Транскрибую файл: {file_path} (beam_size={beam_size}, device_type={self.device_type})")
+            
+            # Enhanced parameters for mobile/desktop optimization
+            transcribe_params = {
+                'beam_size': beam_size,
+                'temperature': temperature,
+                'language': language
+            }
+            
+            # Mobile-specific optimizations
+            if optimize_for_mobile or self.device_type == 'mobile':
+                transcribe_params.update({
+                    'patience': 1.0,  # Faster decoding
+                    'length_penalty': 1.0,  # Standard length penalty
+                    'repetition_penalty': 1.1,  # Slight repetition penalty
+                    'no_repeat_ngram_size': 2  # Prevent short repetitions
+                })
             
             # Виконуємо транскрибацію
             segments, info = self.whisper_model.transcribe(
                 file_path,
-                beam_size=beam_size,
-                temperature=temperature,
-                language=language
+                **transcribe_params
             )
             
             # Збираємо результат
@@ -141,14 +199,17 @@ class STTManager:
             }
     
     def get_status(self) -> Dict[str, Any]:
-        """Повертає статус STT системи."""
+        """Повертає статус STT системи з інформацією про оптимізації."""
         return {
             'whisper_available': self.is_whisper_available(),
             'whisper_model': self.model_size if self.is_whisper_available() else None,
             'device': self.device,
+            'device_type': self.device_type,
+            'optimal_beam_size': self.optimal_beam_size,
             'compute_type': getattr(self, 'compute_type', None),
             'supported_formats': list(self.allowed_extensions),
             'fallback_available': True,  # Web Speech API завжди доступний у браузері
+            'mobile_optimizations': self.device_type == 'mobile',
         }
 
 # Глобальний instance STT менеджера

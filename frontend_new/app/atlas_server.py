@@ -1250,13 +1250,15 @@ def stt_transcribe():
             language = request.form.get('language') or 'uk'
             beam_size = int(request.form.get('beam_size', 5))
             temperature = float(request.form.get('temperature', 0.0))
+            optimize_for_mobile = request.form.get('optimize_for_mobile', 'false').lower() == 'true'
             
-            # Виконуємо транскрибацію
+            # Виконуємо транскрибацію з мобільними оптимізаціями
             result = stt_manager.transcribe_file(
                 temp_file.name,
                 language=language,
                 beam_size=beam_size,
-                temperature=temperature
+                temperature=temperature,
+                optimize_for_mobile=optimize_for_mobile
             )
             
             return jsonify(result)

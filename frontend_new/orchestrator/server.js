@@ -102,12 +102,19 @@ const AGENT_ROLE_PROMPTS = {
         ].filter(Boolean).join('\n'),
         
         autoResponse: (context) => [
-            `Ти — Atlas, стратег системи. Користувач не надав відповіді на запит.`,
-            `Твоя задача: проаналізувати ситуацію та надати розумну відповідь за користувача.`,
-            `Контекст: ${context.clarificationNeeded}`,
-            `Останні повідомлення: ${context.recentHistory}`,
-            `Надай найбільш логічну відповідь, яку міг би дати користувач, базуючись на контексті.`,
-            `Будь практичним і орієнтованим на результат.`
+            `Ти — Atlas, інтелектуальний помічник. Користувач не відповів протягом 30 секунд.`,
+            `Проаналізуй ситуацію та надай природну, розумну відповідь від імені користувача.`,
+            ``,
+            `Контекст завдання: ${context.clarificationNeeded}`,
+            `Попередні повідомлення: ${context.recentHistory}`,
+            ``,
+            `Рекомендації для відповіді:`,
+            `- Використовуй здоровий глузд та практичний підхід`,
+            `- Якщо є сумніви, обирай безпечний варіант`,
+            `- Продовжуй виконання з типовими налаштуваннями, якщо це логічно`,
+            `- Якщо потрібно уточнення, надай найкращу здогадку базуючись на контексті`,
+            ``,
+            `Відповідай як користувач (не як Atlas), природно та стисло:`
         ].join('\n'),
         
         taskAnalysis: (userMessage) => [
@@ -477,7 +484,15 @@ async function startGrishaVisualMonitoring(sessionId, taskDescription) {
             return null;
         }
     } catch (error) {
-        console.warn(`[GRISHA] Visual monitoring start failed: ${error.message}`);
+        // Enhanced error handling for production
+        if (error.code === 'ECONNREFUSED') {
+            console.warn(`[GRISHA] Frontend service unavailable for visual monitoring`);
+        } else if (error.code === 'ETIMEDOUT') {
+            console.warn(`[GRISHA] Visual monitoring start timeout - continuing without monitoring`);
+        } else {
+            console.warn(`[GRISHA] Visual monitoring start failed: ${error.message}`);
+        }
+        // Return null gracefully - system continues without visual monitoring
         return null;
     }
 }
