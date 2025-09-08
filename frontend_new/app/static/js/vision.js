@@ -101,6 +101,8 @@ class AtlasVision {
         // Вставляємо панель в DOM
         const container = document.querySelector('.chat-interface') || document.body;
         container.appendChild(visionPanel);
+        // Початково ставимо панель згорнутою
+        visionPanel.classList.add('collapsed');
         
         // Налаштовуємо обробники подій
         this.setupEventListeners();
@@ -315,24 +317,33 @@ class AtlasVision {
                     margin: 20px 0;
                 }
             }
+            /* Collapsed state - reduced height and hidden content */
+            .vision-panel.collapsed {
+                max-height: 44px;
+                overflow: hidden;
+                opacity: 0.65;
+                transform: translateY(-50%) translateX(6px) scale(0.995);
+            }
+            .vision-panel.collapsed .vision-content,
+            .vision-panel.collapsed .vision-preview,
+            .vision-panel.collapsed .vision-analysis,
+            .vision-panel.collapsed .vision-sequence,
+            .vision-panel.collapsed .vision-controls {
+                display: none !important;
+            }
         `;
         
         document.head.appendChild(style);
     }
     
     setupEventListeners() {
-        // Toggle панелі
+        // Toggle панелі — використовуємо клас collapsed для коректної анімації
         document.getElementById('vision-toggle').addEventListener('click', () => {
-            const content = document.querySelector('.vision-content');
+            const panel = document.getElementById('atlas-vision-panel');
             const toggle = document.getElementById('vision-toggle');
-            
-            if (content.style.display === 'none') {
-                content.style.display = 'block';
-                toggle.textContent = 'Згорнути';
-            } else {
-                content.style.display = 'none';
-                toggle.textContent = 'Розгорнути';
-            }
+            if (!panel) return;
+            const isCollapsed = panel.classList.toggle('collapsed');
+            toggle.textContent = isCollapsed ? 'Розгорнути' : 'Згорнути';
         });
         
         // Завантаження файлу
