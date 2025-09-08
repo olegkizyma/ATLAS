@@ -27,7 +27,7 @@ async function executeWithModelRotation(agentName, message, sessionId, options =
         const result = await callWithModelRotation(agentName, message, options);
         
         if (result && result.content) {
-            logMessage('info', `[EXECUTION] agent=${agentName} provider=${result.provider} model=${result.model} success=true`);
+            logMessage('info', `[EXECUTION] agent=${agentName} model=${result.model} success=true`);
             return result.content;
         } else {
             throw new Error('No content returned from model rotation');
@@ -206,6 +206,7 @@ app.use(express.json({ limit: '10mb' }));
 
 // OpenAI-compatible fallback API base (used for Atlas/Grisha only)
 const FALLBACK_API_BASE = (process.env.FALLBACK_API_BASE || 'http://127.0.0.1:3010/v1').replace(/\/$/, '');
+const FALLBACK_API_KEY = process.env.FALLBACK_API_KEY || process.env.OPENAI_COMPAT_API_KEY || 'dummy-key';
 // Allow disabling or fast-skip of openai_compat provider to avoid long stalls when service (port 3010) is absent
 let OPENAI_COMPAT_DISABLED = (process.env.DISABLE_OPENAI_COMPAT === '1') || (process.env.NO_OPENAI_COMPAT === '1') || (process.env.FAST_NO_OPENAI === '1');
 let openAICompatDown = false;      // true when last probe/call failed
@@ -215,8 +216,8 @@ let openAICompatRecovered = false; // becomes true if service comes back after b
 (async () => {
     if (OPENAI_COMPAT_DISABLED) return;
     const probe = async () => {
-        try {
-            await axios.get(FALLBACK_API_BASE + '/models', { timeout: 800 });
+            try {
+            await axios.get(FALLBACK_API_BASE + '/models', { timeout: 800, headers: { Authorization: `Bearer ${FALLBACK_API_KEY}` } });
             if (openAICompatDown) {
                 openAICompatDown = false;
                 openAICompatRecovered = true;
@@ -315,7 +316,7 @@ async function callWithModelRotation(agentName, userMessage, options = {}) {
         }
         
         openAICompatDown = false; // Скидаємо прапор при успіху
-        return result?.content || null;
+        return result;
         
     } catch (error) {
         console.warn(`[ROTATION] All models failed for ${agentName}:`, error.message);
@@ -342,6 +343,25 @@ app.get('/diagnostics/openai_compat_status', (req, res) => {
         down: openAICompatDown,
         recovered_once: openAICompatRecovered,
         base: FALLBACK_API_BASE
+    });
+});
+
+// Reset circuit breaker endpoint
+app.post('/diagnostics/reset_circuit_breaker', (req, res) => {
+    PIPELINE_METRICS.circuitBreaker.isOpen = false;
+    PIPELINE_METRICS.circuitBreaker.consecutiveFailures = 0;
+    PIPELINE_METRICS.circuitBreaker.cooldownRemaining = 0;
+    PIPELINE_METRICS.circuitBreaker.lastFailureTime = 0;
+    
+    // Also reset model registry failures
+    if (registry) {
+        registry.modelFailures.clear();
+    }
+    
+    res.json({
+        success: true,
+        message: 'Circuit breaker reset',
+        state: PIPELINE_METRICS.circuitBreaker
     });
 });
 

@@ -5,6 +5,51 @@
 
 import OpenAI from 'openai';
 
+// Global request manager to prevent concurrent requests and rate limiting
+class GlobalRequestManager {
+    constructor() {
+        this.lastRequestTime = 0;
+        this.minDelay = 1500; // Мінімум 1.5 секунди між запитами
+        this.rateLimitedModels = new Map(); // model -> timestamp коли можна знову спробувати
+    }
+    
+    async waitForNextRequest() {
+        const now = Date.now();
+        const timeSinceLastRequest = now - this.lastRequestTime;
+        
+        if (timeSinceLastRequest < this.minDelay) {
+            const waitTime = this.minDelay - timeSinceLastRequest;
+            console.log(`[GLOBAL_RATE_LIMIT] Waiting ${waitTime}ms before next request`);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+        }
+        
+        this.lastRequestTime = Date.now();
+    }
+    
+    isModelRateLimited(model) {
+        const blockedUntil = this.rateLimitedModels.get(model);
+        if (!blockedUntil) return false;
+        
+        if (Date.now() < blockedUntil) {
+            const remainingMs = blockedUntil - Date.now();
+            console.log(`[GLOBAL_RATE_LIMIT] Model ${model} blocked for ${Math.ceil(remainingMs/1000)}s more`);
+            return true;
+        }
+        
+        // Час вийшов, прибираємо з списку
+        this.rateLimitedModels.delete(model);
+        return false;
+    }
+    
+    markModelRateLimited(model, retryAfterSeconds = 60) {
+        const blockedUntil = Date.now() + (retryAfterSeconds * 1000);
+        this.rateLimitedModels.set(model, blockedUntil);
+        console.log(`[GLOBAL_RATE_LIMIT] Model ${model} blocked for ${retryAfterSeconds}s`);
+    }
+}
+
+const globalRequestManager = new GlobalRequestManager();
+
 // Конфігурація клієнтів
 const DEFAULT_FALLBACK_BASE = process.env.FALLBACK_API_BASE || 'http://127.0.0.1:3010/v1';
 const DEFAULT_API_KEY = process.env.OPENAI_COMPAT_API_KEY || process.env.FALLBACK_API_KEY || 'dummy-key';
@@ -57,6 +102,14 @@ function calculateTimeout(model, message) {
  * Заміна для callOpenAICompatChat
  */
 export async function chatWithModel(baseUrl, model, userMessage, options = {}) {
+    // Глобальна затримка між запитами
+    await globalRequestManager.waitForNextRequest();
+    
+    // Перевіряємо чи модель не заблокована
+    if (globalRequestManager.isModelRateLimited(model)) {
+        throw new Error(`RATE_LIMITED:${model}:60:Model is globally rate limited`);
+    }
+
     const client = getClient(baseUrl);
     
     const {
@@ -100,6 +153,8 @@ export async function chatWithModel(baseUrl, model, userMessage, options = {}) {
         // Детальніша обробка помилок для ротації моделей
         if (error.status === 429) {
             const retryAfter = error.headers?.['retry-after'] || error.headers?.['Retry-After'] || 60;
+            // Глобально маркуємо модель як rate limited
+            globalRequestManager.markModelRateLimited(model, retryAfter);
             throw new Error(`RATE_LIMITED:${model}:${retryAfter}:${error.message}`);
         } else if (error.status === 401 || error.status === 403) {
             throw new Error(`AUTH_ERROR:${model}:${error.message}`);
@@ -237,10 +292,17 @@ export async function chatWithModelRotation(baseUrl, models, userMessage, option
     for (let i = 0; i < models.length; i++) {
         const model = models[i];
         
-        // Пропускаємо rate limited моделі
-        if (rateLimitedModels.has(model)) {
+        // Пропускаємо rate limited моделі (локально та глобально)
+        if (rateLimitedModels.has(model) || globalRequestManager.isModelRateLimited(model)) {
             console.log(`[ROTATION] Skipping rate limited model: ${model}`);
             continue;
+        }
+        
+        // Додаємо затримку між моделями для уникнення concurrent rate limits
+        if (i > 0) {
+            const modelSwitchDelay = 3000; // 3 секунди між моделями
+            console.log(`[ROTATION] Waiting ${modelSwitchDelay}ms before trying next model...`);
+            await new Promise(resolve => setTimeout(resolve, modelSwitchDelay));
         }
         
         for (let retry = 0; retry <= maxRetries; retry++) {
@@ -292,7 +354,8 @@ export async function chatWithModelRotation(baseUrl, models, userMessage, option
                     continue; // Повторюємо ту ж модель
                     
                 } else if (errorType === 'TIMEOUT' && retry < maxRetries) {
-                    console.warn(`[ROTATION] ⏱️ Timeout, retrying ${model}...`);
+                    console.warn(`[ROTATION] ⏱️ Timeout, retrying ${model} in ${retryDelay}ms...`);
+                    await new Promise(resolve => setTimeout(resolve, retryDelay));
                     continue; // Повторюємо ту ж модель
                     
                 } else {

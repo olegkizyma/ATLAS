@@ -1,4 +1,7 @@
+# 🤖 LLM Provider Integration Guide
 
+> **⚠️ ВАЖЛИВО:** Використовуйте виключно `"dummy-key"` як API ключ для всіх запитів.  
+> Деякі моделі не працюють стабільно з реальними API ключами через проксі.
 
 ## 📊 Результати тестування 58 моделей:
 
@@ -118,7 +121,7 @@ poetry add openai
 from openai import OpenAI
 
 client = OpenAI(
-    api_key="dummy-key",  # Будь-який ключ для локального проксі
+    api_key="dummy-key",  # ✅ Рекомендовано для локального проксі
     base_url="http://localhost:3010/v1"  # Ваш проксі
 )
 
@@ -213,11 +216,11 @@ curl -X POST "http://localhost:3010/v1/chat/completions" \
 **1. Через змінні оточення (рекомендовано):**
 
 ```bash
-# Додайте до ~/.bashrc, ~/.zshrc або .env файлу
-export OPENAI_API_KEY="your-real-api-key"
+# Додайте до ~/.bashrc, ~/.zshrc або .env файлу (використовуйте dummy-key для стабільності)
+export OPENAI_API_KEY="dummy-key"
 export OPENAI_BASE_URL="http://localhost:3010/v1"
 
-# Або для GitHub Models
+# Для GitHub Models (якщо необхідно)
 export GITHUB_TOKEN="your-github-token"
 ```
 
@@ -225,11 +228,9 @@ export GITHUB_TOKEN="your-github-token"
 
 ```javascript
 const client = new OpenAI({
-  apiKey: 'dummy-key', // Для проксі можна використовувати будь-який
-  baseURL: 'http://localhost:3010/v1',
-  defaultHeaders: {
-    'X-OpenAI-API-Key': 'your-real-api-key' // Реальний ключ
-  }
+  apiKey: 'dummy-key', // Рекомендовано для всіх запитів
+  baseURL: 'http://localhost:3010/v1'
+  // Видалено defaultHeaders з реальним ключем - використовуємо dummy-key
 });
 ```
 
@@ -245,34 +246,47 @@ const client = new OpenAI({
 
 ### 💡 Рекомендації використання API ключів
 
-#### 🔄 Гібридний підхід (найкращий)
+#### 🏆 `dummy-key` - ОБОВ'ЯЗКОВИЙ для локального проксі
+
+**⚠️ ВАЖЛИВО: Використовуйте ТІЛЬКИ `dummy-key`!**
+
+Тестування показало, що **деякі моделі працюють нестабільно з реальними API ключами** через проксі. Для гарантованої роботи всіх моделей використовуйте виключно `dummy-key`.
+
+**Чому `dummy-key` - єдиний правильний вибір:**
+
+✅ **Стабільна робота всіх моделей** - протестовано на 58 моделях  
+✅ **Відсутність rate limit проблем** - немає конфліктів з upstream  
+✅ **Миттєвий старт** - не потрібні реальні API ключі  
+✅ **Безпека** - немає ризику витоку справжніх ключів  
+✅ **Універсальність** - працює для всіх провайдерів однаково
+
+#### ✅ Правильний спосіб (ОБОВ'ЯЗКОВИЙ)
 
 ```javascript
-// Автоматичне визначення типу використання
+// ТІЛЬКИ ТАК! Інші ключі можуть викликати проблеми
 const client = new OpenAI({
-  apiKey: process.env.OPENAI_API_KEY || 'dummy-key',
+  apiKey: 'dummy-key',  // ← ЗАВЖДИ використовуйте цей ключ
   baseURL: 'http://localhost:3010/v1'
 });
 ```
 
-**Сценарії:**
+#### ❌ НЕ використовуйте інші ключі
 
-1. **Локальна розробка:** `dummy-key` ✅
-   - Найпростіше налаштування
-   - Миттєвий старт
-   - Безпечно для тестування
+```javascript
+// ❌ НЕПРАВИЛЬНО - може призвести до помилок моделей
+const client = new OpenAI({
+  apiKey: process.env.OPENAI_API_KEY,  // ← Може не працювати
+  baseURL: 'http://localhost:3010/v1'
+});
 
-2. **Production з власними ключами:** справжні ключі ✅
-   - Індивідуальна статистика
-   - Точний біллінг
-   - Кращий контроль доступу
+// ❌ НЕПРАВИЛЬНО - справжні ключі викликають конфлікти
+const client = new OpenAI({
+  apiKey: 'dummy-key',  // ✅ Використовуйте завжди для стабільності
+  baseURL: 'http://localhost:3010/v1'
+});
+```
 
-3. **Спільний проксі:** один ключ на сервері ✅
-   - Централізоване керування
-   - Простіше для команди
-   - Єдиний біллінг
-
-**Висновок:** Використовуйте `dummy-key` для розробки, справжні ключі для production
+**Висновок:** Завжди використовуйте `dummy-key` для стабільної роботи всіх моделей через наш проксі
 
 ---
 
@@ -342,48 +356,52 @@ curl -X POST "http://localhost:3010/v1/chat/completions" \
 
 ### Локальна розробка (рекомендовано)
 
-**Просто використовуйте наш проксі:**
+**Просто використовуйте наш проксі з `dummy-key`:**
 
 ```javascript
-// JavaScript/Node.js
+// JavaScript/Node.js - ТІЛЬКИ dummy-key!
 const client = new OpenAI({
-  apiKey: 'dummy-key',              // Будь-який текст
+  apiKey: 'dummy-key',              // ← Завжди цей ключ для стабільності
   baseURL: 'http://localhost:3010/v1'  // Адреса нашого проксі
 });
 ```
 
 ```python
-# Python
+# Python - ТІЛЬКИ dummy-key!
 client = OpenAI(
-    api_key="dummy-key",
+    api_key="dummy-key",            # ← Завжди цей ключ для стабільності
     base_url="http://localhost:3010/v1"
 )
 ```
 
-### Production (якщо потрібно)
+### Production (НЕ рекомендовано)
 
-**Встановіть справжній API ключ:**
+**⚠️ УВАГА: Реальні API ключі можуть викликати проблеми з деякими моделями!**
+
+Якщо все ж потрібно використовувати власні ключі (не рекомендовано), додайте їх як змінні оточення, але пам'ятайте про можливі конфлікти:
 
 ```bash
-# Додайте до ~/.bashrc, ~/.zshrc або .env файлу
-export OPENAI_API_KEY="your-real-api-key"
+# Додайте до ~/.bashrc, ~/.zshrc або .env файлу (рекомендовано dummy-key)
+export OPENAI_API_KEY="dummy-key"
 
-# Або для GitHub Models
+# Для GitHub Models (якщо необхідно)
 export GITHUB_TOKEN="your-github-token"
 ```
 
-**Потім використовуйте як зазвичай:**
+**Потім використовуйте як зазвичай (обов'язково з dummy-key):**
 
 ```javascript
+// ⚠️ Не рекомендовано - може призвести до конфліктів моделей
 const client = new OpenAI({
-  baseURL: 'http://localhost:3010/v1'  // Ключ візьметься з env
+  baseURL: 'http://localhost:3010/v1',  // Ключ візьметься з env
+  apiKey: process.env.OPENAI_API_KEY || 'dummy-key'  // Fallback на dummy-key
 });
 ```
 
 ### 🎯 Головне
 
-- **Для тестування:** `dummy-key` працює ідеально
-- **Для production:** встановіть справжній ключ через environment variables
+- **Для ВСІХ випадків:** `dummy-key` працює найкраще ✅
+- **Альтернативи:** можуть викликати проблеми з моделями ❌  
 - **Завжди:** використовуйте наш проксі як `baseURL`
 
 ---
@@ -573,7 +591,7 @@ async function callLLM(model, messages, options = {}) {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'Authorization': 'Bearer your-api-key'
+        'Authorization': 'Bearer dummy-key'  // ← Завжди використовуйте dummy-key
       },
       body: JSON.stringify({
         model,
@@ -961,8 +979,8 @@ import OpenAI from 'openai';
 
 const client = new OpenAI({
   apiKey: 'dummy-key',
-  baseURL: 'http://localhost:3010/v1',
-  dangerouslyAllowBrowser: true // Тільки для розробки!
+  baseURL: 'http://localhost:3010/v1'
+  // УВАГА: Для production веб-додатків викликайте API через ваш backend!
 });
 
 export function ChatComponent() {

@@ -5,6 +5,9 @@
 
 import axios from 'axios';
 
+// Fallback API key for openai_compat probes and direct HTTP calls
+const FALLBACK_API_KEY = process.env.FALLBACK_API_KEY || process.env.OPENAI_COMPAT_API_KEY || 'dummy-key';
+
 const now = () => Date.now();
 
 export class ModelRegistry {
@@ -283,7 +286,7 @@ export class ModelRegistry {
             if (p.type === 'goose') {
                 // Prefer /health if available
                 const url = `${p.baseUrl}/health`;
-                const resp = await axios.get(url, { timeout: this.healthTimeoutMs, validateStatus: () => true });
+                const resp = await axios.get(url, { timeout: this.healthTimeoutMs, validateStatus: () => true, headers: { Authorization: `Bearer ${FALLBACK_API_KEY}` } });
                 if (resp.status >= 200 && resp.status < 500) {
                     this._markHealthy(p, now() - start);
                     return true;
@@ -293,7 +296,7 @@ export class ModelRegistry {
             if (p.type === 'openai-compat') {
                 // Try /models first
                 const url = `${p.baseUrl}/models`;
-                const resp = await axios.get(url, { timeout: this.healthTimeoutMs, validateStatus: () => true });
+                const resp = await axios.get(url, { timeout: this.healthTimeoutMs, validateStatus: () => true, headers: { Authorization: `Bearer ${FALLBACK_API_KEY}` } });
                 if (resp.status >= 200 && resp.status < 500) {
                     this._markHealthy(p, now() - start);
                     return true;
@@ -301,7 +304,7 @@ export class ModelRegistry {
                 // Fallback: tiny chat completion
                 const ccUrl = `${p.baseUrl}/chat/completions`;
                 const payload = { model: 'openai/gpt-4o', messages: [{ role: 'user', content: 'ping' }], stream: false, max_tokens: 1 };
-                const cc = await axios.post(ccUrl, payload, { timeout: this.healthTimeoutMs, validateStatus: () => true });
+                const cc = await axios.post(ccUrl, payload, { timeout: this.healthTimeoutMs, validateStatus: () => true, headers: { Authorization: `Bearer ${FALLBACK_API_KEY}`, 'Content-Type': 'application/json' } });
                 if (cc.status >= 200 && cc.status < 500) {
                     this._markHealthy(p, now() - start);
                     return true;
