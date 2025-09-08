@@ -189,6 +189,78 @@ class AtlasIntelligentChatManager {
         }
     }
 
+    startClarificationCountdown() {
+        /**
+         * Shows a countdown to user indicating when Atlas will auto-respond
+         */
+        if (this._clarificationCountdownTimer) {
+            clearInterval(this._clarificationCountdownTimer);
+        }
+        
+        const autoResponseTimeout = this.ttsSync.autoResponseTimeout || 30000;
+        const startTime = Date.now();
+        let remainingTime = autoResponseTimeout;
+        
+        // Show initial countdown
+        this.updateClarificationCountdown(remainingTime);
+        
+        this._clarificationCountdownTimer = setInterval(() => {
+            remainingTime = autoResponseTimeout - (Date.now() - startTime);
+            
+            if (remainingTime <= 0) {
+                clearInterval(this._clarificationCountdownTimer);
+                this._clarificationCountdownTimer = null;
+                this.hideClarificationCountdown();
+                return;
+            }
+            
+            this.updateClarificationCountdown(remainingTime);
+        }, 1000);
+    }
+    
+    updateClarificationCountdown(remainingMs) {
+        /**
+         * Updates the clarification countdown display
+         */
+        try {
+            const banner = document.querySelector('.clarification-banner');
+            if (!banner) return;
+            
+            let countdownEl = banner.querySelector('.countdown');
+            if (!countdownEl) {
+                countdownEl = document.createElement('div');
+                countdownEl.className = 'countdown';
+                countdownEl.style.cssText = 'font-size: 12px; color: #ffaa00; margin-top: 5px;';
+                banner.appendChild(countdownEl);
+            }
+            
+            const seconds = Math.ceil(remainingMs / 1000);
+            countdownEl.textContent = `Atlas автоматично відповість через ${seconds} сек.`;
+            
+        } catch (error) {
+            this.log(`[UI] Countdown update error: ${error.message}`);
+        }
+    }
+    
+    hideClarificationCountdown() {
+        /**
+         * Hides the clarification countdown
+         */
+        try {
+            if (this._clarificationCountdownTimer) {
+                clearInterval(this._clarificationCountdownTimer);
+                this._clarificationCountdownTimer = null;
+            }
+            
+            const countdownEl = document.querySelector('.clarification-banner .countdown');
+            if (countdownEl) {
+                countdownEl.remove();
+            }
+        } catch (error) {
+            this.log(`[UI] Countdown hide error: ${error.message}`);
+        }
+    }
+
     generateClientMessageId() {
         const id = `cmsg_${Date.now()}_${Math.random().toString(36).slice(2,6)}_${this._incrementalId || 0}`;
         this._incrementalId = (this._incrementalId || 0) + 1;
@@ -788,8 +860,12 @@ class AtlasIntelligentChatManager {
                     this.showClarificationBanner();
                     this._clarificationFreeze = true;
                     try { this.updatePipelineHUD('atlas_clarify'); } catch(_) {}
+                    
+                    // Start auto-response countdown for user awareness
+                    this.startClarificationCountdown();
                 } else if (data.session && data.session.clarificationJustResolved) {
                     this.hideClarificationBanner();
+                    this.hideClarificationCountdown();
                     this._clarificationFreeze = false;
                 } else if (data.endOfConversation === true) {
                     // No follow-up actions and orchestrator signaled end
@@ -896,9 +972,11 @@ class AtlasIntelligentChatManager {
             } else if (data.session && data.session.awaitingClarification) {
                 this.showClarificationBanner();
                 this._clarificationFreeze = true;
+                this.startClarificationCountdown();
                 try { this.updatePipelineHUD('atlas_clarify'); } catch(_) {}
             } else if (data.session && data.session.clarificationJustResolved) {
                 this.hideClarificationBanner();
+                this.hideClarificationCountdown();
                 this._clarificationFreeze = false;
             } else if (data.endOfConversation === true) {
                 this.log('[CHAT] Conversation ended by orchestrator (continue)');

@@ -484,7 +484,15 @@ async function startGrishaVisualMonitoring(sessionId, taskDescription) {
             return null;
         }
     } catch (error) {
-        console.warn(`[GRISHA] Visual monitoring start failed: ${error.message}`);
+        // Enhanced error handling for production
+        if (error.code === 'ECONNREFUSED') {
+            console.warn(`[GRISHA] Frontend service unavailable for visual monitoring`);
+        } else if (error.code === 'ETIMEDOUT') {
+            console.warn(`[GRISHA] Visual monitoring start timeout - continuing without monitoring`);
+        } else {
+            console.warn(`[GRISHA] Visual monitoring start failed: ${error.message}`);
+        }
+        // Return null gracefully - system continues without visual monitoring
         return null;
     }
 }
