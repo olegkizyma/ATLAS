@@ -5,7 +5,7 @@ import sqlite3 from 'sqlite3';
 import path from 'path';
 import crypto from 'crypto';
 import axios from 'axios';
-import { chatWithModel } from './openai_client.js';
+import { chatWithModel } from './github_models_client.js';
 
 const DB_PATH = process.env.ATLAS_MEMORY_DB || './agent_memory.db';
 const MAX_FACTS_PER_AGENT = parseInt(process.env.ATLAS_MEMORY_MAX_FACTS || '200', 10);

@@ -18,7 +18,7 @@ import { PHASE, initSession, startActionablePipeline, startPendingPrecheck, star
 import { initMemory, remember, recall, summarizeRecent, summarizeRanked, rememberSafe, summarizeForPrompt, memoryHealth, semanticContext, startMemoryMaintenance } from './agent_memory.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
 import { IntentCache } from './intent_cache.js';
-import { chatWithModel, chatWithModelTimeout, chatWithModelRotation, healthCheck } from './openai_client.js';
+import { chatWithModel, chatWithModelTimeout, chatWithModelRotation, healthCheck } from './github_models_client.js';
 
 // Enhanced execution wrapper with model rotation instead of GitHub Goose fallback
 async function executeWithModelRotation(agentName, message, sessionId, options = {}) {

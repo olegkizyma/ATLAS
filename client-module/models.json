@@ -1,0 +1,316 @@
+{
+  "models": [
+    {
+      "id": "ai21-labs/ai21-jamba-1.5-large",
+      "provider": "AI21 Labs",
+      "type": "chat"
+    },
+    {
+      "id": "ai21-labs/ai21-jamba-1.5-mini",
+      "provider": "AI21 Labs", 
+      "type": "chat"
+    },
+    {
+      "id": "cohere/cohere-command-a",
+      "provider": "Cohere",
+      "type": "chat"
+    },
+    {
+      "id": "cohere/cohere-command-r-08-2024",
+      "provider": "Cohere",
+      "type": "chat"
+    },
+    {
+      "id": "cohere/cohere-command-r-plus-08-2024",
+      "provider": "Cohere",
+      "type": "chat"
+    },
+    {
+      "id": "cohere/cohere-embed-v3-english",
+      "provider": "Cohere",
+      "type": "embedding"
+    },
+    {
+      "id": "cohere/cohere-embed-v3-multilingual",
+      "provider": "Cohere",
+      "type": "embedding"
+    },
+    {
+      "id": "core42/jais-30b-chat",
+      "provider": "Core42",
+      "type": "chat"
+    },
+    {
+      "id": "deepseek/deepseek-r1",
+      "provider": "DeepSeek",
+      "type": "chat"
+    },
+    {
+      "id": "deepseek/deepseek-r1-0528",
+      "provider": "DeepSeek",
+      "type": "chat"
+    },
+    {
+      "id": "deepseek/deepseek-v3-0324",
+      "provider": "DeepSeek",
+      "type": "chat"
+    },
+    {
+      "id": "meta/llama-3.2-11b-vision-instruct",
+      "provider": "Meta",
+      "type": "vision"
+    },
+    {
+      "id": "meta/llama-3.2-90b-vision-instruct",
+      "provider": "Meta",
+      "type": "vision"
+    },
+    {
+      "id": "meta/llama-3.3-70b-instruct",
+      "provider": "Meta",
+      "type": "chat"
+    },
+    {
+      "id": "meta/llama-4-maverick-17b-128e-instruct-fp8",
+      "provider": "Meta",
+      "type": "chat"
+    },
+    {
+      "id": "meta/llama-4-scout-17b-16e-instruct",
+      "provider": "Meta",
+      "type": "chat"
+    },
+    {
+      "id": "meta/meta-llama-3.1-405b-instruct",
+      "provider": "Meta",
+      "type": "chat"
+    },
+    {
+      "id": "meta/meta-llama-3.1-8b-instruct",
+      "provider": "Meta",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/mai-ds-r1",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3-medium-128k-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3-medium-4k-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3-mini-128k-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3-mini-4k-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3-small-128k-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3-small-8k-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3.5-mini-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3.5-moe-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-3.5-vision-instruct",
+      "provider": "Microsoft",
+      "type": "vision"
+    },
+    {
+      "id": "microsoft/phi-4",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-4-mini-instruct",
+      "provider": "Microsoft",
+      "type": "chat"
+    },
+    {
+      "id": "microsoft/phi-4-mini-reasoning",
+      "provider": "Microsoft",
+      "type": "reasoning"
+    },
+    {
+      "id": "microsoft/phi-4-multimodal-instruct",
+      "provider": "Microsoft",
+      "type": "multimodal"
+    },
+    {
+      "id": "microsoft/phi-4-reasoning",
+      "provider": "Microsoft",
+      "type": "reasoning"
+    },
+    {
+      "id": "mistral-ai/codestral-2501",
+      "provider": "Mistral AI",
+      "type": "code"
+    },
+    {
+      "id": "mistral-ai/ministral-3b",
+      "provider": "Mistral AI",
+      "type": "chat"
+    },
+    {
+      "id": "mistral-ai/mistral-large-2411",
+      "provider": "Mistral AI",
+      "type": "chat"
+    },
+    {
+      "id": "mistral-ai/mistral-medium-2505",
+      "provider": "Mistral AI",
+      "type": "chat"
+    },
+    {
+      "id": "mistral-ai/mistral-nemo",
+      "provider": "Mistral AI",
+      "type": "chat"
+    },
+    {
+      "id": "mistral-ai/mistral-small-2503",
+      "provider": "Mistral AI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/gpt-4.1",
+      "provider": "OpenAI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/gpt-4.1-mini",
+      "provider": "OpenAI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/gpt-4.1-nano",
+      "provider": "OpenAI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/gpt-4o",
+      "provider": "OpenAI",
+      "type": "multimodal"
+    },
+    {
+      "id": "openai/gpt-4o-mini",
+      "provider": "OpenAI",
+      "type": "multimodal"
+    },
+    {
+      "id": "openai/gpt-5",
+      "provider": "OpenAI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/gpt-5-chat",
+      "provider": "OpenAI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/gpt-5-mini",
+      "provider": "OpenAI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/gpt-5-nano",
+      "provider": "OpenAI",
+      "type": "chat"
+    },
+    {
+      "id": "openai/o1",
+      "provider": "OpenAI",
+      "type": "reasoning"
+    },
+    {
+      "id": "openai/o1-mini",
+      "provider": "OpenAI",
+      "type": "reasoning"
+    },
+    {
+      "id": "openai/o1-preview",
+      "provider": "OpenAI",
+      "type": "reasoning"
+    },
+    {
+      "id": "openai/o3",
+      "provider": "OpenAI",
+      "type": "reasoning"
+    },
+    {
+      "id": "openai/o3-mini",
+      "provider": "OpenAI",
+      "type": "reasoning"
+    },
+    {
+      "id": "openai/o4-mini",
+      "provider": "OpenAI",
+      "type": "reasoning"
+    },
+    {
+      "id": "openai/text-embedding-3-large",
+      "provider": "OpenAI",
+      "type": "embedding"
+    },
+    {
+      "id": "openai/text-embedding-3-small",
+      "provider": "OpenAI",
+      "type": "embedding"
+    },
+    {
+      "id": "xai/grok-3",
+      "provider": "xAI",
+      "type": "chat"
+    },
+    {
+      "id": "xai/grok-3-mini",
+      "provider": "xAI",
+      "type": "chat"
+    }
+  ],
+  "summary": {
+    "total": 58,
+    "by_provider": {
+      "OpenAI": 15,
+      "Microsoft": 13,
+      "Meta": 6,
+      "Mistral AI": 6,
+      "Cohere": 5,
+      "DeepSeek": 3,
+      "AI21 Labs": 2,
+      "xAI": 2,
+      "Core42": 1
+    },
+    "by_type": {
+      "chat": 36,
+      "multimodal": 3,
+      "reasoning": 6,
+      "vision": 3,
+      "embedding": 3,
+      "code": 1
+    }
+  }
+}
