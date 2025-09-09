@@ -2299,21 +2299,6 @@ async function processAgentCycle(userMessage, session) {
                     }
                     return responses;
                 }
-                // Atlas reformulation замість очікування уточнень від користувача
-                // Atlas створює адаптований план для збору даних через Тетяну
-                const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
-                    userMessage,
-                    grishaRequirement: grishaSecurityCheck.content
-                });
-                const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
-                const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
-                responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
-                
-                // Автоматично переходимо до виконання
-                startActionablePipeline(session, userMessage, atlasReformulation.content, grishaSecurityCheck.content);
-                logMessage('info', `[SHORTAGE_REFORMULATION] Atlas adapted task instead of requesting clarification for session=${session.id}`);
-                return responses;
-            }
         } catch (e) { logMessage('warn', 'Generic clarification escalation skipped: ' + e.message); }
 
         startActionablePipeline(session, userMessage, atlasResponse.content, grishaSecurityCheck.content);
