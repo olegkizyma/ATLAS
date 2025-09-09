@@ -1,0 +1,224 @@
+name: ATLAS3 Auto-Fix CI/CD
+
+on:
+  push:
+    branches: [ ATLAS3 ]
+  pull_request:
+    branches: [ ATLAS3 ]
+  workflow_dispatch:
+    inputs:
+      max_iterations:
+        description: 'Maximum auto-fix iterations'
+        required: false
+        default: '5'
+        type: string
+
+env:
+  MAX_ITERATIONS: ${{ github.event.inputs.max_iterations || '5' }}
+  PYTHON_VERSION: '3.11'
+  NODE_VERSION: '20'
+
+jobs:
+  auto-fix-cycle:
+    name: Auto-Fix Test Cycle
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        # Support both self-hosted Mac Studio M1 Max and Ubuntu for broader compatibility
+        os: [self-hosted, ubuntu-latest]
+        include:
+          - os: self-hosted
+            platform: macos
+          - os: ubuntu-latest
+            platform: linux
+    timeout-minutes: 60
+    
+    steps:
+      - name: Checkout ATLAS3
+        uses: actions/checkout@v4
+        with:
+          ref: ATLAS3
+          token: ${{ secrets.GITHUB_TOKEN }}
+          fetch-depth: 0
+
+      - name: Configure Git for auto-commits
+        run: |
+          git config user.name "ATLAS Auto-Fix Bot"
+          git config user.email "atlas-autofix@noreply.github.com"
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: frontend_new/requirements.txt
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'npm'
+          cache-dependency-path: frontend_new/orchestrator/package-lock.json
+
+      - name: Install Python dependencies (minimal)
+        working-directory: frontend_new
+        run: |
+          python -m pip install --upgrade pip
+          # Install core dependencies only to avoid complex ML dependencies in CI
+          pip install Flask==2.3.3 Flask-CORS==4.0.0 requests==2.31.0 pytest==8.2.0
+
+      - name: Install Node.js dependencies
+        working-directory: frontend_new/orchestrator
+        run: |
+          if [ -f package-lock.json ]; then
+            npm ci --no-audit --no-fund
+          else
+            npm install --no-audit --no-fund
+          fi
+
+      - name: Create logs directory
+        run: mkdir -p logs
+
+      - name: Auto-Fix Iteration Loop
+        id: auto-fix
+        run: |
+          echo "🚀 Starting ATLAS3 Auto-Fix Cycle"
+          echo "platform=${{ matrix.platform }}" >> $GITHUB_OUTPUT
+          
+          ITERATION=1
+          MAX_ITER=${{ env.MAX_ITERATIONS }}
+          TESTS_PASSED=false
+          FIXES_APPLIED=0
+          
+          while [ $ITERATION -le $MAX_ITER ] && [ "$TESTS_PASSED" = "false" ]; do
+            echo "==================== ITERATION $ITERATION ===================="
+            
+            # Run enhanced smoke tests
+            echo "📋 Running enhanced smoke tests..."
+            if bash scripts/smoke_test_enhanced.sh > logs/smoke_test_$ITERATION.log 2>&1; then
+              echo "✅ Smoke tests passed!"
+              
+              # Run additional system tests
+              echo "📋 Running system tests..."
+              if bash scripts/smoke_e2e.sh > logs/e2e_test_$ITERATION.log 2>&1; then
+                echo "✅ All tests passed! No fixes needed."
+                TESTS_PASSED=true
+                break
+              else
+                echo "❌ E2E tests failed, applying fixes..."
+              fi
+            else
+              echo "❌ Smoke tests failed, applying fixes..."
+            fi
+            
+            # Apply auto-fixes
+            echo "🔧 Applying auto-fixes for iteration $ITERATION..."
+            if bash .github/scripts/auto-fix.sh $ITERATION; then
+              FIXES_APPLIED=$((FIXES_APPLIED + 1))
+              
+              # Commit fixes
+              if [ -n "$(git status --porcelain)" ]; then
+                git add .
+                git commit -m "🤖 Auto-fix iteration $ITERATION: Apply automatic corrections"
+                git push origin ATLAS3
+                echo "📝 Committed auto-fixes for iteration $ITERATION"
+              else
+                echo "⚠️ No changes to commit in iteration $ITERATION"
+              fi
+            else
+              echo "❌ Auto-fix failed in iteration $ITERATION"
+            fi
+            
+            ITERATION=$((ITERATION + 1))
+            sleep 5  # Brief pause between iterations
+          done
+          
+          echo "total_iterations=$((ITERATION - 1))" >> $GITHUB_OUTPUT
+          echo "tests_passed=$TESTS_PASSED" >> $GITHUB_OUTPUT
+          echo "fixes_applied=$FIXES_APPLIED" >> $GITHUB_OUTPUT
+
+      - name: Generate Test Report
+        if: always()
+        run: |
+          echo "# ATLAS3 Auto-Fix Report" > auto_fix_report.md
+          echo "" >> auto_fix_report.md
+          echo "**Platform:** ${{ matrix.platform }}" >> auto_fix_report.md
+          echo "**Total Iterations:** ${{ steps.auto-fix.outputs.total_iterations }}" >> auto_fix_report.md
+          echo "**Tests Passed:** ${{ steps.auto-fix.outputs.tests_passed }}" >> auto_fix_report.md
+          echo "**Fixes Applied:** ${{ steps.auto-fix.outputs.fixes_applied }}" >> auto_fix_report.md
+          echo "**Timestamp:** $(date -u)" >> auto_fix_report.md
+          echo "" >> auto_fix_report.md
+          
+          if [ "${{ steps.auto-fix.outputs.tests_passed }}" = "true" ]; then
+            echo "🎉 **Status: SUCCESS** - All tests are now passing!" >> auto_fix_report.md
+          else
+            echo "❌ **Status: FAILED** - Tests still failing after ${{ env.MAX_ITERATIONS }} iterations" >> auto_fix_report.md
+          fi
+
+      - name: Upload Test Logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: atlas3-auto-fix-logs-${{ matrix.platform }}-${{ github.run_number }}
+          path: |
+            logs/
+            auto_fix_report.md
+          retention-days: 30
+
+      - name: Send Load Analytics
+        if: always()
+        run: |
+          echo "📊 Sending load and usage analytics..."
+          # Send analytics data (implement actual endpoint)
+          curl -X POST "https://your-analytics-endpoint.com/atlas3/usage" \
+            -H "Content-Type: application/json" \
+            -d "{
+              \"platform\": \"${{ matrix.platform }}\",
+              \"iterations\": ${{ steps.auto-fix.outputs.total_iterations }},
+              \"tests_passed\": ${{ steps.auto-fix.outputs.tests_passed }},
+              \"fixes_applied\": ${{ steps.auto-fix.outputs.fixes_applied }},
+              \"timestamp\": \"$(date -u --iso-8601)\",
+              \"run_id\": \"${{ github.run_id }}\",
+              \"commit_sha\": \"${{ github.sha }}\"
+            }" || echo "Analytics endpoint not available"
+
+      - name: Final Status Check
+        if: steps.auto-fix.outputs.tests_passed != 'true'
+        run: |
+          echo "❌ Auto-fix cycle completed but tests are still failing"
+          echo "Please review the logs and apply manual fixes if needed"
+          exit 1
+
+  performance-monitoring:
+    name: Performance & Load Monitoring
+    runs-on: ubuntu-latest
+    if: always()
+    needs: auto-fix-cycle
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Monitor System Performance
+        run: |
+          echo "📊 System Performance Metrics:"
+          echo "CPU Usage: $(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 || echo "N/A")"
+          echo "Memory Usage: $(free -m | awk '/^Mem:/{printf "%.1f%%", $3/$2*100}' || echo "N/A")"
+          echo "Disk Usage: $(df -h / | awk 'NR==2{print $5}' || echo "N/A")"
+          
+          # Save metrics for analysis
+          cat > performance_metrics.json << EOF
+          {
+            "timestamp": "$(date -u --iso-8601)",
+            "cpu_usage": "$(top -bn1 | grep "Cpu(s)" | awk '{print $2}' | cut -d'%' -f1 || echo "0")",
+            "memory_usage": "$(free -m | awk '/^Mem:/{printf "%.1f", $3/$2*100}' || echo "0")",
+            "disk_usage": "$(df -h / | awk 'NR==2{gsub("%",""); print $5}' || echo "0")",
+            "workflow_run_id": "${{ github.run_id }}",
+            "branch": "ATLAS3"
+          }
+          EOF
+
+      - name: Upload Performance Metrics
+        uses: actions/upload-artifact@v4
+        with:
+          name: performance-metrics-${{ github.run_number }}
+          path: performance_metrics.json

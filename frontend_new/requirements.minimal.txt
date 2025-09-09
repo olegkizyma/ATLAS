@@ -1,0 +1,5 @@
+# Minimal requirements for CI/CD
+Flask==2.3.3
+Flask-CORS==4.0.0
+requests==2.31.0
+pytest==8.2.0
