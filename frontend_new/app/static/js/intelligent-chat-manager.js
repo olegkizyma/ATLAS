@@ -1919,46 +1919,134 @@ class AtlasIntelligentChatManager {
         const hud = document.getElementById('pipeline-hud');
         if (!hud) return;
         
-        // Update phase steps
+        // Track stage progression and backtracking
+        const currentIndex = this.pipelineState.order.indexOf(phase);
+        const lastActiveIndex = this.pipelineState.lastActiveIndex || 0;
+        
+        const isReturning = currentIndex < lastActiveIndex;
+        this.pipelineState.lastActiveIndex = currentIndex;
+        
+        // Update phase steps with enhanced states
         const steps = hud.querySelectorAll('.ph-step');
-        steps.forEach(step => {
+        steps.forEach((step, index) => {
             const ph = step.dataset.phase;
-            step.classList.remove('active','done','processing');
+            const stepIndex = this.pipelineState.order.indexOf(ph);
+            
+            // Clear previous states
+            step.classList.remove('active', 'done', 'processing', 'error', 'returning');
+            step.style.boxShadow = 'none';
             
             if (ph === phase) {
+                // Current active phase
                 step.classList.add('active');
-                // Add visual indicator for current processing
-                step.style.boxShadow = '0 0 8px currentColor';
                 
-                // Update step text with more context
-                if (metadata.agent) {
-                    const agentName = metadata.agent.toUpperCase();
-                    const action = this.getAgentActionText(metadata.agent, phase);
-                    step.textContent = `${agentName}: ${action}`;
+                // Add returning indicator if we're going backwards
+                if (isReturning) {
+                    step.classList.add('returning');
+                    this.log(`[PIPELINE] Returning to stage: ${phase}`);
                 }
-            } else if (this.pipelineState.seen.has(ph)) {
+                
+                // Add processing indicator for certain phases
+                if (metadata.processing || phase === 'execution' || phase === 'tetyana_probe') {
+                    step.classList.add('processing');
+                }
+                
+                // Add error indicator if there's an error
+                if (metadata.error) {
+                    step.classList.add('error');
+                }
+                
+                // Enhanced visual effects
+                step.style.boxShadow = isReturning 
+                    ? '0 0 12px rgba(255, 165, 0, 0.8), 0 0 20px rgba(255, 165, 0, 0.4)'
+                    : '0 0 12px currentColor, 0 0 20px rgba(0, 255, 127, 0.4)';
+                
+                // Update step content with agent context
+                this.updateStepContent(step, phase, metadata);
+                
+            } else if (this.pipelineState.seen.has(ph) && stepIndex < currentIndex) {
+                // Completed phases
                 step.classList.add('done');
-                step.style.boxShadow = 'none';
-            } else {
-                step.style.boxShadow = 'none';
+            } else if (stepIndex > currentIndex) {
+                // Future phases - reset to default state
+                step.style.opacity = '0.6';
             }
         });
         
-        // Progress bar with smoother animation
-        const idx = this.pipelineState.order.indexOf(phase);
+        // Enhanced progress bar with direction indication
         const total = this.pipelineState.order.length;
-        const pct = Math.max(0, Math.min(100, Math.round(((idx+1)/ total)*100)));
+        const pct = Math.max(0, Math.min(100, Math.round(((currentIndex + 1) / total) * 100)));
         const bar = document.getElementById('pipeline-progress-bar');
+        
         if (bar) {
             if (!this._clarificationFreeze || phase === 'atlas_clarify') {
                 bar.style.width = pct + '%';
-                bar.style.transition = 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)';
+                bar.style.transition = isReturning 
+                    ? 'width 0.8s cubic-bezier(0.68, -0.55, 0.265, 1.55)' // bounce back effect
+                    : 'width 0.6s cubic-bezier(0.4, 0, 0.2, 1)'; // smooth forward
+                
+                // Change color based on direction
+                if (isReturning) {
+                    bar.style.background = 'linear-gradient(90deg, #ff9500, #ffb84d, #ffc266)';
+                } else {
+                    bar.style.background = 'linear-gradient(90deg, #00ff9d, #00b8ff, #1e90ff)';
+                }
             }
         }
         
-        // Enhanced verdict information
+        // Enhanced verdict information and stage tracking
         if (phase === 'grisha_verdict') {
-            try {
+            this.updateVerdictDisplay(metadata);
+        }
+        
+        // Log stage progression for debugging
+        this.log(`[PIPELINE HUB] Stage: ${phase} ${isReturning ? '(returning)' : '(advancing)'} - Progress: ${pct}%`);
+    }
+    
+    updateStepContent(step, phase, metadata) {
+        // Enhanced step content with agent and action context
+        const phaseMap = {
+            'atlas_plan': { agent: 'ATLAS', action: 'Planning' },
+            'grisha_precheck': { agent: 'GRISHA', action: 'Validating' },
+            'execution': { agent: 'TETYANA', action: 'Executing' },
+            'grisha_verdict': { agent: 'GRISHA', action: 'Reviewing' },
+            'grisha_followup': { agent: 'GRISHA', action: 'Following' },
+            'tetyana_probe': { agent: 'TETYANA', action: 'Probing' },
+            'atlas_clarify': { agent: 'ATLAS', action: 'Clarifying' },
+            'atlas_feasibility': { agent: 'ATLAS', action: 'Checking' }
+        };
+        
+        const phaseInfo = phaseMap[phase] || { agent: 'SYSTEM', action: 'Processing' };
+        
+        // Clear existing content
+        step.innerHTML = '';
+        
+        // Add agent and action as separate spans for better control
+        const agentSpan = document.createElement('span');
+        agentSpan.className = 'ph-word ph-agent';
+        agentSpan.textContent = phaseInfo.agent;
+        
+        const actionSpan = document.createElement('span');
+        actionSpan.className = 'ph-word ph-action';
+        actionSpan.textContent = phaseInfo.action;
+        
+        step.appendChild(agentSpan);
+        step.appendChild(actionSpan);
+        
+        // Add status indicator if available
+        if (metadata.status) {
+            const statusSpan = document.createElement('span');
+            statusSpan.className = 'ph-word ph-status';
+            statusSpan.textContent = metadata.status;
+            statusSpan.style.fontSize = '6px';
+            statusSpan.style.opacity = '0.8';
+            step.appendChild(statusSpan);
+        }
+    }
+    
+    updateVerdictDisplay(metadata) {
+        // Enhanced verdict display with confidence and details
+        try {
                 const recent = [...this.messages].reverse().find(m => m.phase === 'grisha_verdict' && m.agent === 'grisha');
                 if (recent && recent.text) {
                     const confMatch = recent.text.match(/CONF\s*=\s*(\d+\.\d+)/i);

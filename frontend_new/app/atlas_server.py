@@ -22,7 +22,7 @@ except ImportError:
 import tempfile
 import subprocess
 from pathlib import Path
-from goose_client import GooseClient
+from goose_vision_client import GooseVisionClient
 # intent classification is handled in orchestrator now
 from stt_manager import stt_manager
 from typing import Optional
@@ -201,7 +201,7 @@ except Exception:
 # Initialize Goose client (configurable)
 GOOSE_BASE_URL = os.environ.get('GOOSE_BASE_URL', 'http://localhost:3000')
 GOOSE_SECRET_KEY = os.environ.get('GOOSE_SECRET_KEY', 'test')
-goose_client = GooseClient(base_url=GOOSE_BASE_URL, secret_key=GOOSE_SECRET_KEY)
+goose_client = GooseVisionClient(base_url=GOOSE_BASE_URL, secret_key=GOOSE_SECRET_KEY)
 
 # Configuration
 FRONTEND_PORT = int(os.environ.get('FRONTEND_PORT', 5001))

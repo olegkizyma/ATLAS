@@ -304,6 +304,23 @@ class GooseVisionClient:
             )
             response.raise_for_status()
 
+    def send_reply(self, session_name: str, message: str, timeout: int = 90) -> dict:
+        """Backward compatibility method for GooseClient interface"""
+        try:
+            # For backward compatibility, we run the async method synchronously
+            if asyncio.get_event_loop().is_running():
+                # If we're already in an async context, create a new loop
+                loop = asyncio.new_event_loop()
+                try:
+                    asyncio.set_event_loop(loop)
+                    return loop.run_until_complete(self.send_message(message, timeout))
+                finally:
+                    asyncio.set_event_loop(None)
+            else:
+                return asyncio.run(self.send_message(message, timeout))
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+
     async def send_message(self, message: str, timeout: int = 90) -> dict:
         """Відправляє повідомлення до Goose і повертає відповідь"""
         if self._is_web():
