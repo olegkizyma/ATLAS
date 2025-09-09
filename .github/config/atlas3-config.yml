@@ -1,0 +1,55 @@
+# ATLAS3 Auto-Fix CI/CD Configuration
+# Configuration for Mac Studio M1 Max and other self-hosted runners
+
+# Self-hosted runner labels
+MACOS_RUNNER_LABELS: ["self-hosted", "macOS", "ARM64", "mac-studio-m1-max"]
+UBUNTU_RUNNER_LABELS: ["ubuntu-latest"]
+
+# Resource limits
+MAX_PARALLEL_JOBS: 2
+TIMEOUT_MINUTES: 60
+MAX_AUTO_FIX_ITERATIONS: 5
+
+# Service ports
+FRONTEND_PORT: 5001
+ORCHESTRATOR_PORT: 5101
+RECOVERY_BRIDGE_PORT: 5102
+TTS_SERVER_PORT: 3001
+GOOSE_PORT: 3000
+AI_API_PORT: 3010
+
+# Monitoring endpoints
+ANALYTICS_ENDPOINT: "https://your-analytics-endpoint.com/atlas3/usage"
+METRICS_ENDPOINT: "https://your-metrics-endpoint.com/atlas3/metrics"
+
+# Auto-fix settings
+ENABLE_AUTO_COMMIT: true
+AUTO_FIX_BRANCH: "ATLAS3"
+AUTO_FIX_COMMIT_PREFIX: "🤖 Auto-fix"
+
+# Test settings
+SMOKE_TEST_TIMEOUT: 300  # 5 minutes
+E2E_TEST_TIMEOUT: 900    # 15 minutes
+HEALTH_CHECK_TIMEOUT: 60 # 1 minute
+
+# Dependencies
+PYTHON_VERSION: "3.11"
+NODE_VERSION: "20"
+REQUIRED_PYTHON_PACKAGES: ["Flask==2.3.3", "Flask-CORS==4.0.0", "requests==2.31.0", "pytest==8.2.0"]
+REQUIRED_NODE_PACKAGES: ["express", "cors", "ws"]
+
+# Performance monitoring
+ENABLE_PERFORMANCE_MONITORING: true
+CPU_THRESHOLD: 80  # percent
+MEMORY_THRESHOLD: 80  # percent
+DISK_THRESHOLD: 85  # percent
+
+# Notification settings
+ENABLE_SLACK_NOTIFICATIONS: false
+ENABLE_EMAIL_NOTIFICATIONS: false
+ENABLE_GITHUB_ISSUES: true
+
+# Security settings
+ENABLE_DEPENDENCY_SCANNING: true
+ENABLE_CODE_SCANNING: true
+ENABLE_SECRET_SCANNING: true
