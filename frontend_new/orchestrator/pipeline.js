@@ -3,7 +3,9 @@
 
 export const PHASE = {
   ATLAS_PLAN: 'atlas_plan',
+  ATLAS_REFORMULATION: 'atlas_reformulation',
   GRISHA_PRECHECK: 'grisha_precheck',
+  GRISHA_VALIDATION: 'grisha_validation',
   EXECUTION: 'execution',
   GRISHA_VERDICT: 'grisha_verdict',
   GRISHA_FOLLOWUP: 'grisha_followup',
