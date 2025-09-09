@@ -1,4 +1,4 @@
-/* Pipeline HUD - Vertical Right-Aligned Layout */
+/* Enhanced Pipeline HUB - Vertical Right-Aligned Layout with Better Visualization */
 
 #pipeline-hud {
     /* Positioning - full height on right edge */
@@ -7,12 +7,12 @@
     top: 0;
     bottom: 0;
     
-    /* Basic styling */
-    background: rgba(0, 0, 0, 0.15);
+    /* Enhanced styling with better transparency and effects */
+    background: linear-gradient(135deg, rgba(0, 20, 40, 0.3), rgba(0, 40, 20, 0.25));
     color: #eaffea;
-    padding: 12px 4px;
+    padding: 16px 6px;
     z-index: 9997;
-    font-family: system-ui, Arial, sans-serif;
+    font-family: 'Segoe UI', system-ui, Arial, sans-serif;
     
     /* Vertical layout - full height */
     display: flex;
@@ -20,32 +20,61 @@
     justify-content: space-evenly;
     align-items: stretch;
     
-    /* Very narrow width */
-    width: 45px;
+    /* Wider for better visibility */
+    width: 65px;
     
-    /* Subtle border */
-    border-left: 1px solid rgba(0, 255, 127, 0.2);
-    backdrop-filter: blur(2px);
+    /* Enhanced border with glow effect */
+    border-left: 2px solid rgba(0, 255, 127, 0.4);
+    backdrop-filter: blur(8px);
+    box-shadow: inset 0 0 20px rgba(0, 255, 127, 0.1);
+    
+    /* Smooth transitions */
+    transition: all 0.3s ease;
+}
+
+#pipeline-hud:hover {
+    width: 85px;
+    background: linear-gradient(135deg, rgba(0, 20, 40, 0.45), rgba(0, 40, 20, 0.4));
+    border-left-color: rgba(0, 255, 127, 0.6);
+    box-shadow: inset 0 0 30px rgba(0, 255, 127, 0.15), 0 0 20px rgba(0, 255, 127, 0.1);
+}
+
+/* Enhanced HUB header */
+#pipeline-hud::before {
+    content: 'HUB';
+    position: absolute;
+    top: 8px;
+    left: 50%;
+    transform: translateX(-50%);
+    font-size: 10px;
+    font-weight: 700;
+    color: rgba(0, 255, 127, 0.8);
+    letter-spacing: 1px;
+    text-shadow: 0 0 8px rgba(0, 255, 127, 0.4);
+    padding: 2px 4px;
+    background: rgba(0, 255, 127, 0.1);
+    border-radius: 4px;
+    border: 1px solid rgba(0, 255, 127, 0.3);
 }
 
 .ph-step {
-    /* Basic styling */
+    /* Enhanced styling */
     display: flex;
     width: 100%;
-    padding: 1px 2px;
-    font-size: 5px !important;
+    padding: 3px 4px;
+    font-size: 7px !important;
     font-weight: 700;
     text-align: center;
     white-space: nowrap;
     
-    /* Visual appearance */
-    background: rgba(0, 20, 10, 0.15);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 2px;
-    color: inherit;
+    /* Enhanced visual appearance */
+    background: linear-gradient(135deg, rgba(0, 30, 15, 0.3), rgba(0, 20, 30, 0.25));
+    border: 1px solid rgba(255, 255, 255, 0.15);
+    border-radius: 4px;
+    color: rgba(255, 255, 255, 0.8);
     
-    /* Transitions */
-    transition: all 0.2s ease;
+    /* Enhanced transitions */
+    transition: all 0.4s ease;
     
     /* Text overflow handling */
     overflow: hidden;
@@ -55,35 +84,99 @@
     flex: 1;
     align-items: center;
     justify-content: center;
-    min-height: 40px;
+    min-height: 45px;
     
     /* Transform for rotated text */
     transform: rotate(90deg) !important;
     transform-origin: center;
     white-space: nowrap;
     
-    /* Remove writing mode since it's not working */
-    /* writing-mode: vertical-lr;
-    text-orientation: upright;
-    letter-spacing: 2px; */
+    /* Enhanced text shadow for better readability */
+    text-shadow: 0 0 4px rgba(0, 0, 0, 0.8), 0 0 8px currentColor;
+    
+    /* Subtle inner glow */
+    box-shadow: inset 0 0 10px rgba(0, 0, 0, 0.3);
 }
 
 .ph-step.active {
-    background: rgba(0, 255, 127, 0.2);
-    border-color: rgba(0, 255, 127, 0.5);
+    background: linear-gradient(135deg, rgba(0, 255, 127, 0.35), rgba(0, 200, 255, 0.25));
+    border-color: rgba(0, 255, 127, 0.7);
     color: #ffffff;
-    font-weight: 600;
+    font-weight: 800;
+    
+    /* Enhanced active state effects */
+    box-shadow: 
+        inset 0 0 15px rgba(0, 255, 127, 0.2),
+        0 0 15px rgba(0, 255, 127, 0.4),
+        0 0 25px rgba(0, 255, 127, 0.2);
+    
+    /* Subtle scale effect */
+    transform: rotate(90deg) scale(1.05) !important;
+    z-index: 10;
 }
 
 .ph-step.done {
-    background: rgba(0, 80, 40, 0.3);
-    border-color: rgba(0, 200, 100, 0.3);
+    background: linear-gradient(135deg, rgba(0, 120, 60, 0.4), rgba(0, 80, 100, 0.3));
+    border-color: rgba(0, 200, 100, 0.5);
     color: #b8ffb8;
-    opacity: 0.7;
+    opacity: 0.85;
+    
+    /* Done state effects */
+    box-shadow: inset 0 0 10px rgba(0, 200, 100, 0.2);
 }
 
 .ph-step.processing {
-    animation: pulse 1.5s infinite;
+    animation: pulse-enhanced 1.2s infinite;
+    box-shadow: 
+        inset 0 0 15px rgba(255, 200, 0, 0.2),
+        0 0 20px rgba(255, 200, 0, 0.3);
+}
+
+.ph-step.error {
+    background: linear-gradient(135deg, rgba(255, 60, 60, 0.35), rgba(255, 100, 0, 0.25));
+    border-color: rgba(255, 60, 60, 0.7);
+    color: #ffcccc;
+    animation: shake 0.5s ease-in-out;
+}
+
+.ph-step.returning {
+    background: linear-gradient(135deg, rgba(255, 165, 0, 0.35), rgba(255, 200, 0, 0.25));
+    border-color: rgba(255, 165, 0, 0.7);
+    color: #fff3cd;
+    animation: return-pulse 1s ease-in-out infinite;
+}
+
+/* Enhanced animations */
+@keyframes pulse-enhanced {
+    0%, 100% { 
+        opacity: 1;
+        box-shadow: 
+            inset 0 0 15px rgba(255, 200, 0, 0.2),
+            0 0 20px rgba(255, 200, 0, 0.3);
+    }
+    50% { 
+        opacity: 0.7;
+        box-shadow: 
+            inset 0 0 25px rgba(255, 200, 0, 0.4),
+            0 0 30px rgba(255, 200, 0, 0.6);
+    }
+}
+
+@keyframes return-pulse {
+    0%, 100% { 
+        opacity: 0.9;
+        transform: rotate(90deg) scale(1.0) !important;
+    }
+    50% { 
+        opacity: 1;
+        transform: rotate(90deg) scale(1.03) !important;
+    }
+}
+
+@keyframes shake {
+    0%, 100% { transform: rotate(90deg) translateX(0) !important; }
+    25% { transform: rotate(90deg) translateX(-2px) !important; }
+    75% { transform: rotate(90deg) translateX(2px) !important; }
 }
 
 @keyframes pulse {
@@ -100,25 +193,46 @@
     align-self: center;
 }
 
-/* Progress bar at bottom */
+/* Enhanced progress bar */
 #pipeline-progress {
     position: absolute;
-    left: 3px;
-    right: 3px;
-    bottom: 3px;
-    height: 1px;
-    background: rgba(0, 255, 127, 0.08);
-    border-radius: 1px;
+    left: 4px;
+    right: 4px;
+    bottom: 4px;
+    height: 3px;
+    background: rgba(0, 255, 127, 0.15);
+    border-radius: 2px;
     overflow: hidden;
+    border: 1px solid rgba(0, 255, 127, 0.2);
+    box-shadow: inset 0 0 5px rgba(0, 0, 0, 0.3);
 }
 
 #pipeline-progress-bar {
     height: 100%;
     width: 0%;
-    background: linear-gradient(90deg, #00ff9d, #1e90ff);
-    box-shadow: 0 0 4px rgba(0, 255, 157, 0.6);
-    transition: width 0.4s ease;
+    background: linear-gradient(90deg, #00ff9d, #00b8ff, #1e90ff);
+    box-shadow: 
+        0 0 8px rgba(0, 255, 157, 0.8),
+        0 0 15px rgba(0, 255, 157, 0.4);
+    transition: width 0.6s ease;
     border-radius: 1px;
+    position: relative;
+}
+
+#pipeline-progress-bar::after {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    bottom: 0;
+    background: linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.3), transparent);
+    animation: progress-shine 2s ease-in-out infinite;
+}
+
+@keyframes progress-shine {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(100%); }
 }
 
 /* Mini indicators */
@@ -130,29 +244,99 @@
     font-size: 8px;
 }
 
-/* Mobile responsiveness */
+/* Enhanced responsive design */
 @media (max-width: 768px) {
     #pipeline-hud {
-        width: 35px;
-        padding: 6px 1px;
+        width: 50px;
+        padding: 8px 2px;
+    }
+    
+    #pipeline-hud:hover {
+        width: 65px;
     }
     
     .ph-step {
         font-size: 6px;
-        padding: 1px;
-        min-height: 35px;
+        padding: 2px;
+        min-height: 38px;
+    }
+    
+    #pipeline-hud::before {
+        font-size: 8px;
+        top: 4px;
     }
 }
 
-/* Word styling with 180° rotation */
+/* Enhanced word styling with better rotation and effects */
 .ph-step .ph-word {
     display: block;
     transform: rotate(180deg) !important;
     transform-origin: center;
-    line-height: 1.2;
-    font-size: 10px;
-    margin: 3px 0;
+    line-height: 1.3;
+    font-size: 11px;
+    margin: 2px 0;
+    letter-spacing: 0.6px;
+    font-weight: 800;
+    text-shadow: 
+        0 0 3px rgba(0, 0, 0, 0.8),
+        0 0 6px currentColor,
+        0 0 10px rgba(0, 255, 127, 0.3);
+    
+    /* Subtle text animation on active state */
+    transition: all 0.3s ease;
+}
+
+.ph-step.active .ph-word {
     letter-spacing: 0.8px;
-    font-weight: 700;
-    text-shadow: 0 0 2px rgba(0, 255, 127, 0.5);
+    text-shadow: 
+        0 0 4px rgba(0, 0, 0, 0.9),
+        0 0 8px currentColor,
+        0 0 15px rgba(0, 255, 127, 0.5);
+}
+
+/* Status indicators for different phases */
+.ph-step[data-phase="atlas_plan"]::before {
+    content: '🧠';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 8px;
+    z-index: 11;
+}
+
+.ph-step[data-phase="grisha_precheck"]::before,
+.ph-step[data-phase="grisha_verdict"]::before {
+    content: '✅';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 8px;
+    z-index: 11;
+}
+
+.ph-step[data-phase="execution"]::before {
+    content: '⚡';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 8px;
+    z-index: 11;
+}
+
+.ph-step[data-phase="tetyana_probe"]::before {
+    content: '🔍';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 8px;
+    z-index: 11;
+}
+
+.ph-step[data-phase="atlas_clarify"]::before {
+    content: '❓';
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    font-size: 8px;
+    z-index: 11;
 }

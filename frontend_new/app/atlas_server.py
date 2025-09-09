@@ -22,7 +22,7 @@ except ImportError:
 import tempfile
 import subprocess
 from pathlib import Path
-from goose_client import GooseClient
+from goose_vision_client import GooseVisionClient
 # intent classification is handled in orchestrator now
 from stt_manager import stt_manager
 from typing import Optional
@@ -201,7 +201,7 @@ except Exception:
 # Initialize Goose client (configurable)
 GOOSE_BASE_URL = os.environ.get('GOOSE_BASE_URL', 'http://localhost:3000')
 GOOSE_SECRET_KEY = os.environ.get('GOOSE_SECRET_KEY', 'test')
-goose_client = GooseClient(base_url=GOOSE_BASE_URL, secret_key=GOOSE_SECRET_KEY)
+goose_client = GooseVisionClient(base_url=GOOSE_BASE_URL, secret_key=GOOSE_SECRET_KEY)
 
 # Configuration
 FRONTEND_PORT = int(os.environ.get('FRONTEND_PORT', 5001))
@@ -1644,6 +1644,74 @@ def vision_cleanup():
         logger.error(f"/api/vision/cleanup error: {e}")
         return jsonify({'error': 'Cleanup failed', 'details': str(e)}), 500
 
+# ==================== ATLAS CAMERA COMMUNICATION ENDPOINTS ====================
+
+@app.route('/api/vision/camera/start', methods=['POST'])
+def start_camera_communication():
+    """Запускає камеру для спілкування Atlas з користувачем"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        result = vision_processor.start_camera_communication()
+        
+        if result["success"]:
+            logger.info("Atlas camera communication started successfully")
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"/api/vision/camera/start error: {e}")
+        return jsonify({'error': 'Failed to start camera', 'details': str(e)}), 500
+
+@app.route('/api/vision/camera/stop', methods=['POST'])
+def stop_camera_communication():
+    """Зупиняє камеру"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        result = vision_processor.stop_camera_communication()
+        logger.info("Atlas camera communication stopped")
+        return jsonify(result)
+        
+    except Exception as e:
+        logger.error(f"/api/vision/camera/stop error: {e}")
+        return jsonify({'error': 'Failed to stop camera', 'details': str(e)}), 500
+
+@app.route('/api/vision/camera/capture', methods=['POST'])
+def capture_camera_frame():
+    """Робить знімок поточного кадру для аналізу Atlas"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        result = vision_processor.capture_current_frame()
+        
+        if result["success"]:
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"/api/vision/camera/capture error: {e}")
+        return jsonify({'error': 'Failed to capture frame', 'details': str(e)}), 500
+
+@app.route('/api/vision/camera/status')
+def camera_status():
+    """Отримує статус камери та можливостей комп'ютерного зору"""
+    if not VISION_AVAILABLE:
+        return jsonify({'error': 'Computer vision not available'}), 503
+    
+    try:
+        status = vision_processor.get_camera_status()
+        return jsonify(status)
+        
+    except Exception as e:
+        logger.error(f"/api/vision/camera/status error: {e}")
+        return jsonify({'error': 'Failed to get camera status', 'details': str(e)}), 500
+
 # ==================== GRISHA VISUAL MONITORING ENDPOINTS ====================
 
 @app.route('/api/grisha/start-monitoring', methods=['POST'])
@@ -1724,6 +1792,108 @@ def grisha_monitoring_status():
     except Exception as e:
         logger.error(f"/api/grisha/monitoring-status error: {e}")
         return jsonify({'error': 'Failed to get monitoring status', 'details': str(e)}), 500
+
+# ==================== ENHANCED GRISHA MONITORING ENDPOINTS ====================
+
+@app.route('/api/grisha/screens/status')
+def grisha_screens_status():
+    """Отримує статус всіх доступних екранів для моніторингу Гришею"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        status = grisha_monitor.get_screen_status()
+        return jsonify(status)
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/screens/status error: {e}")
+        return jsonify({'error': 'Failed to get screen status', 'details': str(e)}), 500
+
+@app.route('/api/grisha/screens/capture', methods=['POST'])
+def grisha_capture_all_screens():
+    """Робить знімки всіх доступних екранів для аналізу Гришею"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        result = grisha_monitor.capture_all_screens()
+        
+        if result["success"]:
+            logger.info(f"Grisha captured {result['total_screens']} screens")
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"/api/grisha/screens/capture error: {e}")
+        return jsonify({'error': 'Failed to capture screens', 'details': str(e)}), 500
+
+@app.route('/api/grisha/reports/add', methods=['POST'])
+def grisha_add_tetyana_report():
+    """Додає звіт від Тетяни для перевірки Гришею"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        data = request.get_json() or {}
+        if not data:
+            return jsonify({'error': 'No report data provided'}), 400
+        
+        grisha_monitor.add_tetyana_report(data)
+        
+        return jsonify({
+            'success': True,
+            'message': 'Report added for Grisha verification',
+            'report_count': len(grisha_monitor.tetyana_reports)
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/reports/add error: {e}")
+        return jsonify({'error': 'Failed to add report', 'details': str(e)}), 500
+
+@app.route('/api/grisha/reports/verify', methods=['POST'])
+def grisha_verify_report():
+    """Грише перевіряє звіт Тетяни з візуальною валідацією"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        data = request.get_json() or {}
+        report_index = data.get('report_index')
+        verification = data.get('verification', {})
+        
+        if report_index is None:
+            return jsonify({'error': 'Report index required'}), 400
+        
+        result = grisha_monitor.verify_tetyana_report(report_index, verification)
+        
+        if result["success"]:
+            logger.info(f"Grisha verified report {report_index}")
+            return jsonify(result)
+        else:
+            return jsonify(result), 400
+            
+    except Exception as e:
+        logger.error(f"/api/grisha/reports/verify error: {e}")
+        return jsonify({'error': 'Failed to verify report', 'details': str(e)}), 500
+
+@app.route('/api/grisha/reports/list')
+def grisha_list_reports():
+    """Отримує список всіх звітів Тетяни та верифікацій Гриші"""
+    if not VISION_AVAILABLE or not grisha_monitor:
+        return jsonify({'error': 'Grisha visual monitoring not available'}), 503
+    
+    try:
+        return jsonify({
+            'tetyana_reports': grisha_monitor.tetyana_reports,
+            'grisha_verifications': grisha_monitor.grisha_verifications,
+            'total_reports': len(grisha_monitor.tetyana_reports),
+            'verified_reports': len(grisha_monitor.grisha_verifications)
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/reports/list error: {e}")
+        return jsonify({'error': 'Failed to list reports', 'details': str(e)}), 500
 
 if __name__ == '__main__':
     # Print startup summary

@@ -71,6 +71,16 @@ class AtlasVision {
                     <button id="vision-sequence" class="vision-btn accent">Створити відео</button>
                 </div>
                 
+                <div class="camera-controls">
+                    <button id="camera-start" class="vision-btn camera-btn">📹 Запустити камеру</button>
+                    <button id="camera-stop" class="vision-btn camera-btn" style="display: none;">⏹️ Зупинити камеру</button>
+                    <button id="camera-capture" class="vision-btn camera-btn" style="display: none;">📸 Зробити знімок</button>
+                    <div class="camera-status" id="camera-status" style="display: none;">
+                        <span class="status-text">Камера активна</span>
+                        <div class="camera-preview" id="camera-preview"></div>
+                    </div>
+                </div>
+                
                 <div class="vision-preview" id="vision-preview" style="display: none;">
                     <div class="preview-original">
                         <h4>Оригінал</h4>
@@ -199,6 +209,54 @@ class AtlasVision {
                 gap: 10px;
                 margin: 15px 0;
                 flex-wrap: wrap;
+            }
+            
+            .camera-controls {
+                display: flex;
+                flex-direction: column;
+                gap: 10px;
+                margin: 15px 0;
+                padding: 10px;
+                border: 1px solid rgba(0, 255, 0, 0.3);
+                border-radius: 6px;
+                background: rgba(0, 40, 0, 0.2);
+            }
+            
+            .camera-btn {
+                background: linear-gradient(135deg, rgba(0, 255, 0, 0.1), rgba(0, 200, 50, 0.1));
+                border: 1px solid #00ff00;
+                color: #00ff00;
+                padding: 8px 12px;
+                border-radius: 4px;
+                cursor: pointer;
+                font-size: 12px;
+                transition: all 0.3s ease;
+            }
+            
+            .camera-btn:hover {
+                background: linear-gradient(135deg, rgba(0, 255, 0, 0.2), rgba(0, 200, 50, 0.2));
+                transform: translateY(-1px);
+                box-shadow: 0 4px 8px rgba(0, 255, 0, 0.3);
+            }
+            
+            .camera-status {
+                padding: 8px;
+                background: rgba(0, 255, 0, 0.1);
+                border-radius: 4px;
+                border: 1px solid rgba(0, 255, 0, 0.3);
+            }
+            
+            .status-text {
+                font-size: 12px;
+                color: #00ff88;
+                font-weight: bold;
+            }
+            
+            .camera-preview {
+                margin-top: 5px;
+                font-size: 10px;
+                color: #aaffaa;
+                opacity: 0.8;
             }
             
             .vision-btn {
@@ -357,6 +415,11 @@ class AtlasVision {
         document.getElementById('vision-analyze').addEventListener('click', () => this.analyzeImage());
         document.getElementById('vision-enhance').addEventListener('click', () => this.enhanceImage());
         document.getElementById('vision-sequence').addEventListener('click', () => this.createVideoSequence());
+        
+        // Camera communication controls
+        document.getElementById('camera-start').addEventListener('click', () => this.startCamera());
+        document.getElementById('camera-stop').addEventListener('click', () => this.stopCamera());
+        document.getElementById('camera-capture').addEventListener('click', () => this.captureFrame());
     }
     
     setupDragAndDrop() {
@@ -661,6 +724,137 @@ class AtlasVision {
     
     getCurrentSequence() {
         return this.currentSequence;
+    }
+    
+    // ==================== CAMERA COMMUNICATION METHODS ====================
+    
+    async startCamera() {
+        try {
+            console.log('[ATLAS Vision] Starting camera communication...');
+            
+            const response = await fetch(`${this.apiBase}/api/vision/camera/start`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                console.log('[ATLAS Vision] Camera started successfully');
+                this.updateCameraUI(true);
+                this.showSuccess('Atlas може тепер бачити вас через камеру');
+                
+                // Automatically capture frames for real-time communication
+                this.startFrameCapture();
+            } else {
+                console.error('[ATLAS Vision] Camera start failed:', result.error);
+                this.showError(`Помилка запуску камери: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('[ATLAS Vision] Camera start error:', error);
+            this.showError('Не вдається запустити камеру');
+        }
+    }
+    
+    async stopCamera() {
+        try {
+            console.log('[ATLAS Vision] Stopping camera communication...');
+            
+            // Stop frame capture interval
+            this.stopFrameCapture();
+            
+            const response = await fetch(`${this.apiBase}/api/vision/camera/stop`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                console.log('[ATLAS Vision] Camera stopped successfully');
+                this.updateCameraUI(false);
+                this.showSuccess('Камеру зупинено');
+            } else {
+                console.error('[ATLAS Vision] Camera stop failed:', result.error);
+                this.showError(`Помилка зупинки камери: ${result.error}`);
+            }
+        } catch (error) {
+            console.error('[ATLAS Vision] Camera stop error:', error);
+            this.showError('Помилка зупинки камери');
+        }
+    }
+    
+    async captureFrame() {
+        try {
+            console.log('[ATLAS Vision] Capturing camera frame...');
+            
+            const response = await fetch(`${this.apiBase}/api/vision/camera/capture`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            const result = await response.json();
+            
+            if (result.success) {
+                console.log('[ATLAS Vision] Frame captured and analyzed');
+                
+                // Update preview with scene description
+                const preview = document.getElementById('camera-preview');
+                if (preview) {
+                    preview.innerHTML = `
+                        <div><strong>Сцена:</strong> ${result.scene_description}</div>
+                        <div><strong>Час:</strong> ${new Date(result.timestamp).toLocaleTimeString()}</div>
+                    `;
+                }
+                
+                // Store analysis for potential use by Atlas
+                this.currentAnalysis = result.analysis;
+                
+                console.log('[ATLAS Vision] Scene description:', result.scene_description);
+                return result;
+            } else {
+                console.error('[ATLAS Vision] Frame capture failed:', result.error);
+                this.showError(`Помилка зйомки: ${result.error}`);
+                return null;
+            }
+        } catch (error) {
+            console.error('[ATLAS Vision] Frame capture error:', error);
+            this.showError('Не вдається зробити знімок');
+            return null;
+        }
+    }
+    
+    updateCameraUI(active) {
+        const startBtn = document.getElementById('camera-start');
+        const stopBtn = document.getElementById('camera-stop');
+        const captureBtn = document.getElementById('camera-capture');
+        const status = document.getElementById('camera-status');
+        
+        if (active) {
+            startBtn.style.display = 'none';
+            stopBtn.style.display = 'block';
+            captureBtn.style.display = 'block';
+            status.style.display = 'block';
+        } else {
+            startBtn.style.display = 'block';
+            stopBtn.style.display = 'none';
+            captureBtn.style.display = 'none';
+            status.style.display = 'none';
+        }
+    }
+    
+    startFrameCapture() {
+        // Capture frames every 3 seconds for real-time communication
+        this.frameCaptureInterval = setInterval(() => {
+            this.captureFrame();
+        }, 3000);
+    }
+    
+    stopFrameCapture() {
+        if (this.frameCaptureInterval) {
+            clearInterval(this.frameCaptureInterval);
+            this.frameCaptureInterval = null;
+        }
     }
 }
 
