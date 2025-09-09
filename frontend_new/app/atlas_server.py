@@ -767,8 +767,8 @@ def chat():
         response = None
         # Dynamic timeout logic: compute needed time based on message complexity instead of fixed large timeout
         def compute_orchestrator_timeout(msg: str) -> int:
-            base_s = int(os.environ.get('ORCH_POST_BASE_TIMEOUT', '15'))  # increased base for better reliability
-            max_s = int(os.environ.get('ORCH_POST_MAX_TIMEOUT', os.environ.get('ORCH_POST_TIMEOUT', '60')))
+            base_s = int(os.environ.get('ORCH_POST_BASE_TIMEOUT', '20'))  # increased for model rotation delays
+            max_s = int(os.environ.get('ORCH_POST_MAX_TIMEOUT', os.environ.get('ORCH_POST_TIMEOUT', '180')))  # increased to 3 minutes for heavy rotation
             per_char_ms = float(os.environ.get('ORCH_POST_PER_CHAR_MS', '6'))  # ms per char heuristic
             # Complexity boosts
             length = len(msg)
@@ -802,7 +802,7 @@ def chat():
                 logger.warning(f"Orchestrator POST attempt {attempt} failed after timeout={orch_timeout}s: {e}")
                 if attempt < max_attempts:
                     time.sleep(min(2 ** attempt, 6))
-                    orch_timeout = min(int(orch_timeout * 1.25), int(os.environ.get('ORCH_POST_MAX_TIMEOUT', '60')))
+                    orch_timeout = min(int(orch_timeout * 1.25), int(os.environ.get('ORCH_POST_MAX_TIMEOUT', '180')))
 
         if response is None:
             logger.error(f"Orchestrator unreachable after retries: {last_exc}")

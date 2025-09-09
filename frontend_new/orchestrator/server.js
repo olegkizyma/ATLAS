@@ -20,6 +20,26 @@ import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js'
 import { IntentCache } from './intent_cache.js';
 import { chatWithModel, chatWithModelTimeout, chatWithModelRotation, healthCheck } from './github_models_client.js';
 
+// Rate limiting helpers
+const globalRequestDelay = parseInt(process.env.GLOBAL_AGENT_REQUEST_DELAY_MS || '2000', 10);
+const globalRateLimit = parseInt(process.env.GLOBAL_RATE_LIMIT_DELAY_MS || '1500', 10);
+
+// Helper function for delays between agent requests
+async function waitForAgentDelay(agentName, previousAgent = null) {
+    if (previousAgent && previousAgent !== agentName) {
+        const delay = globalRequestDelay;
+        logMessage('info', `[AGENT_DELAY] Waiting ${delay}ms between ${previousAgent} -> ${agentName}`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+    }
+}
+
+// Helper function for global rate limiting
+async function waitForRateLimit() {
+    const delay = globalRateLimit;
+    logMessage('debug', `[GLOBAL_RATE_LIMIT] Waiting ${delay}ms before next request`);
+    await new Promise(resolve => setTimeout(resolve, delay));
+}
+
 // Enhanced execution wrapper with model rotation instead of GitHub Goose fallback
 async function executeWithModelRotation(agentNameOrOptions, message, sessionId, options = {}) {
     let agentName, prompt, session, opts;
@@ -1636,7 +1656,7 @@ async function processAgentCycle(userMessage, session) {
             `План Atlas: ${session.pipeline.atlasPlan}`
         ].join('\n');
         
-        const grishaPreRaw = await generateNonBlockingAgentResponse('grisha', precheckPrompt, session);
+    const grishaPreRaw = await generateNonBlockingAgentResponse('grisha', precheckPrompt, session);
         const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
         responses.push(grishaPre);
         session.history.push(grishaPre);
@@ -1650,12 +1670,13 @@ async function processAgentCycle(userMessage, session) {
         
         // Запускаємо новий цикл для виконання nextAction
         logMessage('info', `[processAgentCycle] scheduling next cycle for tetyana_execute`);
-        setTimeout(() => {
+    const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
+    setTimeout(() => {
             const syntheticUser = '[AUTO] Продовжити виконання Тетяни.';
             processAgentCycle(syntheticUser, session).catch(e => {
                 logMessage('warn', `[processAgentCycle] auto tetyana cycle failed: ${e.message}`);
             });
-        }, 100); // невелика затримка для завершення поточного циклу
+    }, nextActionDelay); // контрольована затримка між циклами
         
         return responses;
     }
@@ -1664,8 +1685,8 @@ async function processAgentCycle(userMessage, session) {
     if (session.nextAction === 'tetyana_execute' && session.pipeline && session.pipeline.stage === 'prechecked') {
         logMessage('info', `[processAgentCycle] executing tetyana based on nextAction`);
         
-        const execPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nПлан Atlas: ${session.pipeline.atlasPlan}\nВимоги Гриші: ${session.pipeline.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
-        const tetyanaExecRaw = await generateNonBlockingAgentResponse('tetyana', execPrompt, session, { enableTools: true });
+    const execPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nПлан Atlas: ${session.pipeline.atlasPlan}\nВимоги Гриші: ${session.pipeline.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
+    const tetyanaExecRaw = await generateNonBlockingAgentResponse('tetyana', execPrompt, session, { enableTools: true });
         const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
         
         try { 
@@ -2322,6 +2343,13 @@ function isActionableTask(_text) { return false; }
 
 // Real agent integration
 async function generateAgentResponse(agentName, inputMessage, session, options = {}) {
+    // Global pacing: wait between different agents and respect global rate limit
+    try {
+        const prev = session?.currentAgent || null;
+        await waitForAgentDelay(agentName, prev);
+        await waitForRateLimit();
+    } catch {}
+
     const agentStartTime = Date.now();
     const agent = AGENTS[agentName];
     const messageId = generateMessageId();
@@ -2575,6 +2603,8 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     const totalAgentTime = Date.now() - agentStartTime;
     logMessage('info', `[TIMING] agent=${agentName} total_ms=${totalAgentTime} provider=${provider} model=${model} success=${executionSuccessful}`);
 
+    // Update current agent for next pacing decision
+    try { if (session) session.currentAgent = agentName; } catch {}
     return {
         role: 'assistant',
         content: `${agent.signature} ${content.replace(/^\[ТЕТЯНА\]\s*/i, '')}`,
@@ -2598,6 +2628,12 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
 // Enhanced Non-Blocking Agent Response System
 // Ensures system never gets stuck waiting for agent responses
 async function generateNonBlockingAgentResponse(agentName, inputMessage, session, options = {}) {
+    // Global pacing also applies here to avoid bursts when using non-blocking path
+    try {
+        const prev = session?.currentAgent || null;
+        await waitForAgentDelay(agentName, prev);
+        await waitForRateLimit();
+    } catch {}
     const maxTimeout = parseInt(process.env.ATLAS_AGENT_TIMEOUT_MS || '45000', 10); // 45 seconds max
     const fallbackTimeout = parseInt(process.env.ATLAS_FALLBACK_TIMEOUT_MS || '15000', 10); // 15 seconds before Atlas helps
     

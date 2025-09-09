@@ -99,8 +99,9 @@ export async function chatWithModelRotation(baseUrl, models, userMessage, option
     
     // Читаємо конфігурацію ротації з .env
     const rotationFreq = parseInt(process.env.MODEL_ROTATION_FREQUENCY || '1');
-    const minPoolSize = parseInt(process.env.MODEL_ROTATION_MIN_POOL_SIZE || '30');
+    const minPoolSize = parseInt(process.env.MODEL_ROTATION_MIN_POOL_SIZE || '8');
     const shuffleEvery = parseInt(process.env.MODEL_ROTATION_SHUFFLE_EVERY || '3');
+    const rotationDelayMs = parseInt(process.env.MODEL_ROTATION_DELAY_MS || '2000');
     const aggressiveRotation = process.env.ENABLE_AGGRESSIVE_ROTATION === 'true';
     
     // Інкрементуємо лічильник запитів
@@ -144,22 +145,26 @@ export async function chatWithModelRotation(baseUrl, models, userMessage, option
         modelPool.splice(0, modelPool.length, ...rotatedPool);
     }
     
-    for (const model of modelPool) {
+    for (let i = 0; i < modelPool.length; i++) {
+        const model = modelPool[i];
         try {
-            console.log(`[ATLAS_CLIENT] Trying model: ${model}`);
+            console.log(`[ROTATION] Trying model ${model} (attempt ${i + 1}/${modelPool.length})`);
             const result = await chatWithModel(baseUrl, model, userMessage, options);
-            console.log(`[ATLAS_CLIENT] Model rotation success with: ${model}`);
+            console.log(`[ROTATION] ✅ Success with model: ${model}`);
             return result;
         } catch (error) {
-            console.log(`[ATLAS_CLIENT] Model ${model} failed: ${error.message}`);
+            console.log(`[ROTATION] ❌ Model ${model} failed: ${error.message}`);
             
             // Якщо це остання модель, кидаємо помилку
-            if (model === modelPool[modelPool.length - 1]) {
+            if (i === modelPool.length - 1) {
                 throw new Error(`All ${modelPool.length} models failed. Last error from ${model}: ${error.message}`);
             }
             
-            // Інакше пробуємо наступну модель
-            continue;
+            // Додаємо затримку між спробами моделей (крім останньої)
+            if (rotationDelayMs > 0 && i < modelPool.length - 1) {
+                console.log(`[ROTATION] Waiting ${rotationDelayMs}ms before next model...`);
+                await new Promise(resolve => setTimeout(resolve, rotationDelayMs));
+            }
         }
     }
 }
