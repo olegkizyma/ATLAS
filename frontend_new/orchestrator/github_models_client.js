@@ -56,7 +56,7 @@ let clientInstance = null;
 function getClient() {
     if (!clientInstance) {
         clientInstance = new GitHubModelsClient({
-            proxyURL: process.env.FALLBACK_API_BASE || 'http://127.0.0.1:3010/v1',
+            proxyURL: process.env.FALLBACK_API_BASE || 'http://localhost:5101/v1',
             maxRetries: 2,
             retryDelay: 1000,
             maxDelay: 60000

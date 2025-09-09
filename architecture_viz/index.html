@@ -4,306 +4,782 @@
   <meta charset="UTF-8" />
   <title>ATLAS Architecture Visualization</title>
   <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet">
   <style>
-    body { font-family: Inter, system-ui, Arial, sans-serif; margin: 0; padding: 1.2rem 2rem; background:#0f1115; color:#eee; }
-    h1,h2 { font-weight:600; letter-spacing:.5px; }
-    section { margin-bottom:3rem; }
-    .panel { background:#1b1f27; padding:1rem 1.2rem; border:1px solid #2b313d; border-radius:10px; box-shadow:0 2px 6px rgba(0,0,0,.4); }
-    pre { overflow-x:auto; background:#10141a; padding:1rem; border-radius:8px; }
-    img { max-width:100%; background:#fff; border-radius:8px; box-shadow:0 2px 8px rgba(0,0,0,.6); }
-    .grid { display:grid; gap:1.5rem; grid-template-columns:repeat(auto-fit,minmax(420px,1fr)); }
-    .badge { display:inline-block; padding:2px 8px; font-size:.7rem; background:#2f81f7; color:#fff; border-radius:14px; letter-spacing:.5px; vertical-align:middle; }
-    footer { opacity:.6; font-size:.75rem; margin-top:4rem; }
-    code { font-family: ui-monospace, "SF Mono", Menlo, monospace; }
-    
-    /* Copy buttons */
-    .copy-container { position: relative; display: inline-block; }
-    .copy-btn { 
-      position: absolute; top: 8px; right: 8px; 
-      background: rgba(47,129,247,0.8); color: white; border: none; 
-      padding: 4px 8px; border-radius: 4px; cursor: pointer; 
-      font-size: 12px; opacity: 0.7; transition: opacity 0.2s;
+    :root {
+      --primary: #00ff88;
+      --primary-dark: #00cc6a;
+      --secondary: #ff6b6b;
+      --accent: #4ecdc4;
+      --warning: #ffd93d;
+      --bg-primary: #0a0e1a;
+      --bg-secondary: #121829;
+      --bg-tertiary: #1a1f36;
+      --bg-card: rgba(26, 31, 54, 0.8);
+      --text-primary: #ffffff;
+      --text-secondary: #a0a9c0;
+      --text-muted: #6c7293;
+      --border: rgba(255, 255, 255, 0.1);
+      --shadow: 0 20px 40px rgba(0, 0, 0, 0.3);
+      --glow: 0 0 20px rgba(0, 255, 136, 0.3);
     }
-    .copy-btn:hover { opacity: 1; background: rgba(47,129,247,1); }
-    .copy-btn.copied { background: rgba(76,175,80,0.8); }
-    
-    /* File download buttons */
-    .download-section { margin: 1rem 0; }
+
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: linear-gradient(135deg, var(--bg-primary) 0%, var(--bg-secondary) 100%);
+      color: var(--text-primary);
+      line-height: 1.6;
+      min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    /* Animated background */
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 100%;
+      background: 
+        radial-gradient(circle at 20% 80%, rgba(0, 255, 136, 0.1) 0%, transparent 50%),
+        radial-gradient(circle at 80% 20%, rgba(76, 205, 196, 0.1) 0%, transparent 50%),
+        radial-gradient(circle at 40% 40%, rgba(255, 107, 107, 0.05) 0%, transparent 50%);
+      z-index: -1;
+      animation: float 20s ease-in-out infinite;
+    }
+
+    @keyframes float {
+      0%, 100% { transform: translateY(0px) rotate(0deg); }
+      33% { transform: translateY(-20px) rotate(1deg); }
+      66% { transform: translateY(10px) rotate(-1deg); }
+    }
+
+    /* Header */
+    .header {
+      text-align: center;
+      padding: 4rem 2rem 2rem;
+      position: relative;
+    }
+
+    .main-title {
+      font-size: clamp(2.5rem, 5vw, 4rem);
+      font-weight: 700;
+      margin-bottom: 1rem;
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      background-clip: text;
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      text-shadow: var(--glow);
+      animation: glow 3s ease-in-out infinite alternate;
+    }
+
+    @keyframes glow {
+      from { filter: drop-shadow(0 0 20px rgba(0, 255, 136, 0.3)); }
+      to { filter: drop-shadow(0 0 30px rgba(0, 255, 136, 0.6)); }
+    }
+
+    .subtitle {
+      font-size: 1.25rem;
+      color: var(--text-secondary);
+      max-width: 600px;
+      margin: 0 auto 2rem;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.5rem 1rem;
+      background: rgba(0, 255, 136, 0.1);
+      color: var(--primary);
+      border: 1px solid rgba(0, 255, 136, 0.3);
+      border-radius: 50px;
+      font-size: 0.9rem;
+      font-weight: 500;
+      backdrop-filter: blur(10px);
+    }
+
+    .badge::before {
+      content: '🚀';
+      font-size: 1.2em;
+    }
+
+    /* Container */
+    .container {
+      max-width: 1400px;
+      margin: 0 auto;
+      padding: 0 2rem;
+    }
+
+    /* Cards */
+    .card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 20px;
+      padding: 2rem;
+      margin-bottom: 2rem;
+      backdrop-filter: blur(20px);
+      box-shadow: var(--shadow);
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--primary), var(--accent), var(--secondary));
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .card:hover {
+      transform: translateY(-5px);
+      box-shadow: 0 30px 60px rgba(0, 0, 0, 0.4);
+      border-color: rgba(0, 255, 136, 0.3);
+    }
+
+    .card:hover::before {
+      opacity: 1;
+    }
+
+    .card-title {
+      font-size: 1.75rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--text-primary);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .card-title::before {
+      content: attr(data-icon);
+      font-size: 1.5em;
+    }
+
+    /* Grid */
+    .grid {
+      display: grid;
+      gap: 2rem;
+      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
+    }
+
+    .grid-2 {
+      grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
+    }
+
+    /* Status panel */
+    .status-panel {
+      background: linear-gradient(135deg, rgba(0, 255, 136, 0.1), rgba(76, 205, 196, 0.1));
+      border: 1px solid rgba(0, 255, 136, 0.3);
+    }
+
+    .status-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      margin-top: 1rem;
+    }
+
+    .status-item {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.75rem;
+      background: rgba(255, 255, 255, 0.05);
+      border-radius: 10px;
+      border: 1px solid rgba(255, 255, 255, 0.1);
+    }
+
+    .status-active::before { content: '✅'; }
+    .status-info::before { content: 'ℹ️'; }
+
+    /* Download section */
+    .download-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      margin-top: 1.5rem;
+    }
+
     .download-btn {
-      display: inline-block; margin: 4px 8px 4px 0;
-      padding: 6px 12px; background: rgba(156,255,199,0.1); 
-      color: #9cffc7; border: 1px solid rgba(156,255,199,0.3);
-      text-decoration: none; border-radius: 6px; font-size: 13px;
-      transition: all 0.2s;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      padding: 1rem 1.5rem;
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-primary);
+      text-decoration: none;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+      font-weight: 500;
     }
-    .download-btn:hover { 
-      background: rgba(156,255,199,0.2); 
-      border-color: rgba(156,255,199,0.5);
-      color: #fff;
+
+    .download-btn:hover {
+      background: rgba(0, 255, 136, 0.1);
+      border-color: rgba(0, 255, 136, 0.3);
+      transform: translateY(-2px);
+      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.2);
     }
-    .download-btn::before { content: "📄 "; }
-    .download-btn.png::before { content: "🖼️ "; }
-    .download-btn.svg::before { content: "🎨 "; }
+
+    .download-all {
+      background: linear-gradient(135deg, var(--primary), var(--accent));
+      color: var(--bg-primary);
+      font-weight: 600;
+    }
+
+    .download-all:hover {
+      background: linear-gradient(135deg, var(--primary-dark), var(--accent));
+      color: var(--bg-primary);
+    }
+
+    /* Mermaid container */
+    .mermaid-container {
+      background: rgba(0, 0, 0, 0.3);
+      border-radius: 15px;
+      padding: 1.5rem;
+      margin: 1rem 0;
+      border: 1px solid var(--border);
+      overflow-x: auto;
+    }
+
+    .mermaid {
+      font-family: 'Inter', sans-serif !important;
+      background: transparent !important;
+    }
+
+    /* Image gallery */
+    .image-gallery {
+      display: grid;
+      gap: 2rem;
+      grid-template-columns: repeat(auto-fit, minmax(400px, 1fr));
+    }
+
+    .image-card {
+      background: rgba(255, 255, 255, 0.02);
+      border-radius: 15px;
+      padding: 1.5rem;
+      border: 1px solid var(--border);
+      transition: all 0.3s ease;
+    }
+
+    .image-card:hover {
+      transform: scale(1.02);
+      border-color: rgba(0, 255, 136, 0.3);
+    }
+
+    .image-card h3 {
+      margin-bottom: 1rem;
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .image-card img {
+      width: 100%;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.95);
+      box-shadow: 0 10px 30px rgba(0, 0, 0, 0.3);
+      transition: transform 0.3s ease;
+    }
+
+    .image-card img:hover {
+      transform: scale(1.05);
+    }
+
+    /* Copy button */
+    .copy-container {
+      position: relative;
+    }
+
+    .copy-btn {
+      position: absolute;
+      top: 1rem;
+      right: 1rem;
+      background: rgba(0, 0, 0, 0.7);
+      color: white;
+      border: none;
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      cursor: pointer;
+      font-size: 0.85rem;
+      font-weight: 500;
+      transition: all 0.3s ease;
+      backdrop-filter: blur(10px);
+      z-index: 10;
+    }
+
+    .copy-btn:hover {
+      background: var(--primary);
+      color: var(--bg-primary);
+    }
+
+    .copy-btn.copied {
+      background: var(--primary);
+      color: var(--bg-primary);
+    }
+
+    /* Code blocks */
+    pre, code {
+      font-family: 'JetBrains Mono', monospace;
+      background: rgba(0, 0, 0, 0.4);
+      border-radius: 8px;
+      padding: 1rem;
+      overflow-x: auto;
+      border: 1px solid var(--border);
+    }
+
+    /* Legend */
+    .legend {
+      background: linear-gradient(135deg, rgba(255, 107, 107, 0.1), rgba(255, 217, 61, 0.1));
+      border: 1px solid rgba(255, 107, 107, 0.3);
+    }
+
+    .legend-grid {
+      display: grid;
+      gap: 1rem;
+      grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+      margin-top: 1rem;
+    }
+
+    .legend-item {
+      display: flex;
+      flex-direction: column;
+      gap: 0.25rem;
+    }
+
+    .legend-item strong {
+      color: var(--primary);
+      font-weight: 600;
+    }
+
+    .legend-item span {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    /* Footer */
+    .footer {
+      text-align: center;
+      padding: 4rem 2rem 2rem;
+      color: var(--text-muted);
+      border-top: 1px solid var(--border);
+      margin-top: 4rem;
+    }
+
+    /* Responsive */
+    @media (max-width: 768px) {
+      .container {
+        padding: 0 1rem;
+      }
+      
+      .card {
+        padding: 1.5rem;
+      }
+      
+      .header {
+        padding: 2rem 1rem 1rem;
+      }
+      
+      .grid, .grid-2 {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    /* Animations */
+    @keyframes fadeInUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .card {
+      animation: fadeInUp 0.6s ease-out;
+    }
+
+    .card:nth-child(1) { animation-delay: 0.1s; }
+    .card:nth-child(2) { animation-delay: 0.2s; }
+    .card:nth-child(3) { animation-delay: 0.3s; }
+    .card:nth-child(4) { animation-delay: 0.4s; }
   </style>
   <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
-  <script>mermaid.initialize({ startOnLoad: true, theme: 'dark' });</script>
+  <script>
+    mermaid.initialize({ 
+      startOnLoad: true, 
+      theme: 'dark',
+      themeVariables: {
+        primaryColor: '#00ff88',
+        primaryTextColor: '#ffffff',
+        primaryBorderColor: '#00cc6a',
+        lineColor: '#4ecdc4',
+        secondaryColor: '#1a1f36',
+        tertiaryColor: '#6c7293',
+        background: '#0a0e1a',
+        mainBkg: '#121829',
+        secondBkg: '#1a1f36'
+      }
+    });
+  </script>
 </head>
 <body>
-  <h1>ATLAS Architecture <span class="badge">UPDATED Sep 7, 2025</span></h1>
-  <p>Сукупний огляд системи: multi-agent pipeline (Atlas, Grisha, Tetyana), Recovery Bridge, probe цикл, памʼять (ранжування), метрики.</p>
-  <div class="panel" style="margin-bottom:2rem; background:#15202b;">
-    <h3>Legend & Recent Updates ✅</h3>
-    <ul style="line-height:1.4; font-size:.9rem; padding-left:1.1rem;">
-      <li><strong>Agents</strong>: Atlas (planner), Grisha (validator), Tetyana (executor)</li>
-      <li><strong>Recovery Bridge</strong>: ✅ WebSocket (:5102) + Health (:5103) - автоматичне відновлення помилок</li>
-      <li><strong>Probe Cycle</strong>: Мінімальний експеримент для збирання бракуючих артефактів</li>
-      <li><strong>Memory</strong>: SQLite факти (key/value) з exponential decay + frequency ранжуванням</li>
-      <li><strong>Semantic</strong>: (опц.) hash/remote embeddings cosine top-K</li>
-      <li><strong>Pruning</strong>: Capacity + TTL (3d by default) після кожного запису</li>
-      <li><strong>Metrics</strong>: Prometheus endpoints (`/metrics/prometheus`) з memory_* та probe_*</li>
-      <li><strong>rememberSafe</strong>: інлайн дедуп (60s) щоб зменшити шум</li>
-      <li><strong>System Status</strong>: 🎯 All services running, Recovery Bridge fixed & active</li>
-    </ul>
-  </div>
-
-  <div class="panel download-section" style="margin-bottom:2rem; background:#0d1b0f;">
-    <h3>📥 Download Architecture Files</h3>
-    <p style="font-size:0.9rem; opacity:0.8;">Оригінальні файли архітектури для локального використання:</p>
-    <div>
-      <a href="system_overview.mmd" download class="download-btn">System Overview (Mermaid)</a>
-      <a href="runtime_flow.mmd" download class="download-btn">Runtime Flow (Mermaid)</a>
-      <a href="recovery_bridge_flow.mmd" download class="download-btn">Recovery Bridge (Mermaid)</a>
-      <a href="layers.mmd" download class="download-btn">Layers Architecture (Mermaid)</a>
-      <a href="memory_flow.mmd" download class="download-btn">Memory Flow (Mermaid)</a>
-      <a href="components.graphviz" download class="download-btn">Components (Graphviz DOT)</a>
-      <a href="components.png" download class="download-btn png">Components PNG</a>
-      <a href="components.svg" download class="download-btn svg">Components SVG</a>
-      <a href="SYSTEM_STATUS.md" download class="download-btn">System Status Report</a>
-      <a href="README.md" download class="download-btn">Architecture README</a>
+  <header class="header">
+    <h1 class="main-title">ATLAS Architecture</h1>
+    <p class="subtitle">Інтелектуальна Multi-Agent система з Recovery Bridge, розумною пам'яттю та візуальним моніторингом</p>
+    <div class="badge">
+      Оновлено 8 вересня 2025
     </div>
-    <div style="margin-top:0.5rem;">
-      <button onclick="downloadAllFiles()" class="download-btn" style="background:rgba(255,193,7,0.2); color:#ffc107; border-color:rgba(255,193,7,0.5);">
-        📦 Download All Files
-      </button>
-    </div>
-  </div>
-
-  <section class="panel">
-    <h2>1. High-Level System Overview (Mermaid)</h2>
-    <div class="mermaid">
-      %% Embedded from system_overview.mmd (sync manually if changed)
-      flowchart TD
-        subgraph Client[User / UI]
-          UI[Web UI / Chat]
-        end
-        UI --> API[Flask API 5001]
-        API --> Orchestrator[Node Orchestrator 5101]
-        subgraph Agents[Multi-Agent Core]
-          Atlas[Atlas\nPlanner]
-          Grisha[Grisha\nValidator]
-          Tetyana[Tetyana\nExecutor]
-        end
-        Orchestrator --> Atlas
-        Atlas --> Grisha
-        Grisha -->|approve/adjust| Tetyana
-        Tetyana -->|execution result| Grisha
-        Grisha -->|verdict & followup| Orchestrator
-        Orchestrator --> API --> UI
-        subgraph ProbeCycle[Probe Cycle]
-          TP[Tetyana Probe]
-          GP[Grisha Probe Review]
-          AF[Atlas Feasibility]
-        end
-        Atlas -. initiate probe .-> TP
-        TP --> GP --> AF --> Atlas
-        subgraph Memory[Shared Memory (SQLite)]
-          MAtlas[(Atlas Memory)]
-          MGrisha[(Grisha Memory)]
-        end
-        Atlas <--> MAtlas
-        Grisha <--> MGrisha
-        MAtlas <-. shared context .-> MGrisha
-        subgraph Metrics[Prometheus Metrics]
-          P1[pipeline_phase_*]
-          P2[probe_*]
-          P3[memory_context_tokens]
-          P4[memory_context_injections]
-          P5[memory_facts_written]
-          P6[memory_facts_pruned]
-          P7[semantic_enabled]
-        end
-        Orchestrator --> Metrics
-        subgraph External[Optional Services]
-          G[Goose Executor 3000]
-          TTS[Ukrainian TTS 3001]
-          LLM[Local AI API 3010]
-        end
-        Tetyana -->|task exec| G
-        Orchestrator -->|LLM calls| LLM
-        Orchestrator -->|voice gating| TTS
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>2. Runtime Request Flow (Sequence)</h2>
-    <div class="mermaid">
-      sequenceDiagram
-        autonumber
-        participant U as User/UI
-        participant F as Flask API (5001)
-  participant O as Orchestrator (5101)
-        participant A as Atlas
-        participant G as Grisha
-        participant T as Tetyana
-        participant DB as SQLite Memory
-  participant SC as Semantic (opt)
-        U->>F: chat message
-        F->>O: /chat
-        O->>DB: summarizeForPrompt (ranked)
-        alt embeddings on
-          O->>SC: semanticContext(last user msg)
-          SC-->>O: top-K similar facts
-        end
-        O->>A: plan prompt + memory(+semantic)
-        A-->>O: plan
-        O->>G: validation
-        G-->>O: precheck
-        alt probe needed
-          O->>T: probe request
-          T-->>O: artifacts
-          O->>G: probe review
-          G-->>O: assessment
-          O->>A: feasibility
-          A-->>O: ADVANCE/CLARIFY
-        end
-        alt execute
-          O->>T: instructions
-          T-->>O: result
-        else clarify
-          O-->>F: clarification payload
-          F-->>U: ask user
-        end
-        O->>G: final validation
-        G-->>O: verdict
-        O->>DB: rememberSafe facts
-        O-->>F: response
-        F-->>U: stream
-    </div>
-  </section>
-
-  <section class="panel">
-    <h2>3. Graphviz Component Map (Exported)</h2>
-    <p>PNG/SVG генерується з <code>components.graphviz</code>. Якщо вже згенеровано – відобразиться нижче.</p>
-    <div class="grid">
-      <div>
-        <h3>PNG</h3>
-        <img src="components.png" alt="Components PNG" onerror="this.replaceWith('PNG ще не згенеровано');" />
-      </div>
-      <div>
-        <h3>SVG</h3>
-        <img src="components.svg" alt="Components SVG" onerror="this.replaceWith('SVG ще не згенеровано');" />
+  </header>
+  <div class="container">
+    <!-- System Status -->
+    <div class="card status-panel">
+      <h2 class="card-title" data-icon="🎯">Поточний стан системи</h2>
+      <p>Усі сервіси активні та працюють в штатному режимі. Recovery Bridge система успішно інтегрована та функціонує.</p>
+      
+      <div class="status-grid">
+        <div class="status-item status-active">
+          <span><strong>Frontend</strong> - порт 5001</span>
+        </div>
+        <div class="status-item status-active">
+          <span><strong>Orchestrator</strong> - порт 5101</span>
+        </div>
+        <div class="status-item status-active">
+          <span><strong>Recovery Bridge</strong> - порт 5102</span>
+        </div>
+        <div class="status-item status-active">
+          <span><strong>Ukrainian TTS</strong> - порт 3001</span>
+        </div>
+        <div class="status-item status-active">
+          <span><strong>Goose Web</strong> - порт 3000</span>
+        </div>
+        <div class="status-item status-info">
+          <span><strong>Vision API</strong> - інтегровано</span>
+        </div>
       </div>
     </div>
-  </section>
 
-  <section class="panel">
-    <h2>4. Memory Ranking Flow</h2>
-    <div class="mermaid">
-      sequenceDiagram
-        autonumber
-        participant O as Orchestrator
-        participant M as SQLite
-        participant R as Ranked Summarizer
-        participant S as Semantic (opt)
-        participant A as Atlas
-        participant G as Grisha
-        O->>M: fetch entries
-        O->>R: summarizeForPrompt(targetTokens)
-        R-->>O: ranked block
-        opt embeddings enabled
-          O->>S: semanticContext(query)
-          S-->>O: sem block
-        end
-        O->>A: planning prompt (ranked + sem?)
-        A-->>O: plan
-        O->>M: rememberSafe
-        M-->>O: prune (TTL+capacity)
-        O->>G: validation
-        G-->>O: verdict
+    <!-- Legend -->
+    <div class="card legend">
+      <h2 class="card-title" data-icon="📚">Легенда & Ключові компоненти</h2>
+      <div class="legend-grid">
+        <div class="legend-item">
+          <strong>Агенти</strong>
+          <span>Atlas (планувальник), Grisha (валідатор), Tetyana (виконавець)</span>
+        </div>
+        <div class="legend-item">
+          <strong>Recovery Bridge</strong>
+          <span>WebSocket (:5102) + Health (:5103) - автоматичне відновлення після помилок</span>
+        </div>
+        <div class="legend-item">
+          <strong>Probe Cycle</strong>
+          <span>Мінімальний експеримент для збирання відсутніх артефактів</span>
+        </div>
+        <div class="legend-item">
+          <strong>Memory System</strong>
+          <span>SQLite факти з exponential decay + frequency ранжуванням</span>
+        </div>
+        <div class="legend-item">
+          <strong>Semantic Search</strong>
+          <span>Hash/remote embeddings з cosine similarity top-K</span>
+        </div>
+        <div class="legend-item">
+          <strong>Vision System</strong>
+          <span>OpenCV + YOLO + MediaPipe для обробки зображень</span>
+        </div>
+      </div>
     </div>
-  </section>
 
-    <footer>
-    ATLAS Architecture Visualization by ATLAS Team | Last updated: September 7, 2025 ✅
+    <!-- Download Section -->
+    <div class="card">
+      <h2 class="card-title" data-icon="📥">Завантаження файлів архітектури</h2>
+      <p>Усі оригінальні файли архітектури для локального використання, інтеграції та розробки:</p>
+      
+      <div class="download-grid">
+        <a href="components.png" download class="download-btn">
+          🖼️ <span>Components PNG</span>
+        </a>
+        <a href="components.svg" download class="download-btn">
+          🎨 <span>Components SVG</span>
+        </a>
+        <a href="components_hq.png" download class="download-btn">
+          💎 <span>High Quality PNG</span>
+        </a>
+        <a href="system_overview.mmd" download class="download-btn">
+          📄 <span>System Overview</span>
+        </a>
+        <a href="runtime_flow.mmd" download class="download-btn">
+          ⚡ <span>Runtime Flow</span>
+        </a>
+        <a href="recovery_bridge_flow.mmd" download class="download-btn">
+          🔄 <span>Recovery Bridge</span>
+        </a>
+        <a href="components.graphviz" download class="download-btn">
+          🔗 <span>Graphviz DOT</span>
+        </a>
+        <a href="README.md" download class="download-btn">
+          📖 <span>Architecture README</span>
+        </a>
+      </div>
+      
+      <div style="margin-top: 1.5rem;">
+        <button onclick="downloadAllFiles()" class="download-btn download-all">
+          📦 Завантажити всі файли
+        </button>
+      </div>
+    </div>
+
+    <!-- System Overview -->
+    <div class="card">
+      <h2 class="card-title" data-icon="🏗️">Загальний огляд системи</h2>
+      <div class="mermaid-container">
+        <div class="copy-container">
+          <button class="copy-btn" onclick="copyToClipboard(this.nextElementSibling, this)">📋 Копіювати</button>
+          <div class="mermaid">
+            flowchart TD
+              subgraph Client[👤 User Interface]
+                UI[Web UI / Chat]
+              end
+              UI --> API[🌐 Flask API :5001]
+              API --> Orchestrator[🎭 Node Orchestrator :5101]
+              subgraph Agents[🤖 Multi-Agent Core]
+                Atlas[🧠 Atlas<br/>Planner]
+                Grisha[✅ Grisha<br/>Validator]
+                Tetyana[⚡ Tetyana<br/>Executor]
+              end
+              Orchestrator --> Atlas
+              Atlas --> Grisha
+              Grisha -->|approve/adjust| Tetyana
+              Tetyana -->|execution result| Grisha
+              Grisha -->|verdict & followup| Orchestrator
+              Orchestrator --> API --> UI
+              subgraph Recovery[🔄 Recovery Bridge :5102]
+                RB[Recovery Bridge]
+                IRS[Intelligent Recovery]
+                RBHealth[Health Monitor :5103]
+              end
+              Orchestrator <--> RB
+              RB --> IRS
+              RB --> RBHealth
+              subgraph Vision[👁️ ATLAS Vision System]
+                VisionAPI[Vision API]
+                ImageProcessor[Image Processor]
+                VideoSynth[Video Synthesizer]
+              end
+              API --> VisionAPI
+              VisionAPI --> ImageProcessor
+              ImageProcessor --> VideoSynth
+              subgraph Memory[💾 Shared Memory]
+                MAtlas[(Atlas Memory)]
+                MGrisha[(Grisha Memory)]
+                Semantic[🔍 Semantic Search]
+              end
+              Atlas <--> MAtlas
+              Grisha <--> MGrisha
+              MAtlas <--> Semantic
+              MGrisha <--> Semantic
+              subgraph External[🔧 Optional Services]
+                Goose[🪿 Goose :3000]
+                TTS[🎵 Ukrainian TTS :3001]
+                LLM[🤖 Local AI API :3010]
+              end
+              Tetyana --> Goose
+              Orchestrator --> LLM
+              Orchestrator --> TTS
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Runtime Flow -->
+    <div class="card">
+      <h2 class="card-title" data-icon="⚡">Потік виконання запиту</h2>
+      <div class="mermaid-container">
+        <div class="copy-container">
+          <button class="copy-btn" onclick="copyToClipboard(this.nextElementSibling, this)">📋 Копіювати</button>
+          <div class="mermaid">
+            sequenceDiagram
+              autonumber
+              participant U as 👤 User
+              participant F as 🌐 Flask API
+              participant O as 🎭 Orchestrator
+              participant A as 🧠 Atlas
+              participant G as ✅ Grisha
+              participant T as ⚡ Tetyana
+              participant DB as 💾 Memory
+              participant RB as 🔄 Recovery Bridge
+              
+              U->>F: chat message
+              F->>O: /chat request
+              O->>DB: get context (ranked)
+              O->>A: planning with context
+              A-->>O: execution plan
+              O->>G: validate plan
+              G-->>O: validation result
+              
+              alt execution needed
+                O->>T: execute instructions
+                T-->>O: execution result
+                alt execution failed
+                  O->>RB: failure event
+                  RB-->>O: recovery strategy
+                  O->>T: retry with adaptations
+                end
+              else clarification needed
+                O-->>F: clarification request
+                F-->>U: ask for details
+              end
+              
+              O->>G: final validation
+              G-->>O: verdict
+              O->>DB: store new facts
+              O-->>F: response
+              F-->>U: stream result
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Component Visualization -->
+    <div class="card">
+      <h2 class="card-title" data-icon="🗺️">Візуалізація компонентів</h2>
+      <p>Графічне представлення архітектури системи ATLAS, згенероване з файлу <code>components.graphviz</code>:</p>
+      
+      <div class="image-gallery">
+        <div class="image-card">
+          <h3>🖼️ PNG Версія</h3>
+          <img src="components.png" alt="ATLAS Components PNG" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+          <div style="display:none; text-align:center; padding:2rem; color:var(--text-muted);">
+            PNG ще не згенеровано
+          </div>
+        </div>
+        <div class="image-card">
+          <h3>🎨 SVG Версія</h3>
+          <img src="components.svg" alt="ATLAS Components SVG" onerror="this.style.display='none'; this.nextElementSibling.style.display='block';" />
+          <div style="display:none; text-align:center; padding:2rem; color:var(--text-muted);">
+            SVG ще не згенеровано
+          </div>
+        </div>
+      </div>
+      
+      <div style="margin-top:1.5rem; padding:1rem; background:rgba(0,255,136,0.1); border-radius:10px; border:1px solid rgba(0,255,136,0.3);">
+        <p><strong>💡 Як згенерувати:</strong></p>
+        <code>dot -Tpng components.graphviz -o components.png</code><br>
+        <code>dot -Tsvg components.graphviz -o components.svg</code>
+      </div>
+    </div>
+
+    <!-- Memory Flow -->
+    <div class="card">
+      <h2 class="card-title" data-icon="🧠">Потік роботи з пам'яттю</h2>
+      <div class="mermaid-container">
+        <div class="copy-container">
+          <button class="copy-btn" onclick="copyToClipboard(this.nextElementSibling, this)">📋 Копіювати</button>
+          <div class="mermaid">
+            sequenceDiagram
+              autonumber
+              participant O as 🎭 Orchestrator
+              participant M as 💾 SQLite Memory
+              participant R as 📊 Ranking System
+              participant S as 🔍 Semantic Search
+              participant A as 🧠 Atlas
+              participant G as ✅ Grisha
+              
+              O->>M: fetch memory entries
+              O->>R: rank by frequency + decay
+              R-->>O: prioritized facts
+              
+              opt semantic search enabled
+                O->>S: find similar context
+                S-->>O: relevant embeddings
+              end
+              
+              O->>A: prompt with ranked memory
+              A-->>O: informed plan
+              O->>M: store new facts
+              M-->>M: prune old entries (TTL + capacity)
+              O->>G: validate with memory context
+              G-->>O: memory-aware verdict
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <footer class="footer">
+    <p>🚀 <strong>ATLAS Architecture Visualization</strong> by ATLAS Team</p>
+    <p>Останнє оновлення: 8 вересня 2025 ✨</p>
   </footer>
 
   <script>
-    // Copy functionality for code blocks and diagrams
-    function addCopyButtons() {
-      document.querySelectorAll('pre, .mermaid').forEach(block => {
-        const container = document.createElement('div');
-        container.className = 'copy-container';
-        block.parentNode.insertBefore(container, block);
-        container.appendChild(block);
-        
-        const copyBtn = document.createElement('button');
-        copyBtn.className = 'copy-btn';
-        copyBtn.textContent = '📋 Copy';
-        copyBtn.onclick = () => copyToClipboard(block, copyBtn);
-        container.appendChild(copyBtn);
-      });
-    }
-
+    // Copy functionality
     function copyToClipboard(element, button) {
       let text = '';
       if (element.classList.contains('mermaid')) {
-        // For Mermaid diagrams, copy the source code
-        text = element.getAttribute('data-processed') ? 
-               element.textContent : 
-               element.innerHTML.replace(/<[^>]*>/g, '').trim();
+        text = element.textContent.trim();
       } else {
         text = element.textContent;
       }
       
       navigator.clipboard.writeText(text).then(() => {
-        button.textContent = '✅ Copied!';
+        const original = button.textContent;
+        button.textContent = '✅ Скопійовано!';
         button.classList.add('copied');
         setTimeout(() => {
-          button.textContent = '📋 Copy';
+          button.textContent = original;
           button.classList.remove('copied');
         }, 2000);
       }).catch(err => {
         console.error('Copy failed:', err);
-        button.textContent = '❌ Failed';
+        button.textContent = '❌ Помилка';
         setTimeout(() => {
-          button.textContent = '📋 Copy';
+          button.textContent = '📋 Копіювати';
         }, 2000);
       });
     }
 
-    // Download all files functionality
+    // Download all files
     async function downloadAllFiles() {
       const files = [
+        'components.png',
+        'components.svg', 
+        'components_hq.png',
         'system_overview.mmd',
-        'runtime_flow.mmd', 
+        'runtime_flow.mmd',
         'recovery_bridge_flow.mmd',
         'layers.mmd',
         'memory_flow.mmd',
         'components.graphviz',
-        'components.png',
-        'components.svg',
-        'SYSTEM_STATUS.md',
-        'README.md'
+        'README.md',
+        'SYSTEM_STATUS.md'
       ];
       
-      const zip = new JSZip();
       const button = event.target;
       const originalText = button.textContent;
       
-      button.textContent = '📦 Downloading...';
+      button.textContent = '📦 Завантажуємо...';
       button.disabled = true;
       
       try {
+        const zip = new JSZip();
+        
         for (const file of files) {
           try {
             const response = await fetch(file);
@@ -320,20 +796,20 @@
         const url = window.URL.createObjectURL(zipBlob);
         const a = document.createElement('a');
         a.href = url;
-        a.download = 'atlas-architecture-files.zip';
+        a.download = `atlas-architecture-${new Date().toISOString().split('T')[0]}.zip`;
         document.body.appendChild(a);
         a.click();
         document.body.removeChild(a);
         window.URL.revokeObjectURL(url);
         
-        button.textContent = '✅ Downloaded!';
+        button.textContent = '✅ Завантажено!';
         setTimeout(() => {
           button.textContent = originalText;
           button.disabled = false;
         }, 3000);
       } catch (err) {
         console.error('Download failed:', err);
-        button.textContent = '❌ Failed';
+        button.textContent = '❌ Помилка';
         setTimeout(() => {
           button.textContent = originalText;
           button.disabled = false;
@@ -341,15 +817,22 @@
       }
     }
 
-    // Initialize copy buttons when page loads
-    document.addEventListener('DOMContentLoaded', () => {
-      addCopyButtons();
+    // Smooth scrolling for internal links
+    document.addEventListener('DOMContentLoaded', function() {
+      // Add hover effects to cards
+      const cards = document.querySelectorAll('.card');
+      cards.forEach(card => {
+        card.addEventListener('mouseenter', function() {
+          this.style.transform = 'translateY(-5px)';
+        });
+        card.addEventListener('mouseleave', function() {
+          this.style.transform = 'translateY(0)';
+        });
+      });
     });
   </script>
   
-  <!-- JSZip for downloading all files -->
+  <!-- JSZip for file downloads -->
   <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
-</body>
-</html>
 </body>
 </html>
