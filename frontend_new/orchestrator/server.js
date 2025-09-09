@@ -127,48 +127,75 @@ const CLARIFICATION_AUTOFILL_SILENCE_MS = parseInt(process.env.ATLAS_CLAR_AUTOFI
 const AGENT_ROLE_PROMPTS = {
     atlas: {
         planning: (context) => [
-            `Ти — Atlas, стратег системи ATLAS. Твоя роль: аналізувати запити та перефразовувати їх для виконання.`,
-            `НЕ ЗГАДУЙ РИЗИКИ - просто перефразуй завдання та передай для виконання.`,
+            `Ти — Atlas, агресивний виконавський стратег системи ATLAS. Твоя роль: НЕГАЙНО перефразовувати запити для швидкого виконання.`,
+            `ЗАБОРОНЕНО: згадувати ризики, проблеми, застереження, питання до користувача.`,
+            `ОБОВ'ЯЗКОВО: створювати план який Тетяна може НЕГАЙНО виконати з інструментами Goose.`,
             `Контекст завдання: ${context.userMessage}`,
             context.memoryContext ? `Контекст з пам'яті: ${context.memoryContext}` : '',
-            `Перефразуй завдання користувача в чіткий план дій для Тетяни. Включи:`,
-            `- Суть завдання простими словами`,
-            `- Основні кроки виконання`,
-            `- Очікуваний результат`,
-            `Будь конкретним і практичним. Зосередься на виконанні, а не на перешкодах.`,
+            `Створи КОНКРЕТНИЙ план виконання для Тетяни з інструментами Goose:`,
+            `- СУТЬ: що саме потрібно зробити (1 речення)`,
+            `- КРОКИ: покрокові дії з конкретними командами/файлами`,
+            `- РЕЗУЛЬТАТ: що отримаємо після виконання`,
+            `- ІНСТРУМЕНТИ: які Goose інструменти використовувати`,
+            `Якщо бракує даних - ПРИДУМАЙ типові/стандартні значення та ВИКОНУЙ. НЕ питай користувача.`,
+            `Твоя відповідальність - ЗАБЕЗПЕЧИТИ виконання любою ціною.`,
             ``,
-            `ТТС: Перефразовую завдання для команди та передаю на виконання.`
+            `ТТС: Формую план негайного виконання для команди.`
         ].filter(Boolean).join('\n'),
         
         autoResponse: (context) => [
-            `Ти — Atlas, інтелектуальний помічник. Користувач не відповів протягом 30 секунд.`,
-            `Проаналізуй ситуацію та надай природну, розумну відповідь від імені користувача.`,
+            `Ти — Atlas, агент швидкого виконання. Гриша запитав дані, які потрібні для продовження.`,
+            `ЗАМІСТЬ запиту у користувача - НЕГАЙНО переформулюй завдання для Тетяни щоб отримати ці дані.`,
             ``,
-            `Контекст завдання: ${context.clarificationNeeded}`,
-            `Попередні повідомлення: ${context.recentHistory}`,
+            `Потрібні дані: ${context.clarificationNeeded}`,
+            `Контекст: ${context.recentHistory}`,
             ``,
-            `Рекомендації для відповіді:`,
-            `- Використовуй здоровий глузд та практичний підхід`,
-            `- Якщо є сумніви, обирай безпечний варіант`,
-            `- Продовжуй виконання з типовими налаштуваннями, якщо це логічно`,
-            `- Якщо потрібно уточнення, надай найкращу здогадку базуючись на контексті`,
+            `Створи КОНКРЕТНЕ завдання для Тетяни щоб швидко зібрати ці дані:`,
+            `- МЕТА: зібрати конкретно потрібні дані`,
+            `- ДІЯ: що зробити (команди, запити, перевірки)`,
+            `- ІНСТРУМЕНТИ: які Goose засоби використати`,
+            `- РЕЗУЛЬТАТ: які дані отримаємо`,
             ``,
-            `Відповідай як користувач (не як Atlas), природно та стисло:`,
+            `НЕ чекай користувача. ДІЯЙ зараз щоб отримати дані та продовжити виконання.`,
+            `Твоя відповідальність - ЗАБЕЗПЕЧИТИ рух завдання вперед.`,
             ``,
-            `ТТС: Надаю автоматичну відповідь від імені користувача.`
+            `ТТС: Переформульовую завдання для збору даних та продовження виконання.`
+        ].join('\n'),
+        
+        dataGathering: (context) => [
+            `Ти — Atlas, агент швидкої адаптації. Гриша вказав на брак даних для виконання завдання.`,
+            `ТВОЯ ЗАДАЧА: НЕГАЙНО переформулювати завдання так, щоб Тетяна могла зібрати потрібні дані.`,
+            ``,
+            `Оригінальне завдання: ${context.userMessage}`,
+            `Що потрібно Гріші: ${context.grishaRequirement}`,
+            ``,
+            `Створи АДАПТОВАНИЙ план для Тетяни:`,
+            `- ФАЗА 1: Збір даних (що саме знайти/з'ясувати)`,
+            `- ІНСТРУМЕНТИ: команди/запити для отримання даних`,
+            `- ФАЗА 2: Виконання основного завдання з отриманими даними`,
+            `- РЕЗУЛЬТАТ: як використати зібрані дані`,
+            ``,
+            `ПРИКЛАД формату:`,
+            `ЗБИРАЄМО: системну інформацію про CPU та диски`,
+            `КОМАНДИ: df -h, top -n 1, free -h`,
+            `ПОТІМ: створюємо звіт з реальними показниками`,
+            ``,
+            `НЕ питай - ДІЙ! Переформулюй завдання під потрібні дані.`,
+            ``,
+            `ТТС: Адаптую план для збору даних та виконання завдання.`
         ].join('\n'),
         
         taskAnalysis: (userMessage) => [
-            `Ти — Atlas. Проаналізуй наступне завдання та визнач найкращий підхід:`,
+            `Ти — Atlas, аналітик швидкого виконання. Визнач найшвидший шлях до виконання завдання.`,
             `Завдання: ${userMessage}`,
-            `Визнач:`,
-            `- Тип завдання (обчислення, аналіз, виконання команд, тощо)`,
-            `- Складність (проста/середня/висока)`,
-            `- Необхідні інструменти`,
-            `- План виконання`,
-            `Надай короткий аналіз для подальшого планування.`,
+            `АНАЛІЗУЙ для негайного виконання:`,
+            `- ТИП: що робимо (створення, аналіз, команди, файли)`,
+            `- СКЛАДНІСТЬ: скільки кроків (1-3 кроки = просто, 4+ = складно)`,
+            `- GOOSE ІНСТРУМЕНТИ: які засоби використовувати`,
+            `- ПЛАН НЕГАЙНО: конкретні дії для Тетяни`,
+            `НЕ аналізуй ризики. ФОКУС на швидкому виконанні.`,
             ``,
-            `ТТС: Аналізую завдання та визначаю підхід до виконання.`
+            `ТТС: Аналізую для швидкого виконання завдання.`
         ].join('\n'),
         
         conversationAnalysis: (userMessage) => [
@@ -2005,21 +2032,38 @@ async function processAgentCycle(userMessage, session) {
                         if (session.probe?.startedAt) { PIPELINE_METRICS.probeLatencyMs += (Date.now()-session.probe.startedAt); PIPELINE_METRICS.probeCycles++; }
                         remember('atlas','last_probe_outcome','clarify');
                         clearProbe(session);
-                        // Fallback to clarification path - але без додаткових питань від Atlas
-                        // Просто позначаємо що потрібне уточнення, Гріша вже сказав що потрібно
-                        logProbe('Probe failed after max attempts -> clarification needed (Grisha already provided guidance)');
-                        session.awaitingClarification = true; 
-                        PIPELINE_METRICS.clarifications++;
+                        // Fallback to Atlas reformulation - замість очікування уточнень
+                        // Atlas створює адаптований план для збору потрібних даних
+                        logProbe('Probe failed after max attempts -> Atlas will reformulate task for data gathering');
+                        const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
+                            userMessage,
+                            grishaRequirement: grishaPre.content
+                        });
+                        const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
+                        const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
+                        responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
+                        
+                        // Негайно виконуємо через Тетяну
+                        const adaptedExecPrompt = `Адаптований план Atlas: ${atlasReformulation.content}\n\nВиконай збір даних та основне завдання.`;
+                        const tetyanaAdaptedRaw = await generateAgentResponse('tetyana', adaptedExecPrompt, session, { enableTools: true });
+                        const tetyanaAdapted = tagResponse(tetyanaAdaptedRaw, PHASE.EXECUTION);
+                        responses.push(tetyanaAdapted); pushAndBroadcast(session, tetyanaAdapted);
                     }
                     return responses;
                 }
-                // Замість генерації нових питань Atlas'ом, дозволяємо Гріші самому сказати що потрібно
-                // Гріша вже сформулював що йому потрібно в grishaPre.content
-                // Просто повертаємо відповідь Гриші як остаточну без додаткових питань від Atlas
-                session.awaitingClarification = true; 
-                scheduleClarificationAutoFill(session);
-                PIPELINE_METRICS.clarifications++;
-                markNeedsMore(session, ['additional_context'], grishaPre.content);
+                // Atlas reformulation замість очікування уточнень від користувача
+                // Atlas створює адаптований план для збору даних через Тетяну
+                const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
+                    userMessage,
+                    grishaRequirement: grishaPre.content
+                });
+                const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
+                const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
+                responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
+                
+                // Автоматично переходимо до виконання
+                startActionablePipeline(session, userMessage, atlasReformulation.content, grishaPre.content);
+                logMessage('info', `[SHORTAGE_REFORMULATION] Atlas adapted task instead of requesting clarification for session=${session.id}`);
                 return responses;
             }
         } catch (e) { logMessage('warn', 'Generic clarification escalation skipped: ' + e.message); }
@@ -2105,7 +2149,7 @@ async function processAgentCycle(userMessage, session) {
     responses.push(grishaResponse);
     pushAndBroadcast(session, grishaResponse);
 
-        // Clarification escalation for planning (avoid stalls)
+        // Atlas reformulation for planning (avoid clarification stalls)
         try {
             const lowerGrisha = (grishaResponse.content || '').toLowerCase();
             const shortage = /(уточн|потрібн|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
@@ -2113,16 +2157,23 @@ async function processAgentCycle(userMessage, session) {
             const repeated = session.lastPlanningSignature && session.lastPlanningSignature === planningSig;
             session.lastPlanningSignature = planningSig;
             if (!session.awaitingClarification && (shortage || repeated)) {
-                // Замість генерації нових питань Atlas'ом, дозволяємо природному потоку планування
-                // Гріша вже може сформулювати що потрібно в своїх відповідях
-                session.awaitingClarification = true; 
-                scheduleClarificationAutoFill(session);
-                PIPELINE_METRICS.clarifications++;
-                if (repeated) PIPELINE_METRICS.planningStallClarifications++;
-                logMessage('info', `[PLANNING] Clarification needed (shortage=${shortage} repeated=${repeated}) - letting Grisha handle questions`);
+                // ATLAS REFORMULATION: Створюємо адаптований план замість очікування уточнень
+                const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
+                    userMessage: userMessage,
+                    grishaRequirement: grishaResponse.content
+                });
+                const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
+                const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
+                responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
+                
+                // Автоматично переходимо до виконання з адаптованим планом
+                session.intent = 'actionable';
+                startActionablePipeline(session, userMessage, atlasReformulation.content, grishaResponse.content);
+                
+                logMessage('info', `[PLANNING_REFORMULATION] Atlas adapted plan instead of clarification (shortage=${shortage} repeated=${repeated})`);
                 return responses;
             }
-        } catch (e) { logMessage('warn', 'Planning escalation error: ' + e.message); }
+        } catch (e) { logMessage('warn', 'Planning reformulation error: ' + e.message); }
     // Disagreement heuristic removed
         try { logMessage('debug', 'Returning planning responses phases=' + responses.map(r => r.phase).join(',')); } catch {}
         return responses;
@@ -2461,12 +2512,22 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
             const lowerGrisha = (grishaPre.content || '').toLowerCase();
             const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
             if (shortage && !session.awaitingClarification) {
-                // Замість генерації нових питань Atlas'ом, дозволяємо Гріші бути основним джерелом питань
-                // Відповідь Гриші вже містить необхідні уточнення
-                session.awaitingClarification = true; 
-                PIPELINE_METRICS.clarifications++;
-                markNeedsMore(session, ['additional_context'], grishaPre.content);
-                try { scheduleClarificationAutoFill(session); } catch(e){ logMessage('warn','Clarification auto-fill scheduling failed: '+e.message); }
+                // ATLAS REFORMULATION: Замість питань до користувача, Atlas переформульовує завдання для збору даних Тетяною
+                const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
+                    userMessage,
+                    grishaRequirement: grishaPre.content
+                });
+                const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
+                const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
+                responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
+                
+                // Негайно виконуємо адаптований план через Тетяну
+                const adaptedExecPrompt = `Адаптований план Atlas: ${atlasReformulation.content}\nВимоги Гриші: ${grishaPre.content}\n\nВиконай збір даних та основне завдання згідно з адаптованим планом.`;
+                const tetyanaAdaptedRaw = await generateAgentResponse('tetyana', adaptedExecPrompt, session, { enableTools: true });
+                const tetyanaAdapted = tagResponse(tetyanaAdaptedRaw, PHASE.EXECUTION);
+                responses.push(tetyanaAdapted); pushAndBroadcast(session, tetyanaAdapted);
+                
+                logMessage('info', `[ATLAS_REFORMULATION] Replaced clarification with data gathering task for session=${session.id}`);
                 return responses;
             }
         } catch {}
@@ -2917,12 +2978,12 @@ function createAgentPrompt(agentName, message, session) {
     
     switch (agentName) {
         case 'atlas':
-            return `${baseContext} Ти — ATLAS, стратег і планувальник. Твоє завдання: проаналізувати запит користувача та створити чіткий план виконання українською мовою. Окресли суть завдання, контекст, ключові вимоги та можливі ризики. Сформулюй конкретні кроки для виконання. Якщо бракує даних, сформулюй 1–2 точні питання до користувача.${memoryBlock}
+            return `${baseContext} Ти — ATLAS, агресивний виконавський стратег. Твоє завдання: НЕГАЙНО перефразувати запит для швидкого виконання Тетяною з інструментами Goose. ЗАБОРОНЕНО згадувати ризики, проблеми, питання до користувача. Створюй КОНКРЕТНІ плани з командами та інструментами. Якщо бракує даних - придумуй стандартні значення та ВИКОНУЙ. Твоя відповідальність - ЗАБЕЗПЕЧИТИ виконання любою ціною.${memoryBlock}
 
 Запит користувача: ${message}
 Нещодавній контекст: ${getRecentHistory(session, 3)}
 
-Стиль: стисло, по суті, дружньо, з фокусом на практичному виконанні завдання.`;
+Стиль: агресивно виконавський, конкретний, без застережень, з фокусом на негайному виконанні через Goose інструменти.`;
 
         case 'grisha':
             return `${baseContext} Ти — Гриша, валідаційний агент. Перша перевірка — одразу після перефразування від ATLAS: оцінка ризиків і безпеки, вкажи на слабкі місця. Друга перевірка — після звіту Тетяни: валідуй, що завдання справді виконано за критеріями. Якщо не виконано — чітко вкажи, що саме не так, і які докази потрібні.${memoryBlock}
