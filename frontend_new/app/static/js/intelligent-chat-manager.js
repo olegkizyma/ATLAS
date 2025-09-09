@@ -3639,7 +3639,7 @@ class AtlasIntelligentChatManager {
 
     async _startGrishaScreenMonitoring() {
         try {
-            const response = await fetch(`${this.frontendBase}/api/vision/start_monitoring`, {
+            const response = await fetch(`${this.frontendBase}/api/grisha/start-monitoring`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({
@@ -3660,7 +3660,7 @@ class AtlasIntelligentChatManager {
 
     async _stopGrishaScreenMonitoring() {
         try {
-            const response = await fetch(`${this.frontendBase}/api/vision/stop_monitoring`, {
+            const response = await fetch(`${this.frontendBase}/api/grisha/stop-monitoring`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' }
             });

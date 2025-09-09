@@ -1895,6 +1895,30 @@ def grisha_list_reports():
         logger.error(f"/api/grisha/reports/list error: {e}")
         return jsonify({'error': 'Failed to list reports', 'details': str(e)}), 500
 
+# ==================== WHISPER SPEECH RECOGNITION ENDPOINTS ====================
+
+@app.route('/api/whisper/status')
+def whisper_status():
+    """Перевірка доступності Whisper Large 3"""
+    try:
+        # Тут буде логіка перевірки Whisper
+        # Поки що повертаємо статичну відповідь
+        return jsonify({
+            'available': True,
+            'model': 'whisper-large-3',
+            'status': 'ready',
+            'beam_sizes': [1, 3, 5, 10],
+            'supported_languages': ['uk', 'en', 'ru'],
+            'timestamp': datetime.now().isoformat()
+        })
+    except Exception as e:
+        logger.error(f"/api/whisper/status error: {e}")
+        return jsonify({
+            'available': False,
+            'error': str(e),
+            'timestamp': datetime.now().isoformat()
+        }), 500
+
 if __name__ == '__main__':
     # Print startup summary
     import platform
