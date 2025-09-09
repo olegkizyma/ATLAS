@@ -885,8 +885,23 @@ function applyTtsGate(session, phaseName) {
     session.ttsGate = session.ttsGate || {};
     const doneKey = `${phaseName}Done`;
     if (session.ttsGate[doneKey]) return false;
+    // Don't override an existing pending phase with a different one to avoid desync
+    if (session.ttsGate.pendingPhase && session.ttsGate.pendingPhase !== phaseName) {
+        return true; // already waiting for another phase to complete
+    }
     session.ttsGate.pendingPhase = phaseName;
     if (phaseName === 'atlas_plan') session.ttsGate.atlasDone = session.ttsGate.atlasDone || false;
+    // Emit SSE marker that TTS is expected for this phase
+    try {
+        pushAndBroadcast(session, {
+            role: 'system',
+            agent: 'system',
+            type: 'tts_wait',
+            phase: phaseName,
+            timestamp: Date.now(),
+            content: `[tts_wait] Очікування завершення озвучки для фази ${phaseName}`
+        });
+    } catch(_) {}
     return true;
 }
 
@@ -1497,23 +1512,23 @@ app.post('/chat/stream', async (req, res) => {
         session.clarificationResolvedAt = Date.now();
     session.forceNewCycle = true; // сигнал ініціювати повний новий цикл (Atlas -> Grisha -> Tetyana)
     session.cycleCount = (session.cycleCount || 0) + 1;
-        session.history.push({
+    pushAndBroadcast(session, {
             role: 'system',
             content: '[clarification_resolved] Користувач надав додатковий контекст',
             timestamp: Date.now(),
             type: 'clarification_resolved'
-        });
+    });
     }
     
     // Check for authority command "наказую"
     if (messageText.includes('наказую') || messageText.includes('command')) {
         dialogueManager.setUserAuthority(true);
-        session.history.push({
+    pushAndBroadcast(session, {
             role: 'user',
             content: message,
             timestamp: Date.now(),
             type: 'command'
-        });
+    });
         
         return res.json({
             success: true,
@@ -1527,12 +1542,12 @@ app.post('/chat/stream', async (req, res) => {
     if (messageText.includes('stop') || messageText.includes('стоп') || 
         messageText.includes('wait') || messageText.includes('чекай')) {
         
-        session.history.push({
+    pushAndBroadcast(session, {
             role: 'user', 
             content: message,
             timestamp: Date.now(),
             type: 'interruption'
-        });
+    });
 
         return res.json({
             success: true,
@@ -1657,9 +1672,9 @@ async function processAgentCycle(userMessage, session) {
         ].join('\n');
         
     const grishaPreRaw = await generateNonBlockingAgentResponse('grisha', precheckPrompt, session);
-        const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
-        responses.push(grishaPre);
-        session.history.push(grishaPre);
+    const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
+    responses.push(grishaPre);
+    pushAndBroadcast(session, grishaPre);
         
         // Update pipeline with Grisha precheck results
         session.pipeline.grishaPre = grishaPre.content;
@@ -1696,8 +1711,8 @@ async function processAgentCycle(userMessage, session) {
             }
         } catch {}
         
-        responses.push(tetyanaExec);
-        session.history.push(tetyanaExec);
+    responses.push(tetyanaExec);
+    pushAndBroadcast(session, tetyanaExec);
         
         // Clear nextAction after execution
         session.nextAction = null;
@@ -1714,8 +1729,8 @@ async function processAgentCycle(userMessage, session) {
     // Intelligent task analysis: Use Atlas to determine if task can be handled quickly
     const quickAnalysis = await intelligentTaskAnalysis(userMessage, session);
     if (quickAnalysis && quickAnalysis.content.toLowerCase().includes('просте') || quickAnalysis.content.toLowerCase().includes('швидко')) {
-        const msg = tagResponse(quickAnalysis, PHASE.EXECUTION);
-        session.history.push(msg);
+    const msg = tagResponse(quickAnalysis, PHASE.EXECUTION);
+    pushAndBroadcast(session, msg);
         clearTimeout(session._clarAutoTimer); // no clarification timers relevant
         return [msg];
     }
@@ -1723,7 +1738,7 @@ async function processAgentCycle(userMessage, session) {
     const atlasResponseRaw = await generateNonBlockingAgentResponse('atlas', userMessage, session, { intentHint: preIntent });
     const atlasResponse = tagResponse(atlasResponseRaw, PHASE.ATLAS_PLAN);
     responses.push(atlasResponse);
-    session.history.push(atlasResponse);
+    pushAndBroadcast(session, atlasResponse);
     try { rememberSafe('atlas', `plan_${Date.now()}`, (atlasResponse.content||'').slice(0,300)); } catch {}
 
     // If strict TTS sync enabled and we haven't acknowledged Atlas TTS yet, pause here.
@@ -1763,7 +1778,7 @@ async function processAgentCycle(userMessage, session) {
         const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
     const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
     responses.push(grishaPre);
-    session.history.push(grishaPre);
+    pushAndBroadcast(session, grishaPre);
     try { rememberSafe('grisha', `precheck_${Date.now()}`, (grishaPre.content||'').slice(0,300)); } catch {}
 
     // TTS gate after Grisha precheck
@@ -1796,21 +1811,21 @@ async function processAgentCycle(userMessage, session) {
                     const probeRaw = await generateAgentResponse('tetyana', probePrompt, session, { enableTools: true });
                     logProbe(`Probe execution received (len=${(probeRaw.content||probeRaw||'').length})`);
                     const probeResp = tagResponse(probeRaw, PHASE.TETYANA_PROBE);
-                    responses.push(probeResp); session.history.push(probeResp);
+                    responses.push(probeResp); pushAndBroadcast(session, probeResp);
                     if (applyTtsGate(session, PHASE.TETYANA_PROBE)) return responses;
                     // Immediately have Grisha review probe
                     const reviewPrompt = PROBE_PROMPTS.grishaReview(probeResp.content + (memoryBlock?`\n\n${memoryBlock}`:''));
                     const reviewRaw = await generateAgentResponse('grisha', reviewPrompt, session);
                     logProbe(`Probe review received (first50="${String(reviewRaw.content||reviewRaw||'').slice(0,50)}")`);
                     const reviewResp = tagResponse(reviewRaw, PHASE.GRISHA_PROBE_REVIEW);
-                    responses.push(reviewResp); session.history.push(reviewResp);
+                    responses.push(reviewResp); pushAndBroadcast(session, reviewResp);
                     if (applyTtsGate(session, PHASE.GRISHA_PROBE_REVIEW)) return responses;
                     // Atlas feasibility synthesis
                     const feasPrompt = PROBE_PROMPTS.atlasFeasibility(probeResp.content, reviewResp.content + (atlasRecent?`\n\nІсторія контексту:\n${atlasRecent}`:''));
                     const feasRaw = await generateAgentResponse('atlas', feasPrompt, session);
                     logProbe(`Feasibility response: ${(feasRaw.content||feasRaw||'').slice(0,40)}`);
                     const feasResp = tagResponse(feasRaw, PHASE.ATLAS_FEASIBILITY);
-                    responses.push(feasResp); session.history.push(feasResp);
+                    responses.push(feasResp); pushAndBroadcast(session, feasResp);
                     if (applyTtsGate(session, PHASE.ATLAS_FEASIBILITY)) return responses;
                     const decision = (feasResp.content||'').trim().toUpperCase().startsWith('ADVANCE');
                     if (decision) {
@@ -1828,7 +1843,7 @@ async function processAgentCycle(userMessage, session) {
                             content: 'Пробний крок дав достатньо даних. Переходжу до стандартного виконання.',
                             agent: 'atlas'
                         }, PHASE.ATLAS_FEASIBILITY);
-                        responses.push(synth); session.history.push(synth);
+                        responses.push(synth); pushAndBroadcast(session, synth);
                     } else {
                         PIPELINE_METRICS.probesClarified++;
                         if (session.probe?.attempts < (session.probe?.maxAttempts||2)) {
@@ -1873,7 +1888,7 @@ async function processAgentCycle(userMessage, session) {
                 }
             } catch {}
             responses.push(tetyanaExec);
-            session.history.push(tetyanaExec);
+            pushAndBroadcast(session, tetyanaExec);
 
             // TTS gate after execution before verification chain
             if (applyTtsGate(session, PHASE.EXECUTION)) { session.pipeline && (session.pipeline.stageAfterExecPending = true); return responses; }
@@ -1885,7 +1900,7 @@ async function processAgentCycle(userMessage, session) {
                 const grishaEarlyRaw = await generateAgentResponse('grisha', followMsg, session);
                 const grishaEarly = tagResponse(grishaEarlyRaw, PHASE.GRISHA_FOLLOWUP);
                 responses.push(grishaEarly);
-                session.history.push(grishaEarly);
+                pushAndBroadcast(session, grishaEarly);
                 markNeedsMore(session, [need], tetyanaExec.content);
                 return responses; // skip immediate verification until enriched
             }
@@ -1909,7 +1924,7 @@ async function processAgentCycle(userMessage, session) {
             PIPELINE_METRICS.verificationIterations += verify.iterations || 1;
             PIPELINE_METRICS.verificationConfidenceSum += verify.confidence || 0;
             responses.push(grishaVerdict);
-            session.history.push(grishaVerdict);
+            pushAndBroadcast(session, grishaVerdict);
             try { rememberSafe('grisha', `verdict_${Date.now()}`, `conf=${verify.confidence.toFixed(2)} ${confirmed?'ok':'retry'}`); } catch {}
             if (!confirmed) {
                 const missing = (verify.result?.criteria || []).filter(c => c && c.result === false).map(c => c.name);
@@ -1918,7 +1933,7 @@ async function processAgentCycle(userMessage, session) {
                 const grishaFollow = tagResponse(grishaFollowRaw, PHASE.GRISHA_FOLLOWUP);
                 PIPELINE_METRICS.followups++;
                 responses.push(grishaFollow);
-                session.history.push(grishaFollow);
+                pushAndBroadcast(session, grishaFollow);
                 try { rememberSafe('grisha', `followup_${Date.now()}`, (grishaFollow.content||'').slice(0,260)); } catch {}
                 markNeedsMore(session, missing, tetyanaExec.content);
             } else {
@@ -1936,8 +1951,8 @@ async function processAgentCycle(userMessage, session) {
     if (intent === 'planning') {
         const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
         const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
-        responses.push(grishaResponse);
-        session.history.push(grishaResponse);
+    responses.push(grishaResponse);
+    pushAndBroadcast(session, grishaResponse);
 
         // Clarification escalation for planning (avoid stalls)
         try {
@@ -2058,15 +2073,15 @@ app.post('/chat/continue', async (req, res) => {
                     const grishaWarnRaw = await generateAgentResponse('grisha', grishaPrompt, session);
                     const grishaWarn = tagResponse(grishaWarnRaw, PHASE.GRISHA_FOLLOWUP);
                     responses.push(tetyanaExec);
-                    session.history.push(tetyanaExec);
+                    pushAndBroadcast(session, tetyanaExec);
                     responses.push(grishaWarn);
-                    session.history.push(grishaWarn);
+                    pushAndBroadcast(session, grishaWarn);
                     markNeedsMore(session, [need], tetyanaExec.content);
                     return responses;
                 }
             } catch {}
             responses.push(tetyanaExec);
-            session.history.push(tetyanaExec);
+            pushAndBroadcast(session, tetyanaExec);
             PIPELINE_METRICS.stagedExecutions++;
 
             // Verify by Grisha
@@ -2090,7 +2105,7 @@ app.post('/chat/continue', async (req, res) => {
             PIPELINE_METRICS.verificationIterations += verify.iterations || 1;
             PIPELINE_METRICS.verificationConfidenceSum += verify.confidence || 0;
             responses.push(grishaVerdict);
-            session.history.push(grishaVerdict);
+            pushAndBroadcast(session, grishaVerdict);
 
             if (!confirmed) {
                 const missing = (verify.result?.criteria || []).filter(c => c && c.result === false).map(c => c.name);
@@ -2098,7 +2113,7 @@ app.post('/chat/continue', async (req, res) => {
                 const grishaFollowRaw = await generateAgentResponse('grisha', ask, session);
                 const grishaFollow = tagResponse(grishaFollowRaw, PHASE.GRISHA_FOLLOWUP);
                 responses.push(grishaFollow);
-                session.history.push(grishaFollow);
+                pushAndBroadcast(session, grishaFollow);
                 markNeedsMore(session, missing, tetyanaExec.content);
             } else {
                 // clear pipeline
@@ -2112,7 +2127,7 @@ app.post('/chat/continue', async (req, res) => {
             const tetyanaMore = tagResponse(tetyanaMoreRaw, PHASE.EXECUTION);
             try { tetyanaMore.evidence = extractEvidence(tetyanaMore.content); } catch {}
             responses.push(tetyanaMore);
-            session.history.push(tetyanaMore);
+            pushAndBroadcast(session, tetyanaMore);
             PIPELINE_METRICS.stagedExecutions++;
 
             const verify = await grishaVerifyWithGoose(pipe.userMessage, pipe.atlasPlan, tetyanaMore.content, session.id);
@@ -2134,7 +2149,7 @@ app.post('/chat/continue', async (req, res) => {
             PIPELINE_METRICS.verificationIterations += verify.iterations || 1;
             PIPELINE_METRICS.verificationConfidenceSum += verify.confidence || 0;
             responses.push(grishaVerdict);
-            session.history.push(grishaVerdict);
+            pushAndBroadcast(session, grishaVerdict);
 
             if (!confirmed && pipe.iter < GRISHA_MAX_VERIFY_ITER) {
                 const missing = (verify.result?.criteria || []).filter(c => c && c.result === false).map(c => c.name);
@@ -2142,7 +2157,7 @@ app.post('/chat/continue', async (req, res) => {
                 const grishaFollowRaw = await generateAgentResponse('grisha', ask, session);
                 const grishaFollow = tagResponse(grishaFollowRaw, PHASE.GRISHA_FOLLOWUP);
                 responses.push(grishaFollow);
-                session.history.push(grishaFollow);
+                pushAndBroadcast(session, grishaFollow);
                 pipe.need = missing;
                 session.nextAction = 'tetyana_supplement';
             } else {
@@ -2189,6 +2204,18 @@ app.post('/tts/done', async (req, res) => {
             delete session.ttsGate.pendingPhase;
         }
 
+        // SSE marker: TTS released for phase
+        try {
+            pushAndBroadcast(session, {
+                role: 'system',
+                agent: 'system',
+                type: 'tts_released',
+                phase: phase || session.ttsGate?.pendingPhase || 'unknown',
+                timestamp: Date.now(),
+                content: `[tts_released] Завершено озвучку для фази ${phase || session.ttsGate?.pendingPhase || 'unknown'}`
+            });
+        } catch(_) {}
+
         // If there is a last user message we can resume processing from, re-run the remainder of cycle.
         const lastUserMsg = [...session.history].reverse().find(m => m.role === 'user');
         if (!lastUserMsg) return res.json({ success: true, resumed: false, message: 'No user message to resume from' });
@@ -2217,7 +2244,7 @@ app.post('/tts/done', async (req, res) => {
                     ].join('\n');
                     const reviewRaw = await generateAgentResponse('grisha', reviewPrompt, session);
                     const reviewResp = tagResponse(reviewRaw, PHASE.GRISHA_PROBE_REVIEW);
-                    session.history.push(reviewResp);
+                    pushAndBroadcast(session, reviewResp);
                     if (applyTtsGate(session, PHASE.GRISHA_PROBE_REVIEW)) return res.json({ success: true, resumed: true, response: [reviewResp], session: { id: session.id } });
                     const feasPrompt = [
                         'Ти — Atlas. На основі проби і ревʼю відповідай одним словом: ADVANCE або CLARIFY. Потім стислий коментар.',
@@ -2226,7 +2253,7 @@ app.post('/tts/done', async (req, res) => {
                     ].join('\n');
                     const feasRaw = await generateAgentResponse('atlas', feasPrompt, session);
                     const feasResp = tagResponse(feasRaw, PHASE.ATLAS_FEASIBILITY);
-                    session.history.push(feasResp);
+                    pushAndBroadcast(session, feasResp);
                     const decision = (feasResp.content||'').trim().toUpperCase().startsWith('ADVANCE');
                     if (decision) {
                         PIPELINE_METRICS.probesAdvanced++;
@@ -2277,7 +2304,7 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
         ].join('\n');
         const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
         const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
-        responses.push(grishaPre); session.history.push(grishaPre);
+    responses.push(grishaPre); pushAndBroadcast(session, grishaPre);
     if (applyTtsGate(session, PHASE.GRISHA_PRECHECK)) return responses;
         try {
             const lowerGrisha = (grishaPre.content || '').toLowerCase();
@@ -2296,7 +2323,7 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
         if (shouldImmediateExecute(intent)) {
             const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги Гриші: ${responses.find(r=>r.phase===PHASE.GRISHA_PRECHECK)?.content || ''}\n\nВиконай кроки та чітко звітуй.`;
             const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
-            const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION); responses.push(tetyanaExec); session.history.push(tetyanaExec);
+            const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION); responses.push(tetyanaExec); pushAndBroadcast(session, tetyanaExec);
             if (applyTtsGate(session, PHASE.EXECUTION)) { session.pipeline && (session.pipeline.stageAfterExecPending = true); return responses; }
         }
         return responses;
@@ -2304,7 +2331,7 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
     if (intent === 'planning') {
         const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
         const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
-        responses.push(grishaResponse); session.history.push(grishaResponse);
+    responses.push(grishaResponse); pushAndBroadcast(session, grishaResponse);
         // Auto-promotion heuristic: if user initial message clearly contains executable filesystem directive
         try {
             const lowerUser = (userMessage||'').toLowerCase();
@@ -2320,7 +2347,7 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
                     const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги Гриші: ${grishaResponse.content}\n\nВиконай кроки та чітко звітуй.`;
                     const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
                     const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
-                    responses.push(tetyanaExec); session.history.push(tetyanaExec);
+                    responses.push(tetyanaExec); pushAndBroadcast(session, tetyanaExec);
                 }
             } else {
                 // If Grisha explicitly signals shortage twice in planning loop -> escalate clarification metrics
@@ -2353,12 +2380,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     const agentStartTime = Date.now();
     const agent = AGENTS[agentName];
     const messageId = generateMessageId();
-    // If strict TTS mode is enabled, apply TTS gate for this agent's fast summary phase
-    try {
-        if (STRICT_TTS && session) {
-            applyTtsGate(session, `${agentName}_tts`);
-        }
-    } catch (e) {}
+    // Don't set extra TTS gate for fast summaries to avoid desync with main phase gates
     
     // Check circuit breaker state before execution
     if (isCircuitBreakerOpen()) {
