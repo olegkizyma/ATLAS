@@ -21,10 +21,27 @@ import { IntentCache } from './intent_cache.js';
 import { chatWithModel, chatWithModelTimeout, chatWithModelRotation, healthCheck } from './github_models_client.js';
 
 // Enhanced execution wrapper with model rotation instead of GitHub Goose fallback
-async function executeWithModelRotation(agentName, message, sessionId, options = {}) {
+async function executeWithModelRotation(agentNameOrOptions, message, sessionId, options = {}) {
+    let agentName, prompt, session, opts;
+    
+    // Support both old-style and new-style function calls
+    if (typeof agentNameOrOptions === 'object' && agentNameOrOptions !== null) {
+        // New style: executeWithModelRotation({ agentName, prompt, sessionId, ... })
+        agentName = agentNameOrOptions.agentName;
+        prompt = agentNameOrOptions.prompt;
+        session = agentNameOrOptions.sessionId;
+        opts = agentNameOrOptions;
+    } else {
+        // Old style: executeWithModelRotation(agentName, message, sessionId, options)
+        agentName = agentNameOrOptions;
+        prompt = message;
+        session = sessionId;
+        opts = options;
+    }
+    
     try {
-        logMessage('info', `[EXECUTION] Using model rotation for agent=${agentName} session=${sessionId}`);
-        const result = await callWithModelRotation(agentName, message, options);
+        logMessage('info', `[EXECUTION] Using model rotation for agent=${agentName} session=${session}`);
+        const result = await callWithModelRotation(agentName, prompt, opts);
         
         if (result && result.content) {
             logMessage('info', `[EXECUTION] agent=${agentName} model=${result.model} success=true`);
@@ -286,59 +303,47 @@ async function callOpenAICompatChatWithTimeout(baseUrl, model, userMessage, time
 }
 
 /**
- * Розумна ротація моделей для кращої стабільності
- * Автоматично пробує різні моделі при помилках 429, 500 тощо
+ * Розумна ротація моделей з агресивним алгоритмом
+ * Використовує всі 58 доступних моделей з ротацією кожен запит
+ * ВИКОРИСТОВУЄ CLIENT-MODULE ЗАМІСТЬ OPENAI_COMPAT
  */
 async function callWithModelRotation(agentName, userMessage, options = {}) {
-    if (OPENAI_COMPAT_DISABLED || openAICompatDown) return null;
-    
     try {
-        // Отримуємо список моделей для агента з реєстру
-        const routes = registry.getRoutes(agentName, options) || [];
-        const openaiRoutes = routes.filter(r => r.provider === 'openai_compat');
+        // Отримуємо список моделей для агента з .env
+        const modelEnvVar = `${agentName.toUpperCase()}_TEXT_MODELS`;
+        const modelsString = process.env[modelEnvVar];
         
-        if (openaiRoutes.length === 0) {
-            console.warn(`[ROTATION] No OpenAI-compatible routes for agent: ${agentName}`);
+        if (!modelsString) {
+            console.warn(`[ROTATION] No models configured for agent: ${agentName} (check ${modelEnvVar})`);
             return null;
         }
         
-        // Витягуємо моделі та базовий URL
-        const models = openaiRoutes.map(r => r.model);
-        const baseUrl = openaiRoutes[0]?.baseUrl || FALLBACK_API_BASE;
-        
+        const models = modelsString.split(',').map(m => m.trim());
         console.log(`[ROTATION] Starting rotation for ${agentName} with ${models.length} models`);
         
-        const result = await chatWithModelRotation(baseUrl, models, userMessage, {
+        // Використовуємо client-module через github_models_client.js з агресивною ротацією
+        const result = await chatWithModelRotation(null, models, userMessage, {
             maxRetries: 2,
             retryDelay: 1000,
+            agent: agentName, // Передаємо ім'я агента для персоналізованої ротації
             ...options
         });
         
-        // Звітуємо про успіх у реєстрі
-        if (result?.model) {
-            const successRoute = openaiRoutes.find(r => r.model === result.model);
-            if (successRoute) {
-                registry.reportSuccess(successRoute, 1000); // Приблизна латентність
-            }
+        if (result && result.content) {
+            console.log(`[ROTATION] Success for ${agentName} with model: ${result.model}`);
+            return {
+                content: result.content,
+                model: result.model,
+                usage: result.usage,
+                success: true
+            };
+        } else {
+            console.warn(`[ROTATION] All models failed for agent: ${agentName}`);
+            return null;
         }
-        
-        openAICompatDown = false; // Скидаємо прапор при успіху
-        return result;
         
     } catch (error) {
-        console.warn(`[ROTATION] All models failed for ${agentName}:`, error.message);
-        
-        // Звітуємо про помилки у реєстрі
-        const routes = registry.getRoutes(agentName, options) || [];
-        const openaiRoutes = routes.filter(r => r.provider === 'openai_compat');
-        openaiRoutes.forEach(route => {
-            registry.reportFailure(route, error);
-        });
-        
-        if (error.message.includes('ALL_MODELS_FAILED')) {
-            openAICompatDown = true; // Тимчасово вимикаємо при повному провалі
-        }
-        
+        console.warn(`[ROTATION] Model rotation failed for ${agentName}:`, error.message);
         return null;
     }
 }
@@ -1235,8 +1240,8 @@ app.post('/agent/tetyana', async (req, res) => {
         }
 
         // 2) Короткий звіт: формуємо через model rotation замість Goose
-        let provider = 'openai_compat';
-        let model = 'tetyana_best';
+        let provider = 'client_module';
+        let model = 'tetyana_rotation';
         let content = null;
         
         try {
@@ -1254,7 +1259,7 @@ app.post('/agent/tetyana', async (req, res) => {
             
             if (reportResult) {
                 content = reportResult;
-                logMessage('info', `[TIMING] agent=tetyana phase=report provider=openai_compat success=true`);
+                logMessage('info', `[TIMING] agent=tetyana phase=report provider=client_module success=true`);
             } else {
                 throw new Error('Model rotation report generation failed');
             }
@@ -2410,35 +2415,28 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
             } catch (err) {
                 logMessage('warn', `[TIMING] agent=tetyana phase=report provider=goose error=${err.message}`);
                 
-                // Fallback: Use openai-compat models only if Goose fails
-                const reportRoutes = (registry.getRoutes('tetyana', { intentHint: 'short_report' }) || []).filter(r => r.provider === 'openai_compat');
+                // Fallback: Use client-module for report generation
                 const fallbackPrompt = [
                     'Сформуй короткий структурований ЗВІТ українською на основі виконання нижче. Формат: РЕЗЮМЕ; КРОКИ; РЕЗУЛЬТАТИ; ДОКАЗИ; ПЕРЕВІРКА; СТАТУС.',
                     `Виконання (сирий вивід): ${String(execNotes).slice(0, 6000)}`
                 ].join('\n');
                 
-                for (const route of reportRoutes) {
-                    const routeStartTime = Date.now();
-                    try {
-                        const started = Date.now();
-                        const txt = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, fallbackPrompt);
-                        const routeDuration = Date.now() - routeStartTime;
-                        if (txt) {
-                            reportText = txt;
-                            registry.reportSuccess(route, Date.now() - started);
-                            provider = 'openai_compat';
-                            model = route.model;
-                            executionSuccessful = true;
-                            logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=true`);
-                            break;
-                        }
-                        registry.reportFailure(route, new Error('Empty response from model'));
-                        logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} success=false`);
-                    } catch (err) {
-                        const routeDuration = Date.now() - routeStartTime;
-                        registry.reportFailure(route, err);
-                        logMessage('info', `[TIMING] agent=tetyana phase=report route=${route.model} ms=${routeDuration} error=${err.message}`);
+                try {
+                    const result = await executeWithModelRotation({
+                        agentName: 'tetyana',
+                        prompt: fallbackPrompt,
+                        sessionId: sessionId,
+                        phase: 'report'
+                    });
+                    if (result && result.content) {
+                        reportText = result.content;
+                        provider = 'client_module';
+                        model = result.model || 'phi4-mini-instruct';
+                        executionSuccessful = true;
+                        logMessage('info', `[TIMING] agent=tetyana phase=report provider=client_module success=true`);
                     }
+                } catch (err) {
+                    logMessage('warn', `[TIMING] agent=tetyana phase=report error=${err.message}`);
                 }
             }
             
@@ -2469,7 +2467,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                     const routeDuration = Date.now() - routeStartTime;
                     if (rotationResult) {
                         content = rotationResult;
-                        provider = 'openai_compat';
+                        provider = 'client_module';
                         model = `${agentName}_rotation`;
                         registry.reportSuccess(route, Date.now() - started);
                         executionSuccessful = true;
@@ -2479,19 +2477,23 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
                     registry.reportFailure(route, new Error('Model rotation failed'));
                     logMessage('info', `[TIMING] agent=${agentName} route=model_rotation model=${model} ms=${routeDuration} success=false`);
                 } else if (route.provider === 'openai_compat') {
-                    const text = await callOpenAICompatChat(route.baseUrl || FALLBACK_API_BASE, route.model, prompt);
+                    // Use model rotation instead of direct openai_compat call
+                    const rotationResult = await executeWithModelRotation(agentName, prompt, session.id, { 
+                        intentHint: route.intent || 'default',
+                        systemInstruction: sysInstr 
+                    });
                     const routeDuration = Date.now() - routeStartTime;
-                    if (text) {
-                        content = text;
-                        provider = 'openai_compat';
-                        model = route.model;
+                    if (rotationResult) {
+                        content = rotationResult;
+                        provider = 'client_module';
+                        model = `${agentName}_rotation`;
                         registry.reportSuccess(route, Date.now() - started);
                         executionSuccessful = true;
-                        logMessage('info', `[TIMING] agent=${agentName} route=openai_compat model=${model} ms=${routeDuration} success=true`);
+                        logMessage('info', `[TIMING] agent=${agentName} route=model_rotation model=${model} ms=${routeDuration} success=true`);
                         break;
                     }
-                    registry.reportFailure(route, new Error('Empty response from OpenAI model'));
-                    logMessage('info', `[TIMING] agent=${agentName} route=openai_compat model=${model} ms=${routeDuration} success=false`);
+                    registry.reportFailure(route, new Error('Model rotation failed'));
+                    logMessage('info', `[TIMING] agent=${agentName} route=model_rotation model=${model} ms=${routeDuration} success=false`);
                 }
             } catch (err) {
                 const routeDuration = Date.now() - routeStartTime;
@@ -2531,44 +2533,23 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     let ttsModel = null;
     try {
         const ttsPrompt = `Стисле резюме для швидкого TTS (3-5 речень) українською: ${String(content).slice(0, 3000)}`;
-        const summaryRoutes = (registry.getRoutes(agentName, { intentHint: 'tts_summary' }) || []).filter(r => r.provider === 'openai_compat');
-        for (const route of summaryRoutes) {
-            try {
-                const started = Date.now();
-                const txt = await callOpenAICompatChatWithTimeout(route.baseUrl || FALLBACK_API_BASE, route.model, ttsPrompt, 1200);
-                const dur = Date.now() - started;
-                if (txt) {
-                    ttsSummary = txt.replace(/\s+/g, ' ').trim();
-                    ttsProvider = 'openai_compat';
-                    ttsModel = route.model;
-                    registry.reportSuccess(route, dur);
-                    break;
-                }
-                registry.reportFailure(route, new Error('empty tts summary'));
-            } catch (err) {
-                registry.reportFailure(route, err);
+        // Use client-module for TTS summary generation
+        // Ensure agentName is a string
+        const agentStr = typeof agentName === 'string' ? agentName : 'atlas';
+        try {
+            const result = await executeWithModelRotation({
+                agentName: agentStr,
+                prompt: ttsPrompt,
+                sessionId: 'tts_summary',
+                phase: 'tts_summary'
+            });
+            if (result && result.content) {
+                ttsSummary = result.content.replace(/\s+/g, ' ').trim();
+                ttsProvider = 'client_module';
+                ttsModel = result.model || 'phi4-mini-instruct';
             }
-        }
-        // If none from prioritized routes, try general openai_compat list
-        if (!ttsSummary) {
-            const fallbackRoutes = (registry.getRoutes(agentName) || []).filter(r => r.provider === 'openai_compat');
-            for (const route of fallbackRoutes) {
-                try {
-                    const started = Date.now();
-                    const txt = await callOpenAICompatChatWithTimeout(route.baseUrl || FALLBACK_API_BASE, route.model, ttsPrompt, 1200);
-                    const dur = Date.now() - started;
-                    if (txt) {
-                        ttsSummary = txt.replace(/\s+/g, ' ').trim();
-                        ttsProvider = 'openai_compat';
-                        ttsModel = route.model;
-                        registry.reportSuccess(route, dur);
-                        break;
-                    }
-                    registry.reportFailure(route, new Error('empty tts summary fallback'));
-                } catch (err) {
-                    registry.reportFailure(route, err);
-                }
-            }
+        } catch (err) {
+            logMessage('warn', `[TTS] Summary generation failed: ${err.message}`);
         }
     } catch (e) {
         // swallow - tts summary best-effort only

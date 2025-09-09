@@ -86,13 +86,65 @@ export async function chatWithModelTimeout(baseUrl, model, userMessage, timeoutM
     ]);
 }
 
+// Лічильник запитів для ротації
+let requestCounter = 0;
+let shuffledModels = new Map(); // Кеш перемішаних моделей для кожного агента
+
 /**
- * Функція з ротацією моделей (для випадку коли одна модель не працює)
+ * Функція з агресивною ротацією моделей 
+ * Використовує всі 58 моделей з ротацією кожен запит або кожні 3 запити
  */
 export async function chatWithModelRotation(baseUrl, models, userMessage, options = {}) {
     const modelList = Array.isArray(models) ? models : [models];
     
-    for (const model of modelList) {
+    // Читаємо конфігурацію ротації з .env
+    const rotationFreq = parseInt(process.env.MODEL_ROTATION_FREQUENCY || '1');
+    const minPoolSize = parseInt(process.env.MODEL_ROTATION_MIN_POOL_SIZE || '30');
+    const shuffleEvery = parseInt(process.env.MODEL_ROTATION_SHUFFLE_EVERY || '3');
+    const aggressiveRotation = process.env.ENABLE_AGGRESSIVE_ROTATION === 'true';
+    
+    // Інкрементуємо лічильник запитів
+    requestCounter++;
+    
+    let modelsToUse = modelList;
+    
+    // Агресивна ротація - перемішуємо модель кожні N запитів
+    if (aggressiveRotation && requestCounter % shuffleEvery === 0) {
+        const agentKey = options.agent || 'default';
+        
+        // Перемішуємо модель для цього агента
+        const shuffled = [...modelList];
+        for (let i = shuffled.length - 1; i > 0; i--) {
+            const j = Math.floor(Math.random() * (i + 1));
+            [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+        }
+        shuffledModels.set(agentKey, shuffled);
+        console.log(`[ROTATION] Shuffled ${shuffled.length} models for agent ${agentKey} (request #${requestCounter})`);
+    }
+    
+    // Використовуємо перемішані моделі якщо доступні
+    const agentKey = options.agent || 'default';
+    if (shuffledModels.has(agentKey)) {
+        modelsToUse = shuffledModels.get(agentKey);
+    }
+    
+    // Використовуємо мінімум minPoolSize моделей
+    const poolSize = Math.min(modelsToUse.length, Math.max(minPoolSize, 1));
+    const modelPool = modelsToUse.slice(0, poolSize);
+    
+    console.log(`[ROTATION] Using ${modelPool.length} models from pool of ${modelsToUse.length} (req #${requestCounter})`);
+    
+    // Ротація кожен запит або кожні rotationFreq запитів
+    const shouldRotate = requestCounter % rotationFreq === 0;
+    if (shouldRotate && modelPool.length > 1) {
+        // Починаємо з випадкової моделі
+        const startIndex = Math.floor(Math.random() * modelPool.length);
+        const rotatedPool = [...modelPool.slice(startIndex), ...modelPool.slice(0, startIndex)];
+        console.log(`[ROTATION] Starting with model #${startIndex}: ${rotatedPool[0]}`);
+        modelPool.splice(0, modelPool.length, ...rotatedPool);
+    }
+    
+    for (const model of modelPool) {
         try {
             console.log(`[ATLAS_CLIENT] Trying model: ${model}`);
             const result = await chatWithModel(baseUrl, model, userMessage, options);
@@ -102,8 +154,8 @@ export async function chatWithModelRotation(baseUrl, models, userMessage, option
             console.log(`[ATLAS_CLIENT] Model ${model} failed: ${error.message}`);
             
             // Якщо це остання модель, кидаємо помилку
-            if (model === modelList[modelList.length - 1]) {
-                throw new Error(`All models failed. Last error from ${model}: ${error.message}`);
+            if (model === modelPool[modelPool.length - 1]) {
+                throw new Error(`All ${modelPool.length} models failed. Last error from ${model}: ${error.message}`);
             }
             
             // Інакше пробуємо наступну модель
