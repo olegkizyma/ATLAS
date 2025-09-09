@@ -14,11 +14,12 @@ import { fileURLToPath } from 'url';
 import path from 'path';
 import os from 'os';
 import ModelRegistry from './model_registry.js';
-import { PHASE, initSession, startActionablePipeline, startPendingPrecheck, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute } from './pipeline.js';
+import { PHASE, initSession, startActionablePipeline, startPendingSecurityCheck, startProbePipeline, clearProbe, markNeedsMore, clearPipeline, tagResponse, executionMode, shouldImmediateExecute, startGrishaVisualMonitoring, startGrishaTaskVerification, markNeedsGrishaInformation } from './pipeline.js';
 import { initMemory, remember, recall, summarizeRecent, summarizeRanked, rememberSafe, summarizeForPrompt, memoryHealth, semanticContext, startMemoryMaintenance } from './agent_memory.js';
 import gooseAdapter, { runExecution, extractEvidence } from './goose_adapter.js';
 import { IntentCache } from './intent_cache.js';
 import { chatWithModel, chatWithModelTimeout, chatWithModelRotation, healthCheck } from './github_models_client.js';
+import { generateSecurityCheckPrompt, assessTaskSecurity, getSecurityManifest } from './security_manifest.js';
 
 // Rate limiting helpers
 const globalRequestDelay = parseInt(process.env.GLOBAL_AGENT_REQUEST_DELAY_MS || '2000', 10);
@@ -243,39 +244,104 @@ const AGENT_ROLE_PROMPTS = {
     },
     
     grisha: {
-        validation: (context) => [
-            `Ти — Гриша, валідатор та контролер системи ATLAS з можливістю візії.`,
-            `Твоя роль: забезпечувати якість та додавати вимоги для покращення виконання.`,
-            `Завдання користувача: ${context.userMessage}`,
-            `План Atlas: ${context.atlasPlan}`,
-            context.tetyanaReport ? `Звіт Тетяни: ${context.tetyanaReport}` : '',
-            `Проаналізуй та дай конкретні рекомендації:`,
-            `- Чи план достатньо детальний для виконання?`,
-            `- Які додаткові перевірки потрібні?`,
-            `- Конкретні вимоги для Тетяни (не загальні поради)`,
-            `- Критерії перевірки результатів`,
-            `- Використовуй візію для перевірки інтерфейсу, якщо потрібно`,
-            `Дай чіткий висновок: ЗАТВЕРДЖУЮ / ПОТРЕБУЄ_УТОЧНЕНЬ / ДОДАЮ_ВИМОГИ`,
-            ``,
-            `ТТС: Перевіряю план та додаю вимоги для якісного виконання.`
-        ].filter(Boolean).join('\n'),
+        securityCheck: (context) => {
+            const securityPrompt = generateSecurityCheckPrompt(
+                context.userMessage, 
+                context.userId, 
+                { atlasPlan: context.atlasPlan }
+            );
+            return [
+                securityPrompt.systemPrompt,
+                ``,
+                securityPrompt.taskPrompt,
+                ``,
+                `ТТС: Перевіряю безпеку завдання згідно з маніфестом.`
+            ].join('\n');
+        },
         
-        finalVerification: (context) => [
-            `Ти — Гриша з можливістю візії. Перевір результати виконання:`,
-            `Оригінальне завдання: ${context.userMessage}`,
-            `План: ${context.atlasPlan}`,
-            `Результати Тетяни: ${context.tetyanaResults}`,
-            `Ретельно оціни (НЕ просто підтверджуй):`,
-            `- Чи завдання виконано повністю та якісно?`,
-            `- Чи результати відповідають очікуванням?`,
-            `- Рівень довіри (0-100%) з обґрунтуванням`,
-            `- Конкретні недоліки або проблеми`,
-            `- Потрібні додаткові перевірки чи доопрацювання`,
-            `- Використовуй візію для підтвердження інтерфейсу, якщо необхідно`,
-            `Дай чесну фінальну оцінку з конкретними рекомендаціями.`,
+        visualMonitoring: (context) => [
+            `Ти — Гриша, агент безпеки з візією. Розпочинаю візуальний моніторинг.`,
             ``,
-            `ТТС: Перевіряю результати виконання та даю фінальну оцінку.`
-        ].filter(Boolean).join('\n'),
+            `ЗАВДАННЯ: ${context.userMessage}`,
+            `СТАТУС: Розпочинаю спостереження за всіма доступними екранами`,
+            ``,
+            `Твої дії:`,
+            `1. Повідом про початок моніторингу`,
+            `2. Спостерігай за виконанням через візію`,
+            `3. Фіксуй важливі моменти та зміни`,
+            `4. Готуйся до верифікації результатів`,
+            ``,
+            `ФОРМАТ ЗВІТУ:`,
+            `МОНІТОРИНГ: РОЗПОЧАТО`,
+            `ЕКРАНИ: [кількість доступних екранів]`,
+            `СТАТУС: [що відбувається на екрані]`,
+            ``,
+            `ТТС: Розпочинаю візуальний моніторинг виконання завдання.`
+        ].join('\n'),
+        
+        visualComplete: (context) => [
+            `Ти — Гриша, агент безпеки з візією. Завершую візуальний моніторинг.`,
+            ``,
+            `ЗАВДАННЯ: ${context.userMessage}`,
+            `СТАТУС: Завершую спостереження за екранами`,
+            `ЗВІТ_ТЕТЯНИ: ${context.tetyanaResults || 'очікується'}`,
+            ``,
+            `Твої дії:`,
+            `1. Повідом про завершення моніторингу`,
+            `2. Співстав візуальні спостереження зі звітом Тетяни`,
+            `3. Дай фінальну оцінку виконання`,
+            ``,
+            `ФОРМАТ ЗВІТУ:`,
+            `МОНІТОРИНГ: ЗАВЕРШЕНО`,
+            `ВІЗУАЛЬНА_ПЕРЕВІРКА: [опис що бачив]`,
+            `ЗВІТ_ТЕТЯНИ: [співставлення]`,
+            `ВИСНОВОК: [ВИКОНАНО/ПОТРЕБУЄ_ДОРОБОТКИ/ПОМИЛКА]`,
+            ``,
+            `ТТС: Завершую візуальний моніторинг та даю фінальну оцінку.`
+        ].join('\n'),
+        
+        taskVerification: (context) => {
+            const securityManifest = getSecurityManifest(context.userId);
+            return [
+                `Ти — Гриша, агент безпеки та верифікації з візією.`,
+                ``,
+                `МЕТА: Перевірити виконання завдання всіма доступними способами`,
+                `ЗАВДАННЯ: ${context.userMessage}`,
+                `ЗВІТ_ТЕТЯНИ: ${context.tetyanaResults || 'очікується'}`,
+                `ВІЗУАЛЬНІ_ДАНІ: ${context.visualEvidence || 'не надано'}`,
+                ``,
+                `ЕТАПИ ВЕРИФІКАЦІЇ:`,
+                `1. Аналіз звіту Тетяни`,
+                `2. Перевірка візуальних доказів`,
+                `3. Співставлення з оригінальним завданням`,
+                `4. Оцінка повноти виконання`,
+                ``,
+                `ФОРМАТ РІШЕННЯ:`,
+                `ВЕРИФІКАЦІЯ: [ПІДТВЕРДЖЕНО/ПОТРІБНА_ДОРОБКА/ЗАПУСТИТИ_НОВИЙ_ЦИКЛ]`,
+                `ЕТАП_ЗУПИНКИ: [якщо потрібна доробка - на якому етапі]`,
+                `ПРИЧИНА: [чому потрібна доробка або новий цикл]`,
+                `АТЛАСУ: [що саме треба переформулювати для нового циклу]`,
+                `ДОВІРА: [рівень довіри 0-100%]`,
+                ``,
+                `Будь критичним, але справедливим. Якщо є сумніви - краще запустити новий цикл.`,
+                ``,
+                `ТТС: Проводжу фінальну верифікацію виконання завдання.`
+            ].join('\n');
+        },
+        
+        requestInformation: (context) => [
+            `Ти — Гриша, агент безпеки. Потребую додаткової інформації.`,
+            ``,
+            `ЗАВДАННЯ: ${context.userMessage}`,
+            `ПРИЧИНА_ЗАПИТУ: ${context.reason || 'Недостатньо даних для перевірки безпеки'}`,
+            ``,
+            `ТЕТЯНІ: Потрібно зібрати наступну інформацію:`,
+            context.informationNeeded ? context.informationNeeded.map(item => `- ${item}`).join('\n') : '- Додаткові деталі про завдання',
+            ``,
+            `ПІСЛЯ отримання інформації повернися до мене для повторної перевірки безпеки.`,
+            ``,
+            `ТТС: Запитую додаткову інформацію для перевірки безпеки.`
+        ].join('\n'),
         
         visionAnalysis: (context) => [
             `Ти — Гриша з візією. Проаналізуй скріншот/інтерфейс:`,
@@ -717,7 +783,7 @@ function recordSharedMemory(agent, content, phase) {
             remember('grisha', `atlas_plan_${ts}`, snippet);
         }
         // When Grisha precheck or follow-up instructs Tetiana -> mirror for atlas
-        if (agent === 'grisha' && (phase === PHASE.GRISHA_PRECHECK || phase === PHASE.GRISHA_FOLLOWUP)) {
+        if (agent === 'grisha' && (phase === PHASE.GRISHA_SECURITY_CHECK || phase === PHASE.GRISHA_FOLLOWUP)) {
             remember('atlas', `grisha_req_${ts}`, snippet);
         }
         // Probe specific: share probe review & feasibility across both
@@ -1776,32 +1842,48 @@ async function processAgentCycle(userMessage, session) {
     });
 
     // Check if we have a pending nextAction (e.g., after auto-clarification)
-    if (session.nextAction === 'grisha_precheck' && session.pipeline) {
-        // Execute Grisha precheck for pending pipeline
-        const precheckPrompt = [
-            'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
-            'Якщо бракує ключових даних для виконання — задай КОНКРЕТНІ питання користувачеві (що саме потрібно уточнити).',
-            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ» або ПИТАННЯ «ДО КОРИСТУВАЧА» (якщо потрібні уточнення).',
-            '',
-            `Завдання користувача: ${session.pipeline.userMessage}`,
-            `План Atlas: ${session.pipeline.atlasPlan}`
-        ].join('\n');
+    if (session.nextAction === 'grisha_security_check' && session.pipeline) {
+        // Execute Grisha security check for pending pipeline
+        const securityPrompt = generateSecurityCheckPrompt(
+            session.pipeline.userMessage,
+            session.userId || 'anonymous',
+            { atlasPlan: session.pipeline.atlasPlan }
+        );
         
-    const grishaPreRaw = await generateNonBlockingAgentResponse('grisha', precheckPrompt, session);
-    const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
-    responses.push(grishaPre);
-    pushAndBroadcast(session, grishaPre);
+        const grishaSecurityRaw = await generateNonBlockingAgentResponse('grisha', securityPrompt.systemPrompt + '\n\n' + securityPrompt.taskPrompt, session);
+        const grishaSecurityCheck = tagResponse(grishaSecurityRaw, PHASE.GRISHA_SECURITY_CHECK);
+        responses.push(grishaSecurityCheck);
+        pushAndBroadcast(session, grishaSecurityCheck);
         
-        // Update pipeline with Grisha precheck results
-        session.pipeline.grishaPre = grishaPre.content;
-        session.pipeline.stage = 'prechecked';
-        session.nextAction = 'tetyana_execute';
+        // Parse security decision
+        const securityContent = grishaSecurityCheck.content.toLowerCase();
+        const isAllowed = securityContent.includes('дозволено') || securityContent.includes('безпека: дозволено');
+        const needsInfo = securityContent.includes('потребую_інформації: так');
+        const needsMonitoring = securityContent.includes('моніторинг: так');
         
-        logMessage('info', `[processAgentCycle] executed pending grisha_precheck`);
+        if (!isAllowed) {
+            // Security blocked the task
+            session.pipeline.stage = 'security_blocked';
+            session.nextAction = null;
+            logMessage('info', `[processAgentCycle] task blocked by security check`);
+            return responses;
+        }
+        
+        if (needsInfo) {
+            // Grisha needs more information
+            markNeedsGrishaInformation(session, ['Додаткові деталі завдання'], 'Недостатньо даних для перевірки безпеки');
+            logMessage('info', `[processAgentCycle] grisha requests more information`);
+        } else {
+            // Security approved, proceed to visual monitoring if needed
+            session.pipeline.grishaSecurityCheck = grishaSecurityCheck.content;
+            session.pipeline.stage = 'security_approved';
+            session.nextAction = needsMonitoring ? 'grisha_visual_monitoring' : 'tetyana_execute';
+            logMessage('info', `[processAgentCycle] security check approved, next: ${session.nextAction}`);
+        }
         
         // Запускаємо новий цикл для виконання nextAction
-        logMessage('info', `[processAgentCycle] scheduling next cycle for tetyana_execute`);
-    const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
+        logMessage('info', `[processAgentCycle] scheduling next cycle for ${session.nextAction}`);
+        const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
     setTimeout(() => {
             const syntheticUser = '[AUTO] Продовжити виконання Тетяни.';
             processAgentCycle(syntheticUser, session).catch(e => {
@@ -1816,7 +1898,7 @@ async function processAgentCycle(userMessage, session) {
     if (session.nextAction === 'tetyana_execute' && session.pipeline && session.pipeline.stage === 'prechecked') {
         logMessage('info', `[processAgentCycle] executing tetyana based on nextAction`);
         
-    const execPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nПлан Atlas: ${session.pipeline.atlasPlan}\nВимоги Гриші: ${session.pipeline.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
+    const execPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nПлан Atlas: ${session.pipeline.atlasPlan}\nВимоги безпеки Гриші: ${session.pipeline.grishaSecurityCheck || 'Базові вимоги безпеки'}\n\nВиконай кроки та чітко звітуй.`;
     const tetyanaExecRaw = await generateNonBlockingAgentResponse('tetyana', execPrompt, session, { enableTools: true });
         const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
         
@@ -1830,11 +1912,176 @@ async function processAgentCycle(userMessage, session) {
     responses.push(tetyanaExec);
     pushAndBroadcast(session, tetyanaExec);
         
+        // After execution, start Grisha task verification
+        startGrishaTaskVerification(session, tetyanaExec.content);
+        
+        logMessage('info', `[processAgentCycle] tetyana execution completed, starting verification`);
+        
+        const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
+        setTimeout(() => {
+            const syntheticUser = '[AUTO] Верифікація виконання Гришею.';
+            processAgentCycle(syntheticUser, session).catch(e => {
+                logMessage('warn', `[processAgentCycle] auto verification cycle failed: ${e.message}`);
+            });
+        }, nextActionDelay);
+        return responses;
+        
         // Clear nextAction after execution
         session.nextAction = null;
         clearPipeline(session);
         
         logMessage('info', `[processAgentCycle] tetyana execution completed`);
+        return responses;
+    }
+
+    // Handle Grisha visual monitoring
+    if (session.nextAction === 'grisha_visual_monitoring' && session.pipeline) {
+        const monitoringPrompt = getSystemPromptsTemplates().grisha.visualMonitoring({
+            userMessage: session.pipeline.userMessage,
+            atlasPlan: session.pipeline.atlasPlan
+        });
+        
+        const grishaMonitoringRaw = await generateNonBlockingAgentResponse('grisha', monitoringPrompt, session);
+        const grishaMonitoring = tagResponse(grishaMonitoringRaw, PHASE.GRISHA_VISUAL_MONITORING);
+        responses.push(grishaMonitoring);
+        pushAndBroadcast(session, grishaMonitoring);
+        
+        // Start visual monitoring and proceed to execution
+        startGrishaVisualMonitoring(session);
+        logMessage('info', `[processAgentCycle] grisha visual monitoring started`);
+        
+        const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
+        setTimeout(() => {
+            const syntheticUser = '[AUTO] Продовжити виконання після моніторингу.';
+            processAgentCycle(syntheticUser, session).catch(e => {
+                logMessage('warn', `[processAgentCycle] auto post-monitoring cycle failed: ${e.message}`);
+            });
+        }, nextActionDelay);
+        return responses;
+    }
+    
+    // Handle Grisha information request  
+    if (session.nextAction === 'grisha_information_request' && session.pipeline) {
+        const infoRequestPrompt = getSystemPromptsTemplates().grisha.requestInformation({
+            userMessage: session.pipeline.userMessage,
+            reason: session.pipeline.reason,
+            informationNeeded: session.pipeline.informationNeeded
+        });
+        
+        const grishaInfoRequestRaw = await generateNonBlockingAgentResponse('grisha', infoRequestPrompt, session);
+        const grishaInfoRequest = tagResponse(grishaInfoRequestRaw, PHASE.GRISHA_INFORMATION_REQUEST);
+        responses.push(grishaInfoRequest);
+        pushAndBroadcast(session, grishaInfoRequest);
+        
+        // Request Tetyana to gather the needed information
+        session.pipeline.stage = 'gathering_info';
+        session.nextAction = 'tetyana_gather_info';
+        
+        logMessage('info', `[processAgentCycle] grisha requested additional information`);
+        
+        const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
+        setTimeout(() => {
+            const syntheticUser = '[AUTO] Збір інформації для Гриші.';
+            processAgentCycle(syntheticUser, session).catch(e => {
+                logMessage('warn', `[processAgentCycle] auto info gathering cycle failed: ${e.message}`);
+            });
+        }, nextActionDelay);
+        return responses;
+    }
+
+    // Handle Tetyana gathering information for Grisha
+    if (session.nextAction === 'tetyana_gather_info' && session.pipeline) {
+        const gatherPrompt = `Завдання користувача: ${session.pipeline.userMessage}\nГриша запросив додаткову інформацію: ${session.pipeline.informationNeeded?.join(', ') || 'Деталі завдання'}\n\nЗбери потрібну інформацію та передай Гріші для повторної перевірки безпеки.`;
+        
+        const tetyanaGatherRaw = await generateNonBlockingAgentResponse('tetyana', gatherPrompt, session);
+        const tetyanaGather = tagResponse(tetyanaGatherRaw, PHASE.EXECUTION);
+        responses.push(tetyanaGather);
+        pushAndBroadcast(session, tetyanaGather);
+        
+        // Send gathered info back to Grisha for security re-check
+        session.pipeline.stage = 'pending_security_recheck';
+        session.pipeline.gatheredInfo = tetyanaGather.content;
+        session.nextAction = 'grisha_security_check';
+        
+        logMessage('info', `[processAgentCycle] tetyana gathered info for grisha recheck`);
+        
+        const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
+        setTimeout(() => {
+            const syntheticUser = '[AUTO] Повторна перевірка безпеки.';
+            processAgentCycle(syntheticUser, session).catch(e => {
+                logMessage('warn', `[processAgentCycle] auto security recheck cycle failed: ${e.message}`);
+            });
+        }, nextActionDelay);
+        return responses;
+    }
+    
+    // Handle Grisha task verification
+    if (session.nextAction === 'grisha_task_verification' && session.pipeline) {
+        const verificationPrompt = getSystemPromptsTemplates().grisha.taskVerification({
+            userMessage: session.pipeline.userMessage,
+            tetyanaResults: session.pipeline.tetyanaResults,
+            userId: session.userId
+        });
+        
+        const grishaVerificationRaw = await generateNonBlockingAgentResponse('grisha', verificationPrompt, session);
+        const grishaVerification = tagResponse(grishaVerificationRaw, PHASE.GRISHA_TASK_VERIFICATION);
+        responses.push(grishaVerification);
+        pushAndBroadcast(session, grishaVerification);
+        
+        // Parse verification decision
+        const verificationContent = grishaVerification.content.toLowerCase();
+        const isConfirmed = verificationContent.includes('підтверджено');
+        const needsRework = verificationContent.includes('потрібна_доробка');
+        const needsNewCycle = verificationContent.includes('запустити_новий_цикл');
+        
+        if (isConfirmed) {
+            // Task verification successful
+            session.pipeline.stage = 'verified_complete';
+            session.nextAction = null;
+            clearPipeline(session);
+            logMessage('info', `[processAgentCycle] task verification confirmed`);
+        } else if (needsRework) {
+            // Task needs additional work
+            session.pipeline.stage = 'needs_rework';
+            session.nextAction = 'tetyana_execute';
+            logMessage('info', `[processAgentCycle] task needs rework, continuing cycle`);
+            
+            const nextActionDelay = parseInt(process.env.NEXT_ACTION_DELAY_MS || '800', 10);
+            setTimeout(() => {
+                const syntheticUser = '[AUTO] Доробка завдання.';
+                processAgentCycle(syntheticUser, session).catch(e => {
+                    logMessage('warn', `[processAgentCycle] auto rework cycle failed: ${e.message}`);
+                });
+            }, nextActionDelay);
+        } else if (needsNewCycle) {
+            // Need to restart with new formulation from Atlas
+            const originalUserMessage = session.pipeline.userMessage;
+            clearPipeline(session);
+            session.nextAction = null;
+            logMessage('info', `[processAgentCycle] restarting cycle due to grisha feedback`);
+            
+            // Send feedback to Atlas for reformulation
+            const atlasReformulationPrompt = getSystemPromptsTemplates().atlas.reformulation({
+                userMessage: originalUserMessage,
+                grishaFeedback: grishaVerification.content
+            });
+            const atlasReformulation = await generateNonBlockingAgentResponse('atlas', atlasReformulationPrompt, session);
+            const reformulationResponse = tagResponse(atlasReformulation, PHASE.ATLAS_REFORMULATION);
+            responses.push(reformulationResponse);
+            pushAndBroadcast(session, reformulationResponse);
+            
+            // Start new security check with reformulated plan
+            startPendingSecurityCheck(session, originalUserMessage, reformulationResponse.content);
+            
+            const nextActionDelay2 = parseInt(process.env.NEXT_ACTION_DELAY_MS || '1000', 10);
+            setTimeout(() => {
+                const syntheticUser = '[AUTO] Новий цикл з переформульованим планом.';
+                processAgentCycle(syntheticUser, session).catch(e => {
+                    logMessage('warn', `[processAgentCycle] auto new cycle failed: ${e.message}`);
+                });
+            }, nextActionDelay2);
+        }
+        
         return responses;
     }
 
@@ -1900,66 +2147,88 @@ async function processAgentCycle(userMessage, session) {
             '',
             'ТТС: Аналізую план та додаю вимоги для якісного виконання.'
         ].join('\n');
-        const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
-    const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
-    responses.push(grishaPre);
-    pushAndBroadcast(session, grishaPre);
-    try { rememberSafe('grisha', `precheck_${Date.now()}`, (grishaPre.content||'').slice(0,300)); } catch {}
-
-    // TTS gate after Grisha precheck
-    if (applyTtsGate(session, PHASE.GRISHA_PRECHECK)) return responses;
-
-    // Enhanced agent cycle: Check Grisha's feedback and handle reformulation
-    try {
-        const grishaContent = (grishaPre.content || '').toLowerCase();
         
-        // Check if Grisha requires reformulation
-        if (grishaContent.includes('потребує_переформулювання')) {
-            logMessage('info', '[AGENT_CYCLE] Grisha requests Atlas reformulation');
+        // Phase 2: Grisha security check
+        const securityPrompt = generateSecurityCheckPrompt(userMessage, session.userId, { atlasPlan: atlasResponse.content });
+        const grishaSecurityRaw = await generateAgentResponse('grisha', securityPrompt.systemPrompt + '\n\n' + securityPrompt.taskPrompt, session);
+        const grishaSecurityCheck = tagResponse(grishaSecurityRaw, PHASE.GRISHA_SECURITY_CHECK);
+        responses.push(grishaSecurityCheck);
+        pushAndBroadcast(session, grishaSecurityCheck);
+        try { rememberSafe('grisha', `security_check_${Date.now()}`, (grishaSecurityCheck.content||'').slice(0,300)); } catch {}
+
+        // TTS gate after Grisha security check
+        if (applyTtsGate(session, PHASE.GRISHA_SECURITY_CHECK)) return responses;
+
+        // Enhanced agent cycle: Check Grisha's security decision
+        try {
+            const grishaContent = (grishaSecurityCheck.content || '').toLowerCase();
             
-            // Atlas reformulates based on Grisha's feedback
-            const reformulationPrompt = [
-                'Ти — Atlas. Гриша запросив переформулювання плану.',
-                `Оригінальне завдання: ${userMessage}`,
-                `Твій попередній план: ${atlasResponse.content}`,
-                `Зауваження Гриші: ${grishaPre.content}`,
-                '',
-                'Переформулюй план враховуючи зауваження Гриші:',
-                '- Виправи недоліки, які він вказав',
-                '- Додай деталі, яких бракувало',
-                '- Зберігай фокус на виконанні',
-                '- НЕ ЗГАДУЙ РИЗИКИ, просто покращ план',
-                '',
-                'ТТС: Переформульовую план згідно з вимогами Гриші.'
-            ].join('\n');
+            // Check if task is blocked by security
+            if (grishaContent.includes('заборонено') || grishaContent.includes('безпека: заборонено')) {
+                logMessage('info', '[AGENT_CYCLE] Task blocked by Grisha security check');
+                
+                const blockMessage = tagResponse({
+                    role: 'assistant',
+                    content: `[ГРИША] Завдання заблоковано через порушення безпеки. ${grishaSecurityCheck.content}`,
+                    agent: 'grisha'
+                }, PHASE.GRISHA_SECURITY_CHECK);
+                responses.push(blockMessage);
+                pushAndBroadcast(session, blockMessage);
+                return responses;
+            }
             
-            const atlasReformulationRaw = await generateAgentResponse('atlas', reformulationPrompt, session);
-            const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
-            responses.push(atlasReformulation);
-            pushAndBroadcast(session, atlasReformulation);
+            // Check if Grisha needs more information
+            if (grishaContent.includes('потребую_інформації: так')) {
+                logMessage('info', '[AGENT_CYCLE] Grisha requests more information for security check');
+                
+                // Start information gathering cycle
+                markNeedsGrishaInformation(session, ['Додаткові деталі для перевірки безпеки'], 'Недостатньо даних для оцінки безпеки');
+                
+                const infoRequestMessage = tagResponse({
+                    role: 'assistant',
+                    content: `[ГРИША] Потребую додаткової інформації для перевірки безпеки завдання.`,
+                    agent: 'grisha'
+                }, PHASE.GRISHA_INFORMATION_REQUEST);
+                responses.push(infoRequestMessage);
+                pushAndBroadcast(session, infoRequestMessage);
+                return responses;
+            }
+
+            // Security approved - check if monitoring needed
+            const needsMonitoring = grishaContent.includes('моніторинг: так');
             
-            if (applyTtsGate(session, PHASE.ATLAS_REFORMULATION)) return responses;
+            // Continue with normal flow based on Grisha security requirements
+            session.pipeline = session.pipeline || {};
+            session.pipeline.grishaSecurityCheck = grishaSecurityCheck.content;
+            session.pipeline.grishaRequirements = grishaSecurityCheck.content;
             
-            // Grisha validates the reformulated plan (simplified validation)
-            const validationPrompt = [
-                'Ти — Гриша. Перевір переформульований план Atlas.',
-                `Завдання: ${userMessage}`,
-                `Переформульований план: ${atlasReformulation.content}`,
-                '',
-                'Швидка валідація:',
-                '- Чи план тепер достатньо детальний?',
-                '- Чи враховані твої попередні зауваження?',
-                'Відповідай: ЗАТВЕРДЖУЮ / ПОТРЕБУЄ_УТОЧНЕНЬ',
-                '',
-                'ТТС: Перевіряю переформульований план.'
-            ].join('\n');
+            // Check for shortages or information needs
+            const hasShortage = /(уточн|потрібн|недостатньо|missing|need more)/.test(grishaContent);
             
-            const grishaValidationRaw = await generateAgentResponse('grisha', validationPrompt, session);
-            const grishaValidation = tagResponse(grishaValidationRaw, PHASE.GRISHA_VALIDATION);
-            responses.push(grishaValidation);
-            pushAndBroadcast(session, grishaValidation);
-            
-            if (applyTtsGate(session, PHASE.GRISHA_VALIDATION)) return responses;
+            if (hasShortage) {
+                logMessage('info', '[SHORTAGE_HANDLING] Grisha indicates information shortage');
+                
+                // Try Atlas data gathering reformulation
+                try {
+                    const dataGatheringPrompt = getSystemPromptsTemplates().atlas.dataGathering({
+                        userMessage,
+                        grishaRequirement: grishaSecurityCheck.content
+                    });
+                    
+                    const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
+                    const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
+                    responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
+                    
+                    // Automatically proceed to execution
+                    startActionablePipeline(session, userMessage, atlasReformulation.content, grishaSecurityCheck.content);
+                    logMessage('info', `[SHORTAGE_REFORMULATION] Atlas adapted task for security requirements for session=${session.id}`);
+                    return responses;
+                } catch (e) { 
+                    logMessage('warn', 'Security-focused reformulation failed: ' + e.message); 
+                }
+            }
+
+        startActionablePipeline(session, userMessage, atlasResponse.content, grishaSecurityCheck.content);
             
             // Update plan for execution
             session.pipeline.atlasPlan = atlasReformulation.content;
@@ -2014,7 +2283,7 @@ async function processAgentCycle(userMessage, session) {
                         clearProbe(session);
                         // Continue as actionable pipeline and immediately perform Grisha precheck to avoid waiting a new cycle
                         logProbe('Probe ADVANCE confirmed -> transitioning to actionable pipeline');
-                        startActionablePipeline(session, userMessage, atlasResponse.content, grishaPre.content);
+                        startActionablePipeline(session, userMessage, atlasResponse.content, grishaSecurityCheck.content);
                         // Emit a synthesized confirmation message (Atlas) to show transition
                         const synth = tagResponse({
                             role: 'assistant',
@@ -2062,13 +2331,13 @@ async function processAgentCycle(userMessage, session) {
                 responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
                 
                 // Автоматично переходимо до виконання
-                startActionablePipeline(session, userMessage, atlasReformulation.content, grishaPre.content);
+                startActionablePipeline(session, userMessage, atlasReformulation.content, grishaSecurityCheck.content);
                 logMessage('info', `[SHORTAGE_REFORMULATION] Atlas adapted task instead of requesting clarification for session=${session.id}`);
                 return responses;
             }
         } catch (e) { logMessage('warn', 'Generic clarification escalation skipped: ' + e.message); }
 
-        startActionablePipeline(session, userMessage, atlasResponse.content, grishaPre.content);
+        startActionablePipeline(session, userMessage, atlasResponse.content, grishaSecurityCheck.content);
 
         // Immediate mode: execute right away without waiting for frontend continuation
         if (shouldImmediateExecute(intent)) {
@@ -2428,7 +2697,7 @@ app.post('/tts/done', async (req, res) => {
             return res.json({ success: true, resumed: true, response: responses, session: { id: session.id, currentAgent: session.currentAgent } });
         }
         // Resume after Grisha precheck gate (immediate path)
-        if (phase === PHASE.GRISHA_PRECHECK) {
+        if (phase === PHASE.GRISHA_SECURITY_CHECK) {
             const responses = await processAgentCycleResumeAfterGrishaPre(session);
             if (responses.length) return res.json({ success: true, resumed: true, response: responses, session: { id: session.id } });
         }
