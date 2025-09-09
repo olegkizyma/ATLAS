@@ -129,12 +129,225 @@ VISION_FRONTEND_CONFIG = {
     "instructions": "Computer vision tools for ATLAS. Can analyze images, detect objects and people, monitor screen activity, and generate action sequences based on visual input.",
 }
 
+class AtlasVisionSystem:
+    """Enhanced ATLAS Vision System with real-time camera integration"""
+    
+    def __init__(self, vision_processor: VisionProcessor):
+        self.vision_processor = vision_processor
+        self.camera_active = False
+        self.camera_capture = None
+        self.camera_thread = None
+        self.last_frame = None
+        self.analysis_queue = []
+        self.communication_mode = False  # For Atlas-user communication through vision
+        
+        # Real-time analysis settings
+        self.analysis_interval = 1.0  # seconds between analysis
+        self.last_analysis_time = 0
+        
+        logger.info("ATLAS Vision System initialized with camera support")
+    
+    def start_camera_communication(self) -> Dict[str, Any]:
+        """Starts real-time camera for Atlas-user communication"""
+        try:
+            if not cv2:
+                return {"success": False, "error": "OpenCV not available"}
+            
+            # Initialize camera
+            self.camera_capture = cv2.VideoCapture(0)
+            
+            if not self.camera_capture.isOpened():
+                return {"success": False, "error": "Cannot access camera"}
+            
+            # Set camera properties for better quality
+            self.camera_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.camera_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self.camera_capture.set(cv2.CAP_PROP_FPS, 30)
+            
+            self.camera_active = True
+            self.communication_mode = True
+            
+            # Start camera thread for real-time processing
+            if threading:
+                self.camera_thread = threading.Thread(
+                    target=self._camera_loop,
+                    daemon=True
+                )
+                self.camera_thread.start()
+            
+            logger.info("Camera communication started for Atlas")
+            return {
+                "success": True,
+                "message": "Atlas can now see and communicate through camera",
+                "resolution": "1280x720",
+                "fps": 30
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to start camera communication: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def stop_camera_communication(self) -> Dict[str, Any]:
+        """Stops camera communication"""
+        try:
+            self.camera_active = False
+            self.communication_mode = False
+            
+            if self.camera_capture:
+                self.camera_capture.release()
+                self.camera_capture = None
+            
+            if self.camera_thread and self.camera_thread.is_alive():
+                self.camera_thread.join(timeout=3)
+            
+            logger.info("Camera communication stopped")
+            return {"success": True, "message": "Camera communication stopped"}
+            
+        except Exception as e:
+            logger.error(f"Failed to stop camera: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def _camera_loop(self):
+        """Real-time camera processing loop"""
+        while self.camera_active and self.camera_capture:
+            try:
+                ret, frame = self.camera_capture.read()
+                if not ret:
+                    logger.warning("Failed to read camera frame")
+                    continue
+                
+                self.last_frame = frame.copy()
+                
+                # Perform analysis at intervals
+                current_time = time.time()
+                if current_time - self.last_analysis_time > self.analysis_interval:
+                    self._analyze_current_frame(frame)
+                    self.last_analysis_time = current_time
+                
+                time.sleep(0.033)  # ~30 FPS
+                
+            except Exception as e:
+                logger.error(f"Camera loop error: {e}")
+                break
+        
+        # Cleanup
+        if self.camera_capture:
+            self.camera_capture.release()
+    
+    def _analyze_current_frame(self, frame):
+        """Analyze current camera frame for Atlas communication"""
+        try:
+            # Basic analysis for communication
+            analysis = {
+                "timestamp": datetime.now().isoformat(),
+                "frame_size": frame.shape,
+                "detected_elements": []
+            }
+            
+            # Detect faces for user communication
+            if self.vision_processor.mp_face:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                face_results = self.vision_processor.mp_face.process(rgb_frame)
+                
+                if face_results.detections:
+                    analysis["faces_detected"] = len(face_results.detections)
+                    analysis["user_present"] = True
+                else:
+                    analysis["user_present"] = False
+            
+            # Detect hands for gesture recognition
+            if self.vision_processor.mp_hands:
+                rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
+                hand_results = self.vision_processor.mp_hands.process(rgb_frame)
+                
+                if hand_results.multi_hand_landmarks:
+                    analysis["hands_detected"] = len(hand_results.multi_hand_landmarks)
+                    # Add gesture analysis here if needed
+            
+            # Object detection with YOLO
+            if self.vision_processor.yolo_model:
+                results = self.vision_processor.yolo_model(frame)
+                objects = []
+                for result in results:
+                    if hasattr(result, 'boxes') and result.boxes is not None:
+                        for box in result.boxes:
+                            if hasattr(box, 'cls') and hasattr(box, 'conf'):
+                                class_id = int(box.cls.cpu().numpy())
+                                confidence = float(box.conf.cpu().numpy())
+                                if confidence > 0.5:  # Only high confidence objects
+                                    objects.append({
+                                        "class_id": class_id,
+                                        "confidence": confidence,
+                                        "name": self.vision_processor.yolo_model.names[class_id]
+                                    })
+                
+                analysis["objects"] = objects
+            
+            # Add to analysis queue (keep last 10 analyses)
+            self.analysis_queue.append(analysis)
+            if len(self.analysis_queue) > 10:
+                self.analysis_queue.pop(0)
+            
+        except Exception as e:
+            logger.error(f"Frame analysis error: {e}")
+    
+    def get_current_scene_description(self) -> str:
+        """Get description of what Atlas currently sees"""
+        if not self.analysis_queue:
+            return "No visual data available"
+        
+        latest = self.analysis_queue[-1]
+        description_parts = []
+        
+        # User presence
+        if latest.get("user_present"):
+            description_parts.append("Користувач присутній")
+            if latest.get("faces_detected", 0) > 1:
+                description_parts.append(f"Виявлено {latest['faces_detected']} облич")
+        else:
+            description_parts.append("Користувач не виявлений")
+        
+        # Hand gestures
+        hands = latest.get("hands_detected", 0)
+        if hands > 0:
+            description_parts.append(f"Виявлено {hands} рук(и)")
+        
+        # Objects
+        objects = latest.get("objects", [])
+        if objects:
+            object_names = [obj["name"] for obj in objects[:3]]  # Top 3 objects
+            description_parts.append(f"Об'єкти: {', '.join(object_names)}")
+        
+        return ". ".join(description_parts) if description_parts else "Сцена порожня"
+    
+    def capture_frame_for_analysis(self) -> Optional[np.ndarray]:
+        """Capture current frame for detailed analysis"""
+        if self.last_frame is not None:
+            return self.last_frame.copy()
+        return None
+    
+    def get_vision_status(self) -> Dict[str, Any]:
+        """Get current status of vision system"""
+        return {
+            "camera_active": self.camera_active,
+            "communication_mode": self.communication_mode,
+            "user_present": self.analysis_queue[-1].get("user_present", False) if self.analysis_queue else False,
+            "last_analysis": self.analysis_queue[-1]["timestamp"] if self.analysis_queue else None,
+            "scene_description": self.get_current_scene_description()
+        }
+
 class VisionProcessor:
-    """Процесор комп'ютерного зору для ATLAS"""
+    """Процесор комп'ютерного зору для ATLAS з підтримкою камери"""
     
     def __init__(self):
         self.temp_dir = Path(tempfile.gettempdir()) / "atlas_vision"
         self.temp_dir.mkdir(exist_ok=True)
+        
+        # Camera communication properties
+        self.camera_active = False
+        self.camera_capture = None
+        self.communication_mode = False
+        self.last_frame = None
         
         # Ініціалізуємо моделі якщо доступні
         self.mp_hands = None
@@ -552,6 +765,99 @@ class VisionProcessor:
                     
         except Exception as e:
             logger.warning(f"Cleanup failed: {e}")
+    
+    def start_camera_communication(self) -> Dict[str, Any]:
+        """Запускає камеру для спілкування з Atlas через зображення"""
+        try:
+            if not cv2:
+                return {"success": False, "error": "OpenCV не доступний"}
+            
+            self.camera_capture = cv2.VideoCapture(0)
+            if not self.camera_capture.isOpened():
+                return {"success": False, "error": "Не вдається отримати доступ до камери"}
+            
+            # Налаштування якості камери
+            self.camera_capture.set(cv2.CAP_PROP_FRAME_WIDTH, 1280)
+            self.camera_capture.set(cv2.CAP_PROP_FRAME_HEIGHT, 720)
+            self.camera_capture.set(cv2.CAP_PROP_FPS, 30)
+            
+            self.camera_active = True
+            self.communication_mode = True
+            
+            logger.info("Atlas camera communication started")
+            return {
+                "success": True,
+                "message": "Atlas може бачити та спілкуватися через камеру",
+                "resolution": "1280x720"
+            }
+            
+        except Exception as e:
+            logger.error(f"Failed to start camera: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def stop_camera_communication(self) -> Dict[str, Any]:
+        """Зупиняє камеру"""
+        try:
+            self.camera_active = False
+            self.communication_mode = False
+            
+            if self.camera_capture:
+                self.camera_capture.release()
+                self.camera_capture = None
+            
+            logger.info("Camera communication stopped")
+            return {"success": True, "message": "Спілкування через камеру зупинено"}
+            
+        except Exception as e:
+            return {"success": False, "error": str(e)}
+    
+    def capture_current_frame(self) -> Dict[str, Any]:
+        """Робить знімок поточного кадру для аналізу Atlas"""
+        try:
+            if not self.camera_active or not self.camera_capture:
+                return {"success": False, "error": "Камера не активна"}
+            
+            ret, frame = self.camera_capture.read()
+            if not ret:
+                return {"success": False, "error": "Не вдається зробити знімок"}
+            
+            self.last_frame = frame.copy()
+            
+            # Конвертуємо в base64 для передачі
+            _, buffer = cv2.imencode('.jpg', frame)
+            frame_base64 = base64.b64encode(buffer).decode('utf-8')
+            
+            # Аналізуємо кадр
+            image = Image.fromarray(cv2.cvtColor(frame, cv2.COLOR_BGR2RGB))
+            analysis = self.analyze_image(image)
+            
+            return {
+                "success": True,
+                "frame_data": frame_base64,
+                "analysis": analysis,
+                "timestamp": datetime.now().isoformat(),
+                "scene_description": self.generate_scene_description(analysis)
+            }
+            
+        except Exception as e:
+            logger.error(f"Frame capture error: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def get_camera_status(self) -> Dict[str, Any]:
+        """Отримує статус камери та системи зору"""
+        return {
+            "camera_active": self.camera_active,
+            "communication_mode": self.communication_mode,
+            "opencv_available": cv2 is not None,
+            "mediapipe_available": mp is not None,
+            "yolo_available": self.yolo_model is not None,
+            "models_loaded": {
+                "hands": self.mp_hands is not None,
+                "pose": self.mp_pose is not None,
+                "face": self.mp_face is not None,
+                "yolo": self.yolo_model is not None
+            }
+        }
 
 
 class GooseVisionIntegration:
@@ -902,7 +1208,7 @@ class GooseVisionIntegration:
 
 
 class GrishaVisionMonitor:
-    """Система візуального моніторингу для Гриші під час виконання завдань Тетяною"""
+    """Enhanced система візуального моніторингу для Гриші - підтримка всіх доступних екранів"""
     
     def __init__(self, vision_processor: VisionProcessor):
         self.vision_processor = vision_processor
@@ -912,6 +1218,167 @@ class GrishaVisionMonitor:
         self.session_id = None
         self.start_time = None
         self.task_description = None
+        
+        # Enhanced monitoring capabilities
+        self.monitor_all_screens = True
+        self.available_screens = []
+        self.screen_analyses = {}
+        self.tetyana_reports = []
+        self.grisha_verifications = []
+        
+        # Initialize screen detection
+        self._detect_available_screens()
+        
+    def _detect_available_screens(self):
+        """Виявляє всі доступні екрани/монітори"""
+        try:
+            if pyautogui:
+                # Get screen size (primary screen)
+                screen_width, screen_height = pyautogui.size()
+                
+                self.available_screens = [{
+                    "id": 0,
+                    "name": "Primary Screen",
+                    "width": screen_width,
+                    "height": screen_height,
+                    "x": 0,
+                    "y": 0,
+                    "primary": True
+                }]
+                
+                # Try to detect multiple monitors if available
+                try:
+                    import screeninfo
+                    monitors = screeninfo.get_monitors()
+                    
+                    self.available_screens = []
+                    for i, monitor in enumerate(monitors):
+                        self.available_screens.append({
+                            "id": i,
+                            "name": f"Monitor {i+1}",
+                            "width": monitor.width,
+                            "height": monitor.height,
+                            "x": monitor.x,
+                            "y": monitor.y,
+                            "primary": monitor.is_primary
+                        })
+                        
+                    logger.info(f"Detected {len(self.available_screens)} screens for Grisha monitoring")
+                except ImportError:
+                    logger.info("Multiple monitor detection not available, using primary screen only")
+                    
+            else:
+                logger.warning("pyautogui not available, screen monitoring disabled")
+                self.available_screens = []
+                
+        except Exception as e:
+            logger.error(f"Screen detection failed: {e}")
+            self.available_screens = []
+    
+    def get_screen_status(self) -> Dict[str, Any]:
+        """Отримує статус всіх доступних екранів"""
+        return {
+            "screens_available": len(self.available_screens),
+            "screens": self.available_screens,
+            "monitoring_active": self.monitoring_active,
+            "current_session": self.session_id,
+            "all_screens_mode": self.monitor_all_screens
+        }
+    
+    def capture_all_screens(self) -> Dict[str, Any]:
+        """Робить знімки всіх доступних екранів для Гриші"""
+        try:
+            if not pyautogui or not self.available_screens:
+                return {"success": False, "error": "Screen capture not available"}
+            
+            captures = []
+            timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+            
+            for screen in self.available_screens:
+                try:
+                    # Capture specific screen region
+                    screenshot = pyautogui.screenshot(
+                        region=(screen["x"], screen["y"], screen["width"], screen["height"])
+                    )
+                    
+                    # Save screenshot
+                    filename = f"grisha_screen_{screen['id']}_{timestamp}.png"
+                    filepath = self.vision_processor.temp_dir / filename
+                    screenshot.save(filepath)
+                    
+                    # Analyze screenshot
+                    analysis = self._analyze_screenshot(filepath)
+                    
+                    captures.append({
+                        "screen_id": screen["id"],
+                        "screen_name": screen["name"],
+                        "filepath": str(filepath),
+                        "filename": filename,
+                        "analysis": analysis,
+                        "dimensions": [screen["width"], screen["height"]],
+                        "timestamp": timestamp
+                    })
+                    
+                    logger.debug(f"Captured screen {screen['id']}: {filename}")
+                    
+                except Exception as e:
+                    logger.error(f"Failed to capture screen {screen['id']}: {e}")
+                    continue
+            
+            return {
+                "success": True,
+                "captures": captures,
+                "total_screens": len(captures),
+                "timestamp": timestamp
+            }
+            
+        except Exception as e:
+            logger.error(f"All screen capture failed: {e}")
+            return {"success": False, "error": str(e)}
+    
+    def add_tetyana_report(self, report: Dict[str, Any]) -> None:
+        """Додає звіт від Тетяни для перевірки Гришею"""
+        try:
+            report_entry = {
+                "timestamp": datetime.now().isoformat(),
+                "session_id": self.session_id,
+                "report": report,
+                "verified": False,
+                "grisha_notes": None
+            }
+            self.tetyana_reports.append(report_entry)
+            logger.info(f"Added Tetyana report for session {self.session_id}")
+        except Exception as e:
+            logger.error(f"Failed to add Tetyana report: {e}")
+    
+    def verify_tetyana_report(self, report_index: int, verification: Dict[str, Any]) -> Dict[str, Any]:
+        """Грише перевіряє звіт Тетяни"""
+        try:
+            if 0 <= report_index < len(self.tetyana_reports):
+                report = self.tetyana_reports[report_index]
+                report["verified"] = True
+                report["grisha_notes"] = verification.get("notes", "")
+                report["verification_timestamp"] = datetime.now().isoformat()
+                
+                # Capture screens at verification time
+                screen_captures = self.capture_all_screens()
+                report["verification_screens"] = screen_captures
+                
+                self.grisha_verifications.append({
+                    "report_index": report_index,
+                    "verification": verification,
+                    "timestamp": datetime.now().isoformat(),
+                    "screens": screen_captures
+                })
+                
+                logger.info(f"Grisha verified report {report_index}")
+                return {"success": True, "verification_id": len(self.grisha_verifications) - 1}
+            else:
+                return {"success": False, "error": "Invalid report index"}
+                
+        except Exception as e:
+            logger.error(f"Report verification failed: {e}")
+            return {"success": False, "error": str(e)}
         
     def start_monitoring(self, session_id: str, task_description: str) -> Dict[str, Any]:
         """Запускає візуальний моніторинг для сесії виконання"""
