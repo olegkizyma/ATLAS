@@ -1,54 +1,9 @@
 /**
  * GitHub Models Client Adapter для ATLAS
- * Використовує client-module замість старого openai_client.js
+ * Повністю використовує client-module з прокси на порту 3010
  */
 
 import GitHubModelsClient from '../../client-module/nodejs_client/client.js';
-
-// Global request manager для уникнення concurrent requests
-class GlobalRequestManager {
-    constructor() {
-        this.lastRequestTime = 0;
-        this.minDelay = 1500; // Мінімум 1.5 секунди між запитами
-        this.rateLimitedModels = new Map(); // model -> timestamp коли можна знову спробувати
-    }
-    
-    async waitForNextRequest() {
-        const now = Date.now();
-        const timeSinceLastRequest = now - this.lastRequestTime;
-        
-        if (timeSinceLastRequest < this.minDelay) {
-            const waitTime = this.minDelay - timeSinceLastRequest;
-            console.log(`[GLOBAL_RATE_LIMIT] Waiting ${waitTime}ms before next request`);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-        }
-        
-        this.lastRequestTime = Date.now();
-    }
-    
-    isModelRateLimited(model) {
-        const blockedUntil = this.rateLimitedModels.get(model);
-        if (!blockedUntil) return false;
-        
-        if (Date.now() < blockedUntil) {
-            const remainingMs = blockedUntil - Date.now();
-            console.log(`[GLOBAL_RATE_LIMIT] Model ${model} blocked for ${Math.ceil(remainingMs/1000)}s more`);
-            return true;
-        }
-        
-        // Час вийшов, прибираємо з списку
-        this.rateLimitedModels.delete(model);
-        return false;
-    }
-    
-    markModelRateLimited(model, retryAfterSeconds = 60) {
-        const blockedUntil = Date.now() + (retryAfterSeconds * 1000);
-        this.rateLimitedModels.set(model, blockedUntil);
-        console.log(`[GLOBAL_RATE_LIMIT] Model ${model} blocked for ${retryAfterSeconds}s`);
-    }
-}
-
-const globalRequestManager = new GlobalRequestManager();
 
 // Singleton клієнт
 let clientInstance = null;
@@ -56,210 +11,145 @@ let clientInstance = null;
 function getClient() {
     if (!clientInstance) {
         clientInstance = new GitHubModelsClient({
-            proxyURL: process.env.FALLBACK_API_BASE || 'http://localhost:5101/v1',
-            maxRetries: 2,
+            proxyURL: 'http://localhost:3010/v1',  // GitHub Models прокси
+            maxRetries: 3,
             retryDelay: 1000,
             maxDelay: 60000
         });
+        console.log('[ATLAS_CLIENT] Initialized GitHub Models client with proxy http://localhost:3010/v1');
     }
     return clientInstance;
 }
 
 /**
- * Динамічний розрахунок таймауту на основі розміру повідомлення та моделі
- */
-function calculateTimeout(model, message) {
-    const baseMs = parseInt(process.env.LLM_BASE_TIMEOUT_MS || '8000', 10);
-    const perTokenMs = parseInt(process.env.LLM_PER_TOKEN_TIMEOUT_MS || '18', 10);
-    const maxMs = parseInt(process.env.LLM_MAX_TIMEOUT_MS || '60000', 10);
-    
-    // Приблизна кількість токенів (4 символи = 1 токен)
-    const estimatedTokens = Math.ceil(message.length / 4);
-    const calculatedTimeout = baseMs + (estimatedTokens * perTokenMs);
-    
-    return Math.min(calculatedTimeout, maxMs);
-}
-
-/**
- * Основна функція для чату з моделлю
+ * Основна функція для чату з моделлю через client-module
  */
 export async function chatWithModel(baseUrl, model, userMessage, options = {}) {
     const {
         systemMessage = null,
         maxTokens = 1000,
         temperature = 0.7,
-        stream = false,
         timeout = null
     } = options;
 
-    // Глобальне обмеження запитів
-    await globalRequestManager.waitForNextRequest();
-
-    // Перевіряємо rate limit для моделі
-    if (globalRequestManager.isModelRateLimited(model)) {
-        throw new Error(`Model ${model} is rate limited`);
-    }
-
     const client = getClient();
-    const messages = [];
     
-    if (systemMessage) {
-        messages.push({ role: 'system', content: systemMessage });
-    }
-    messages.push({ role: 'user', content: userMessage });
-
-    const actualTimeout = timeout || calculateTimeout(model, userMessage);
+    console.log(`[ATLAS_CLIENT] Calling model: ${model} with message length: ${userMessage.length}`);
 
     try {
-        const startTime = Date.now();
-        
+        // Готуємо повідомлення
+        const messages = [];
+        if (systemMessage) {
+            messages.push({ role: 'system', content: systemMessage });
+        }
+        messages.push({ role: 'user', content: userMessage });
+
+        // Викликаємо модель через client-module
         const result = await client.chatCompletion({
-            model,
-            messages,
-            maxTokens,
-            temperature,
-            timeout: actualTimeout
+            model: model,
+            messages: messages,
+            maxTokens: maxTokens,
+            temperature: temperature
         });
 
-        const duration = Date.now() - startTime;
-
-        if (!result.success) {
-            throw new Error(result.error);
+        if (result.success) {
+            console.log(`[ATLAS_CLIENT] Success: ${model} -> ${result.content.length} chars, ${result.usage?.totalTokens || 'N/A'} tokens`);
+            
+            return {
+                content: result.content,
+                model: result.model,
+                usage: result.usage,
+                success: true
+            };
+        } else {
+            console.error(`[ATLAS_CLIENT] Model error: ${model} -> ${result.error}`);
+            throw new Error(`Model ${model} failed: ${result.error}`);
         }
-
-        console.log(`[GitHub Models] ✅ Success with model: ${model} (${duration}ms)`);
-
-        return {
-            content: result.content,
-            model: result.model,
-            usage: result.usage,
-            duration
-        };
 
     } catch (error) {
-        console.error(`[GitHub Models] Error with model ${model}:`, error.message);
-
-        // Обробляємо rate limiting
-        if (error.message.includes('429') || error.message.toLowerCase().includes('rate limit')) {
-            globalRequestManager.markModelRateLimited(model, 60);
-        }
-
+        console.error(`[ATLAS_CLIENT] Exception calling ${model}:`, error.message);
         throw error;
     }
 }
 
 /**
- * Чат з таймаутом
+ * Функція з таймаутом
  */
 export async function chatWithModelTimeout(baseUrl, model, userMessage, timeoutMs, options = {}) {
-    return chatWithModel(baseUrl, model, userMessage, { ...options, timeout: timeoutMs });
+    const timeout = timeoutMs || 30000; // 30 секунд за замовчуванням
+    
+    return Promise.race([
+        chatWithModel(baseUrl, model, userMessage, options),
+        new Promise((_, reject) => 
+            setTimeout(() => reject(new Error(`Timeout after ${timeout}ms`)), timeout)
+        )
+    ]);
 }
 
 /**
- * Чат з ротацією моделей
+ * Функція з ротацією моделей (для випадку коли одна модель не працює)
  */
 export async function chatWithModelRotation(baseUrl, models, userMessage, options = {}) {
-    if (!Array.isArray(models) || models.length === 0) {
-        throw new Error('Models array cannot be empty');
-    }
+    const modelList = Array.isArray(models) ? models : [models];
     
-    const {
-        systemMessage = null,
-        maxTokens = 1000,
-        temperature = 0.7,
-        stream = false,
-        timeout = null,
-        maxRetries = 2,
-        retryDelay = 1000
-    } = options;
-
-    const errors = [];
-    const rateLimitedModels = new Set();
-    
-    for (let i = 0; i < models.length; i++) {
-        const model = models[i];
-        
-        // Пропускаємо rate limited моделі
-        if (rateLimitedModels.has(model) || globalRequestManager.isModelRateLimited(model)) {
-            console.log(`[ROTATION] Skipping rate limited model: ${model}`);
+    for (const model of modelList) {
+        try {
+            console.log(`[ATLAS_CLIENT] Trying model: ${model}`);
+            const result = await chatWithModel(baseUrl, model, userMessage, options);
+            console.log(`[ATLAS_CLIENT] Model rotation success with: ${model}`);
+            return result;
+        } catch (error) {
+            console.log(`[ATLAS_CLIENT] Model ${model} failed: ${error.message}`);
+            
+            // Якщо це остання модель, кидаємо помилку
+            if (model === modelList[modelList.length - 1]) {
+                throw new Error(`All models failed. Last error from ${model}: ${error.message}`);
+            }
+            
+            // Інакше пробуємо наступну модель
             continue;
         }
-        
-        // Додаємо затримку між моделями
-        if (i > 0) {
-            const modelSwitchDelay = 3000;
-            console.log(`[ROTATION] Waiting ${modelSwitchDelay}ms before trying next model...`);
-            await new Promise(resolve => setTimeout(resolve, modelSwitchDelay));
-        }
-        
-        for (let retry = 0; retry <= maxRetries; retry++) {
-            try {
-                console.log(`[ROTATION] Trying model ${model} (attempt ${retry + 1}/${maxRetries + 1})`);
-                
-                const result = await chatWithModel(baseUrl, model, userMessage, {
-                    systemMessage,
-                    maxTokens,
-                    temperature,
-                    stream,
-                    timeout
-                });
-                
-                console.log(`[ROTATION] ✅ Success with model: ${model}`);
-                return result;
-                
-            } catch (error) {
-                const errorMsg = error.message;
-                errors.push(`${model}: ${errorMsg}`);
-                
-                // Rate limiting - не ретрай, спробуй наступну модель
-                if (errorMsg.includes('429') || errorMsg.toLowerCase().includes('rate limit')) {
-                    console.log(`[ROTATION] ⚠️ Rate limited: ${model}, trying next model`);
-                    rateLimitedModels.add(model);
-                    break; // Переходимо до наступної моделі
-                }
-                
-                // Server errors - ретрай
-                if (errorMsg.includes('500') || errorMsg.includes('502') || errorMsg.includes('503')) {
-                    if (retry < maxRetries) {
-                        const delay = retryDelay * Math.pow(2, retry);
-                        console.log(`[ROTATION] ⚠️ Server error, retrying ${model} in ${delay}ms`);
-                        await new Promise(resolve => setTimeout(resolve, delay));
-                        continue;
-                    }
-                }
-                
-                console.log(`[ROTATION] ❌ Failed: ${model} - ${errorMsg}`);
-                break; // Переходимо до наступної моделі
-            }
-        }
     }
-    
-    throw new Error(`ALL_MODELS_FAILED: Tried ${models.length} models. Errors: ${errors.join(', ')}`);
 }
 
 /**
- * Health check для прокси
+ * Перевірка здоров'я клієнта
  */
-export async function healthCheck(baseUrl) {
+export async function healthCheck() {
     try {
         const client = getClient();
-        const models = client.getModels();
+        
+        // Пробуємо простий запит
+        const result = await client.chatCompletion({
+            model: 'openai/gpt-4o-mini',
+            messages: [{ role: 'user', content: 'Hi' }],
+            maxTokens: 10
+        });
+        
         return {
-            healthy: true,
-            models: models.length,
-            baseUrl
+            status: 'healthy',
+            client: 'github-models-proxy',
+            url: 'http://localhost:3010/v1',
+            test_result: result.success
         };
     } catch (error) {
         return {
-            healthy: false,
-            error: error.message,
-            baseUrl
+            status: 'unhealthy',
+            client: 'github-models-proxy',
+            url: 'http://localhost:3010/v1',
+            error: error.message
         };
     }
 }
 
-export {
-    getClient,
-    calculateTimeout,
-    globalRequestManager
+// Додаткові експорти для сумісності з існуючим кодом ATLAS
+export { getClient };
+
+// Експорт за замовчуванням для сумісності
+export default { 
+    chatWithModel, 
+    chatWithModelTimeout, 
+    chatWithModelRotation, 
+    healthCheck, 
+    getClient 
 };

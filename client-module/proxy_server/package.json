@@ -1,0 +1,24 @@
+{
+  "name": "github-models-proxy",
+  "version": "1.0.0",
+  "description": "GitHub Models Proxy for ATLAS Orchestrator",
+  "main": "server.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server.js",
+    "dev": "node --watch server.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.6.0",
+    "cors": "^2.8.5"
+  },
+  "keywords": [
+    "github-models",
+    "proxy",
+    "atlas",
+    "openai-api"
+  ],
+  "author": "ATLAS Team",
+  "license": "MIT"
+}

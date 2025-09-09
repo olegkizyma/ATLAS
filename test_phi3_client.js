@@ -6,13 +6,24 @@
 import GitHubModelsClient from './client-module/nodejs_client/client.js';
 
 async function testPhi3Mini() {
-    console.log("🚀 Тестуємо модель microsoft/phi-3-mini-4k-instruct");
+    console.log("🚀 Тестуємо модель microsoft/phi-4-mini-instruct");
     console.log("=".repeat(50));
     
     // Створюємо клієнт
     const client = new GitHubModelsClient({
-        proxyURL: "http://localhost:5101/v1"
+        proxyURL: "http://localhost:3010/v1"
     });
+    
+    console.log(`🔗 Клієнт налаштований на: http://localhost:3010/v1`);
+    
+    // Перевіряємо, чи клієнт може отримати список моделей
+    try {
+        const models = await client.listModels({ provider: 'microsoft' });
+        console.log(`📋 Знайдено Microsoft моделей: ${models.length}`);
+        console.log(`📝 Деякі моделі: ${models.slice(0, 3).map(m => m.id).join(', ')}`);
+    } catch (e) {
+        console.log(`❌ Помилка отримання моделей: ${e.message}`);
+    }
     
     // Тестове повідомлення українською
     const testMessage = "Розкажи коротко про штучний інтелект українською мовою. Максимум 3 речення.";
@@ -21,9 +32,9 @@ async function testPhi3Mini() {
     console.log("-".repeat(50));
     
     try {
-        // Викликаємо модель
+        // Викликаємо модель (використовуємо працюючу модель)
         const result = await client.chatCompletion({
-            model: "microsoft/phi-3-mini-4k-instruct",
+            model: "microsoft/phi-4-mini-instruct",
             messages: [
                 { role: "user", content: testMessage }
             ],

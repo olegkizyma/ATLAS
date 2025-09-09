@@ -1,0 +1,18 @@
+{
+  "name": "github-models-proxy",
+  "version": "1.0.0",
+  "description": "GitHub Models API Proxy для ATLAS системи",
+  "main": "github_models_proxy.js",
+  "type": "module",
+  "scripts": {
+    "start": "node github_models_proxy.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "axios": "^1.4.0",
+    "cors": "^2.8.5"
+  },
+  "keywords": ["github", "models", "proxy", "atlas", "openai"],
+  "author": "ATLAS Team",
+  "license": "MIT"
+}
