@@ -3,6 +3,7 @@
 
 export FLASK_DEBUG=false
 export ATLAS_PRODUCTION=true
+export STRICT_TTS=1
 
 # Create logs directory
 mkdir -p logs
@@ -19,8 +20,12 @@ if command -v gunicorn &> /dev/null; then
     gunicorn -w 4 -b 0.0.0.0:5001 --access-logfile ../logs/frontend_access.log --error-logfile ../logs/frontend_error.log production_server:create_app &
     echo $! > ../logs/frontend.pid
 else
-    echo "Gunicorn not found, starting with Flask (development mode)..."
-    python app/atlas_server.py > ../logs/frontend.log 2>&1 &
+    echo "Gunicorn not found, starting with Flask (production fallback)..."
+    if [ -d "venv" ]; then
+        source venv/bin/activate && python app/atlas_server.py > ../logs/frontend.log 2>&1 &
+    else
+        python3 app/atlas_server.py > ../logs/frontend.log 2>&1 &
+    fi
     echo $! > ../logs/frontend.pid
 fi
 

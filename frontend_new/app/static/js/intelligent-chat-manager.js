@@ -453,6 +453,11 @@ class AtlasIntelligentChatManager {
         if (!m) return;
         // Пропускаємо користувацькі повідомлення (user) — вони вже рендеряться локально
         if (m.role === 'user') return;
+        // Ігноруємо системні маркери TTS, не показуємо і не озвучуємо
+        if (m.type === 'tts_wait' || m.type === 'tts_released') {
+            try { this.log(`[HISTORY] ${m.type} for phase ${m.phase || 'unknown'}`); } catch(_) {}
+            return;
+        }
         // Уникнути дублікатів
         this._renderedHistoryKeys = this._renderedHistoryKeys || new Set();
         const key = this.historyMessageKey(m);
@@ -469,7 +474,7 @@ class AtlasIntelligentChatManager {
         if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
             const segments = this.segmentForTTS(content, agent);
             const batched = this.combineSegmentsForAgent(segments, agent);
-            for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+            for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent, phase });
             this.processTTSQueue();
         }
         if (isLive) this.scrollToBottomIfNeeded();
@@ -824,16 +829,16 @@ class AtlasIntelligentChatManager {
                         if (this.isQuickMode && this.isQuickMode()) {
                             const shortText = this.buildQuickTTS(content, agent);
                             if (shortText) {
-                                this.voiceSystem.ttsQueue.push({ text: shortText, agent });
+                                this.voiceSystem.ttsQueue.push({ text: shortText, agent, phase });
                             } else {
                                 const segments = this.segmentForTTS(content, agent);
                                 const batched = this.combineSegmentsForAgent(segments, agent);
-                                for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                                for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent, phase });
                             }
                         } else {
                             const segments = this.segmentForTTS(content, agent);
                             const batched = this.combineSegmentsForAgent(segments, agent);
-                            for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent });
+                            for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent, phase });
                         }
                     }
                     
@@ -1023,9 +1028,9 @@ class AtlasIntelligentChatManager {
                         // Respect one-shot guard for the first TTS playback
                         if (!this.voiceSystem.firstTtsDone) {
                             this.voiceSystem.firstTtsDone = true;
-                            await this.synthesizeAndPlay(prepData.text, prepData.agent);
+                            await this.synthesizeAndPlay(prepData.text, prepData.agent, 0, metadata.phase || null);
                         } else {
-                            await this.synthesizeAndPlay(prepData.text, prepData.agent);
+                            await this.synthesizeAndPlay(prepData.text, prepData.agent, 0, metadata.phase || null);
                         }
                     }
                     
@@ -1250,7 +1255,7 @@ class AtlasIntelligentChatManager {
                 }
 
                 // Synthesize the text with agent-specific settings
-                await this.synthesizeAndPlay(ttsItem.text, ttsItem.agent);
+                await this.synthesizeAndPlay(ttsItem.text, ttsItem.agent, 0, ttsItem.phase || null);
                 
                 // Natural pause between agents for office-like flow
                 if (this.ttsSync.strictAgentOrder && this.voiceSystem.ttsQueue.length > 0) {
@@ -1321,7 +1326,7 @@ class AtlasIntelligentChatManager {
         }
     }
 
-    async synthesizeAndPlay(text, agent, retryCount = 0) {
+    async synthesizeAndPlay(text, agent, retryCount = 0, phase = null) {
         try {
             // Перевіряємо доступність TTS сервісу перед запитом
             if (retryCount === 0) {
@@ -1412,7 +1417,7 @@ class AtlasIntelligentChatManager {
                 if (retryCount < this.voiceSystem.maxRetries) {
                     this.log(`[VOICE] Retrying TTS in ${500 * (retryCount + 1)}ms...`);
                     await this.delay(500 * (retryCount + 1));
-                    return await this.synthesizeAndPlay(text, agent, retryCount + 1);
+                    return await this.synthesizeAndPlay(text, agent, retryCount + 1, phase);
                 }
                 if (!agentConfig.noFallback) {
                     const fallbackVoice = this.voiceSystem.fallbackVoices[retryCount % this.voiceSystem.fallbackVoices.length];
@@ -1429,7 +1434,7 @@ class AtlasIntelligentChatManager {
                     clearTimeout(t2);
                     if (!fallbackResponse.ok) throw new Error(`Fallback TTS failed: ${fallbackResponse.status}`);
                     const audioBlob = await fallbackResponse.blob();
-                    return await this.playAudioBlob(audioBlob, `${agent} (fallback: ${fallbackVoice})`, { agent, text: speechText });
+                    return await this.playAudioBlob(audioBlob, `${agent} (fallback: ${fallbackVoice})`, { agent, text: speechText, phase });
                 }
                 throw new Error(`TTS synthesis failed: ${response.status}`);
             }
@@ -1439,7 +1444,7 @@ class AtlasIntelligentChatManager {
                 this.log(`[VOICE] Server returned fallback audio: ${fb}. ${retryCount < this.voiceSystem.maxRetries ? 'Retrying...' : 'Skipping playback.'}`);
                 if (retryCount < this.voiceSystem.maxRetries) {
                     await this.delay(400 * (retryCount + 1));
-                    return await this.synthesizeAndPlay(text, agent, retryCount + 1);
+                    return await this.synthesizeAndPlay(text, agent, retryCount + 1, phase);
                 }
                 return; // не відтворюємо тишу
             }
@@ -1452,7 +1457,7 @@ class AtlasIntelligentChatManager {
                 throw new Error('Empty audio blob received');
             }
             
-            await this.playAudioBlob(audioBlob, `${agent} (${voice})`, { agent, text: speechText });
+            await this.playAudioBlob(audioBlob, `${agent} (${voice})`, { agent, text: speechText, phase });
             
         } catch (error) {
             const agentConfig = this.voiceSystem.agents[agent] || this.voiceSystem.agents.atlas;
@@ -1474,7 +1479,7 @@ class AtlasIntelligentChatManager {
                 const delayMs = Math.min(1000 * (retryCount + 1), 5000); // Прогресивна затримка: 1с, 2с, 3с, 4с
                 this.log(`[VOICE] Retrying TTS in ${delayMs}ms...`);
                 await this.delay(delayMs);
-                return await this.synthesizeAndPlay(text, agent, retryCount + 1);
+                return await this.synthesizeAndPlay(text, agent, retryCount + 1, phase);
             }
             // Фолбек у Web Speech вимкнено за замовчуванням (можна ввімкнути через allowWebSpeechFallback)
             if (this.voiceSystem.allowWebSpeechFallback && !agentConfig.noFallback) {
@@ -1557,7 +1562,7 @@ class AtlasIntelligentChatManager {
                     }, 150);
                 };
 
-                audio.onended = () => {
+                audio.onended = async () => {
                     cleanup();
                     this.voiceSystem.lastAgentComplete = Date.now();
                     this.log(`[VOICE] Finished playing ${description}`);
@@ -1568,6 +1573,19 @@ class AtlasIntelligentChatManager {
                         }
                         this.ttsSync.onTTSEnd();
                     } catch (_) {}
+                    
+                    // STRICT_TTS: повідомляємо оркестратор про завершення озвучки фази
+                    try {
+                        const sid = this.getSessionId();
+                        const phase = meta.phase || null;
+                        if (phase) {
+                            await fetch(`${this.orchestratorBase}/tts/done`, {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({ sessionId: sid, phase })
+                            }).catch(()=>{});
+                        }
+                    } catch(_) {}
                     
                     // Check if input should be unlocked after TTS completes
                     this.checkAndUnlockInput();
