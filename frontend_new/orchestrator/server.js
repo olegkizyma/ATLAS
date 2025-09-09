@@ -127,15 +127,17 @@ const CLARIFICATION_AUTOFILL_SILENCE_MS = parseInt(process.env.ATLAS_CLAR_AUTOFI
 const AGENT_ROLE_PROMPTS = {
     atlas: {
         planning: (context) => [
-            `Ти — Atlas, стратег системи ATLAS. Твоя роль: аналізувати запити та створювати детальні плани виконання.`,
+            `Ти — Atlas, стратег системи ATLAS. Твоя роль: аналізувати запити та перефразовувати їх для виконання.`,
+            `НЕ ЗГАДУЙ РИЗИКИ - просто перефразуй завдання та передай для виконання.`,
             `Контекст завдання: ${context.userMessage}`,
             context.memoryContext ? `Контекст з пам'яті: ${context.memoryContext}` : '',
-            `Створи детальний план виконання завдання. Включи:`,
-            `- Аналіз завдання`,
-            `- Кроки виконання`,
-            `- Необхідні ресурси`,
-            `- Критерії успіху`,
-            `Будь конкретним і практичним.`
+            `Перефразуй завдання користувача в чіткий план дій для Тетяни. Включи:`,
+            `- Суть завдання простими словами`,
+            `- Основні кроки виконання`,
+            `- Очікуваний результат`,
+            `Будь конкретним і практичним. Зосередься на виконанні, а не на перешкодах.`,
+            ``,
+            `ТТС: Перефразовую завдання для команди та передаю на виконання.`
         ].filter(Boolean).join('\n'),
         
         autoResponse: (context) => [
@@ -151,7 +153,9 @@ const AGENT_ROLE_PROMPTS = {
             `- Продовжуй виконання з типовими налаштуваннями, якщо це логічно`,
             `- Якщо потрібно уточнення, надай найкращу здогадку базуючись на контексті`,
             ``,
-            `Відповідай як користувач (не як Atlas), природно та стисло:`
+            `Відповідай як користувач (не як Atlas), природно та стисло:`,
+            ``,
+            `ТТС: Надаю автоматичну відповідь від імені користувача.`
         ].join('\n'),
         
         taskAnalysis: (userMessage) => [
@@ -161,8 +165,10 @@ const AGENT_ROLE_PROMPTS = {
             `- Тип завдання (обчислення, аналіз, виконання команд, тощо)`,
             `- Складність (проста/середня/висока)`,
             `- Необхідні інструменти`,
-            `- Можливі ризики`,
-            `Надай короткий аналіз для подальшого планування.`
+            `- План виконання`,
+            `Надай короткий аналіз для подальшого планування.`,
+            ``,
+            `ТТС: Аналізую завдання та визначаю підхід до виконання.`
         ].join('\n'),
         
         conversationAnalysis: (userMessage) => [
@@ -177,7 +183,9 @@ const AGENT_ROLE_PROMPTS = {
             `Відповідай одним словом: ЗАДАЧА або РОЗМОВА або ІНФОРМАЦІЯ`,
             ``,
             `Якщо ЗАДАЧА - потрібно передати Тетяні для виконання.`,
-            `Якщо РОЗМОВА або ІНФОРМАЦІЯ - відповідаю сам через діалог.`
+            `Якщо РОЗМОВА або ІНФОРМАЦІЯ - відповідаю сам через діалог.`,
+            ``,
+            `ТТС: Класифікую тип повідомлення для правильної обробки.`
         ].join('\n')
     },
     
@@ -187,34 +195,42 @@ const AGENT_ROLE_PROMPTS = {
             `Завдання користувача: ${context.userMessage}`,
             `План від Atlas: ${context.atlasPlan}`,
             context.grishaRequirements ? `Вимоги від Гриші: ${context.grishaRequirements}` : '',
-            `Виконай завдання згідно з планом. Звітуй про:`,
-            `КРОКИ: (що саме виконано)`,
+            `Виконай завдання згідно з планом. Звітуй структуровано:`,
+            `РЕЗЮМЕ: (коротко що зроблено)`,
+            `КРОКИ: (що саме виконано покроково)`,
             `РЕЗУЛЬТАТИ: (отримані дані/файли)`,
             `ДОКАЗИ: (як можна перевірити)`,
-            `СТАТУС: (завершено/потребує продовження)`
+            `СТАТУС: (завершено/потребує продовження)`,
+            ``,
+            `ТТС: Виконую завдання згідно з планом.`
         ].filter(Boolean).join('\n'),
         
         autoAnalysis: (userMessage) => [
             `Ти — Тетяна. Користувач надіслав: "${userMessage}"`,
             `Проаналізуй чи можна це виконати швидко та безпечно без додаткових уточнень.`,
-            `Якщо так - виконай та звітуй. Якщо ні - поясни що потрібно уточнити.`,
-            `Будь ефективною та практичною.`
+            `Якщо так - виконай та звітуй структуровано. Якщо ні - поясни що потрібно уточнити.`,
+            `Будь ефективною та практичною.`,
+            ``,
+            `ТТС: Аналізую можливість швидкого виконання завдання.`
         ].join('\n')
     },
     
     grisha: {
         validation: (context) => [
             `Ти — Гриша, валідатор та контролер системи ATLAS з можливістю візії.`,
+            `Твоя роль: забезпечувати якість та додавати вимоги для покращення виконання.`,
             `Завдання користувача: ${context.userMessage}`,
             `План Atlas: ${context.atlasPlan}`,
             context.tetyanaReport ? `Звіт Тетяни: ${context.tetyanaReport}` : '',
-            `Проаналізуй та дай висновок:`,
-            `- Чи план безпечний для виконання?`,
-            `- Чи є всі необхідні дані?`,
-            `- Які ризики та як їх мінімізувати?`,
-            `- Рекомендації для покращення`,
+            `Проаналізуй та дай конкретні рекомендації:`,
+            `- Чи план достатньо детальний для виконання?`,
+            `- Які додаткові перевірки потрібні?`,
+            `- Конкретні вимоги для Тетяни (не загальні поради)`,
+            `- Критерії перевірки результатів`,
             `- Використовуй візію для перевірки інтерфейсу, якщо потрібно`,
-            `Дай чіткий висновок: ЗАТВЕРДЖУЮ / ПОТРЕБУЄ_УТОЧНЕНЬ / ВІДХИЛЯЮ`
+            `Дай чіткий висновок: ЗАТВЕРДЖУЮ / ПОТРЕБУЄ_УТОЧНЕНЬ / ДОДАЮ_ВИМОГИ`,
+            ``,
+            `ТТС: Перевіряю план та додаю вимоги для якісного виконання.`
         ].filter(Boolean).join('\n'),
         
         finalVerification: (context) => [
@@ -222,13 +238,16 @@ const AGENT_ROLE_PROMPTS = {
             `Оригінальне завдання: ${context.userMessage}`,
             `План: ${context.atlasPlan}`,
             `Результати Тетяни: ${context.tetyanaResults}`,
-            `Оціни:`,
-            `- Чи завдання виконано повністю?`,
+            `Ретельно оціни (НЕ просто підтверджуй):`,
+            `- Чи завдання виконано повністю та якісно?`,
             `- Чи результати відповідають очікуванням?`,
-            `- Рівень довіри (0-100%)`,
-            `- Потрібні додаткові перевірки?`,
+            `- Рівень довіри (0-100%) з обґрунтуванням`,
+            `- Конкретні недоліки або проблеми`,
+            `- Потрібні додаткові перевірки чи доопрацювання`,
             `- Використовуй візію для підтвердження інтерфейсу, якщо необхідно`,
-            `Дай фінальну оцінку та рекомендації.`
+            `Дай чесну фінальну оцінку з конкретними рекомендаціями.`,
+            ``,
+            `ТТС: Перевіряю результати виконання та даю фінальну оцінку.`
         ].filter(Boolean).join('\n'),
         
         visionAnalysis: (context) => [
@@ -237,10 +256,12 @@ const AGENT_ROLE_PROMPTS = {
             context.tetyanaAction ? `Дія Тетяни: ${context.tetyanaAction}` : '',
             `Що ти бачиш на екрані:`,
             `- Опиши ключові елементи`,
-            `- Чи відповідає очікуваннями?`,
+            `- Чи відповідає очікуванням?`,
             `- Чи є помилки або проблеми?`,
             `- Рекомендації для Тетяни`,
-            `Надай короткий звіт про візуальну перевірку.`
+            `Надай короткий звіт про візуальну перевірку.`,
+            ``,
+            `ТТС: Аналізую візуальний інтерфейс та надаю рекомендації.`
         ].filter(Boolean).join('\n')
     }
 };
@@ -786,6 +807,8 @@ function tetianaSystemInstruction({ enableTools } = { enableTools: false }) {
         '4) ДОКАЗИ: мапа criterion -> evidence (мінімум 2 критерії) у вигляді списку.',
         '5) ПЕРЕВІРКА: як ти перевірила результат (що саме і яким способом).',
         '6) СТАТУС: Done | Blocked (з причиною) | Needs Clarification (з конкретним питанням).',
+        '',
+        'ТТС: (короткий зміст для озвучування)',
         '',
         'Відповідь починай з підпису [ТЕТЯНА]. Уникай розлогих міркувань.'
     ];
@@ -1832,14 +1855,23 @@ async function processAgentCycle(userMessage, session) {
     // If actionable -> staged pipeline with TTS pacing
     if (intent === 'actionable') {
     PIPELINE_METRICS.actionableSessions++;
-        // 1) Grisha precheck now; execution deferred until frontend TTS completes
+        // Enhanced Grisha precheck with requirements feedback
         const precheckPrompt = [
-            'Ти — Гриша. Перед виконанням склади короткий план перевірки і визнач 1-3 точкові дії для Тетяни, які дадуть перевіряємі артефакти.',
-            'Якщо бракує ключових даних для виконання — задай КОНКРЕТНІ питання користувачеві (що саме потрібно уточнити).',
-            'Відповідай стисло: СПИСОК «ДЛЯ ТЕТЯНИ» або ПИТАННЯ «ДО КОРИСТУВАЧА» (якщо потрібні уточнення).',
+            'Ти — Гриша, валідатор системи ATLAS. Проаналізуй план Atlas та додай конкретні вимоги.',
+            'НЕ просто схвалюй - додавай вимоги для якісного виконання.',
             '',
             `Завдання користувача: ${userMessage}`,
-            `План Atlas: ${atlasResponse.content}`
+            `План Atlas: ${atlasResponse.content}`,
+            '',
+            'Твоя відповідь повинна містити:',
+            '1. АНАЛІЗ: Що добре в плані, що можна покращити',
+            '2. ВИМОГИ: Конкретні додаткові кроки для Тетяни (мінімум 2-3)',
+            '3. КРИТЕРІЇ: Як перевіряти якість результату',
+            '4. ВИСНОВОК: ЗАТВЕРДЖУЮ_З_ВИМОГАМИ / ПОТРЕБУЄ_ПЕРЕФОРМУЛЮВАННЯ / ПОТРЕБУЄ_УТОЧНЕНЬ',
+            '',
+            'Якщо бракує ключових даних — задай КОНКРЕТНІ питання користувачеві.',
+            '',
+            'ТТС: Аналізую план та додаю вимоги для якісного виконання.'
         ].join('\n');
         const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
     const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
@@ -1850,15 +1882,68 @@ async function processAgentCycle(userMessage, session) {
     // TTS gate after Grisha precheck
     if (applyTtsGate(session, PHASE.GRISHA_PRECHECK)) return responses;
 
-        // Універсальна ескалація уточнення без доменних хардкодів:
-        // Якщо відповідь Гриші містить явні індикатори інформаційного дефіциту ("уточн", "потрібні дані", "надайте", "які саме"),
-        // і в сесії ще не зафіксовано, що користувач щось додатково надав після останньої відповіді Atlas — Atlas формує запит на уточнення.
-        try {
-            const lowerGrisha = (grishaPre.content || '').toLowerCase();
-            // Tuned shortage heuristic (менш чутлива): вимагаємо наявність 2+ маркерів або фрази що явно запитує дані
-            const shortageMarkers = (lowerGrisha.match(/уточн|потрібн|недостатньо|вкажіть|які саме|provide|missing|need (more|additional)/g) || []);
-            const shortage = shortageMarkers.length >= 2;
-            if (shortage && !session.awaitingClarification) {
+    // Enhanced agent cycle: Check Grisha's feedback and handle reformulation
+    try {
+        const grishaContent = (grishaPre.content || '').toLowerCase();
+        
+        // Check if Grisha requires reformulation
+        if (grishaContent.includes('потребує_переформулювання')) {
+            logMessage('info', '[AGENT_CYCLE] Grisha requests Atlas reformulation');
+            
+            // Atlas reformulates based on Grisha's feedback
+            const reformulationPrompt = [
+                'Ти — Atlas. Гриша запросив переформулювання плану.',
+                `Оригінальне завдання: ${userMessage}`,
+                `Твій попередній план: ${atlasResponse.content}`,
+                `Зауваження Гриші: ${grishaPre.content}`,
+                '',
+                'Переформулюй план враховуючи зауваження Гриші:',
+                '- Виправи недоліки, які він вказав',
+                '- Додай деталі, яких бракувало',
+                '- Зберігай фокус на виконанні',
+                '- НЕ ЗГАДУЙ РИЗИКИ, просто покращ план',
+                '',
+                'ТТС: Переформульовую план згідно з вимогами Гриші.'
+            ].join('\n');
+            
+            const atlasReformulationRaw = await generateAgentResponse('atlas', reformulationPrompt, session);
+            const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
+            responses.push(atlasReformulation);
+            pushAndBroadcast(session, atlasReformulation);
+            
+            if (applyTtsGate(session, PHASE.ATLAS_REFORMULATION)) return responses;
+            
+            // Grisha validates the reformulated plan (simplified validation)
+            const validationPrompt = [
+                'Ти — Гриша. Перевір переформульований план Atlas.',
+                `Завдання: ${userMessage}`,
+                `Переформульований план: ${atlasReformulation.content}`,
+                '',
+                'Швидка валідація:',
+                '- Чи план тепер достатньо детальний?',
+                '- Чи враховані твої попередні зауваження?',
+                'Відповідай: ЗАТВЕРДЖУЮ / ПОТРЕБУЄ_УТОЧНЕНЬ',
+                '',
+                'ТТС: Перевіряю переформульований план.'
+            ].join('\n');
+            
+            const grishaValidationRaw = await generateAgentResponse('grisha', validationPrompt, session);
+            const grishaValidation = tagResponse(grishaValidationRaw, PHASE.GRISHA_VALIDATION);
+            responses.push(grishaValidation);
+            pushAndBroadcast(session, grishaValidation);
+            
+            if (applyTtsGate(session, PHASE.GRISHA_VALIDATION)) return responses;
+            
+            // Update plan for execution
+            session.pipeline.atlasPlan = atlasReformulation.content;
+            session.pipeline.grishaRequirements = grishaPre.content;
+        }
+        
+        // Check for clarification needs
+        const shortageMarkers = (grishaContent.match(/уточн|потрібн|недостатньо|вкажіть|які саме|provide|missing|need (more|additional)/g) || []);
+        const shortage = shortageMarkers.length >= 2 || grishaContent.includes('потребує_уточнень');
+        
+        if (shortage && !session.awaitingClarification) {
                 // Attempt internal probe first (Tetiana) if the shortage looks executable (mentions code/run)
                 const probeCandidate = /(код|file|script|run|execute|запусти|створи файл|приклад)/i.test(lowerGrisha);
                 if (probeCandidate && (!session.probe || (session.probe && session.probe.attempts < (session.probe.maxAttempts||2)))) {

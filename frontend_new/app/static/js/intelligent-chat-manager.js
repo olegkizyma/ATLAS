@@ -120,6 +120,8 @@ class AtlasIntelligentChatManager {
             onTTSEnd: () => {},
             // Строга синхронізація агентів: кожен агент чекає завершення попереднього
             strictAgentOrder: true,
+            // CRITICAL: All new events must wait for TTS completion
+            blockAllEventsUntilTTSComplete: true,
             // Максимальний час очікування завершення TTS перед форсуванням (мс)
             maxWaitTime: 45000,
             // Прапорець для відстеження стану синхронізації
@@ -127,9 +129,13 @@ class AtlasIntelligentChatManager {
             // Запобігати одночасному мовленню агентів
             preventSimultaneousVoices: true,
             // Природна пауза між агентами (мс) для природнього діалогу
-            naturalPauseBetweenAgents: 800,
+            naturalPauseBetweenAgents: 1200,
             // Таймаут для автовідповіді Atlas (30 секунд)
-            autoResponseTimeout: 30000
+            autoResponseTimeout: 30000,
+            // Queue to hold pending agent actions during TTS playback
+            pendingAgentActions: [],
+            // Track current agent speaking to enforce proper sequencing
+            currentSpeakingAgent: null
         };
         
         this.init();
@@ -880,8 +886,9 @@ class AtlasIntelligentChatManager {
             if (data.success && data.response && Array.isArray(data.response)) {
                 this.log(`Received ${data.response.length} agent responses`);
                 
-                // Process each agent response sequentially
-                for (const agentResponse of data.response) {
+                // Process each agent response sequentially with TTS synchronization
+                for (let i = 0; i < data.response.length; i++) {
+                    const agentResponse = data.response[i];
                     const agent = agentResponse.agent || 'atlas';
                     const content = agentResponse.content || '';
                     const signature = agentResponse.signature || this.voiceSystem.agents[agent]?.signature;
@@ -895,9 +902,18 @@ class AtlasIntelligentChatManager {
                         this.log(`[PIPELINE] Skipping duplicate phase message: ${agent}:${phase}`);
                         continue;
                     }
+
+                    // Wait for previous TTS to complete before processing next agent message
+                    if (i > 0 && this.ttsSync.blockAllEventsUntilTTSComplete && this.voiceSystem.enabled) {
+                        this.log(`[TTS-SYNC] Waiting for previous TTS completion before ${agent} message...`);
+                        await this.waitForTTSIdle(this.ttsSync.maxWaitTime).catch(() => {
+                            this.log(`[TTS-SYNC] TTS wait timeout, continuing with ${agent}`);
+                        });
+                    }
+
                     this.addVoiceMessage(content, agent, signature, phase);
                     
-                    // Add to TTS queue if voice is enabled
+                    // Add to TTS queue and start processing immediately for sequential playback
                     if (this.voiceSystem.enabled && this.isVoiceEnabled() && content.trim()) {
                         if (this.isQuickMode && this.isQuickMode()) {
                             const shortText = this.buildQuickTTS(content, agent);
@@ -913,17 +929,24 @@ class AtlasIntelligentChatManager {
                             const batched = this.combineSegmentsForAgent(segments, agent);
                             for (const seg of batched) this.voiceSystem.ttsQueue.push({ text: seg, agent, phase });
                         }
+                        
+                        // Process TTS immediately for this agent to ensure sequential playback
+                        this.processTTSQueue();
+                        
+                        // Wait for this agent's TTS to complete before next agent
+                        if (this.ttsSync.blockAllEventsUntilTTSComplete) {
+                            await this.waitForTTSIdle(this.ttsSync.maxWaitTime).catch(() => {
+                                this.log(`[TTS-SYNC] ${agent} TTS timeout, continuing to next agent`);
+                            });
+                        }
                     }
                     
-                    // Small delay between messages for better UX
-                    await this.delay(500);
+                    // Small delay between messages for better UX (only if no TTS sync)
+                    if (!this.ttsSync.blockAllEventsUntilTTSComplete) {
+                        await this.delay(500);
+                    }
                 }
                 
-                // Process TTS queue
-                if (this.voiceSystem.ttsQueue.length > 0) {
-                    this.processTTSQueue();
-                }
-
                 // If orchestrator indicates nextAction, continue pipeline only after TTS completes
                 if (data.session && data.session.nextAction) {
                     const voiceActive = this.voiceSystem.enabled && this.isVoiceEnabled();
@@ -1230,6 +1253,24 @@ class AtlasIntelligentChatManager {
     buildQuickTTS(text, agent = 'atlas') {
         if (!text) return '';
         const a = (agent || 'atlas').toLowerCase();
+        
+        // Use the new TTS content extraction which handles ТТС: sections
+        const ttsContent = this.extractTTSContent(text, agent);
+        if (ttsContent) {
+            // Add light addressing between agents for natural flow
+            if (this.conversationStyle?.liveAddressing) {
+                const pref = (() => {
+                    if (a.includes('atlas')) return 'Тетяно, Гриша, ';
+                    if (a.includes('grisha')) return 'Атласе, Тетяно, ';
+                    if (a.includes('tet') || a.includes('goose')) return 'Атласе, ';
+                    return '';
+                })();
+                return `${pref}${ttsContent}`;
+            }
+            return ttsContent;
+        }
+
+        // Fallback to original logic if no TTS content found
         let src = String(text);
         // Прибираємо підпис на початку
         src = src.replace(/^\s*\[[^\]]+\]\s*/i, '');
@@ -1579,6 +1620,63 @@ class AtlasIntelligentChatManager {
                 this.log(`[VOICE] Voice synthesis failed without fallback: ${error.message}`);
             }
         }
+    }
+
+    // Extract TTS content from "ТТС:" sections or generate summary for agents
+    extractTTSContent(text, agent) {
+        const src = String(text || '');
+        
+        // First, check for explicit ТТС: section
+        const ttsMatch = src.match(/ТТС:\s*(.+?)(?:\n\n|$)/is);
+        if (ttsMatch) {
+            let ttsContent = ttsMatch[1].trim();
+            // Clean up and ensure appropriate length
+            ttsContent = ttsContent.replace(/\n+/g, ' ').trim();
+            if (ttsContent.length > 300) {
+                ttsContent = ttsContent.slice(0, 300) + '...';
+            }
+            return ttsContent;
+        }
+
+        // Fallback to existing logic for backward compatibility
+        if (agent === 'tetyana') {
+            return this.summarizeTetianaForTTS(src);
+        }
+
+        // For other agents, create a quick summary
+        return this.createQuickTTSSummary(src, agent);
+    }
+
+    // Create quick TTS summary for Atlas and Grisha
+    createQuickTTSSummary(text, agent) {
+        const src = String(text || '');
+        let cleaned = src
+            .replace(/^\s*\[[^\]]+\]\s*/i, '') // Remove agent tags
+            .replace(/^#+\s+/gm, '') // Remove markdown headers
+            .replace(/\*\*|__|`/g, '') // Remove markdown formatting
+            .replace(/\n{2,}/g, '\n') // Collapse multiple newlines
+            .trim();
+
+        // Get first meaningful sentence for TTS
+        const sentences = cleaned.split(/(?<=[.!?…])\s+/)
+            .map(s => s.trim())
+            .filter(Boolean);
+        
+        let result = '';
+        if (sentences.length > 0) {
+            result = sentences[0];
+            // Add second sentence if first is very short
+            if (result.length < 50 && sentences.length > 1) {
+                result += ' ' + sentences[1];
+            }
+        }
+
+        // Ensure reasonable length
+        if (result.length > 200) {
+            result = result.slice(0, 200) + '...';
+        }
+
+        return result || 'Відповідь агента готова';
     }
 
     // Витягує стисле ТТС-представлення звіту Тетяни: РЕЗЮМЕ + СТАТУС (і, за можливості, короткий підсумок кроків)
