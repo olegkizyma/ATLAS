@@ -1996,7 +1996,7 @@ class AtlasIntelligentChatManager {
         
         // Enhanced verdict information and stage tracking
         if (phase === 'grisha_verdict') {
-            this.updateVerdictDisplay(metadata);
+            this.updateVerdictDisplay(metadata, phase);
         }
         
         // Log stage progression for debugging
@@ -2044,8 +2044,11 @@ class AtlasIntelligentChatManager {
         }
     }
     
-    updateVerdictDisplay(metadata) {
+    updateVerdictDisplay(metadata, phase) {
         // Enhanced verdict display with confidence and details
+        const hud = document.getElementById('pipeline-hud');
+        if (!hud) return;
+        
         try {
                 const recent = [...this.messages].reverse().find(m => m.phase === 'grisha_verdict' && m.agent === 'grisha');
                 if (recent && recent.text) {
@@ -2058,7 +2061,6 @@ class AtlasIntelligentChatManager {
                     }
                 }
             } catch(e) { this.log('[PIPELINE] Verdict update failed: '+e.message); }
-        }
         
         // Auto-response phase indicator
         if (phase === 'atlas_clarify' && metadata.autoResponse) {
@@ -2104,59 +2106,6 @@ class AtlasIntelligentChatManager {
         return actions[agent]?.[phase] || 'PROCESSING';
     }
 
-    updateVerdictDisplay(phase) {
-        const hud = document.getElementById('pipeline-hud');
-        if (!hud) return;
-        
-        if (phase === 'atlas_feasibility') {
-            try {
-                const recent = [...this.messages].reverse().find(m => m.phase === 'atlas_feasibility');
-                if (recent) {
-                    const up = recent.text.toUpperCase();
-                    let icon='◻'; let color='#7d5fff';
-                    if (up.startsWith('ADVANCE')) { icon='✔'; color='#00b894'; }
-                    else if (up.startsWith('CLARIFY')) { icon='✖'; color='#d63031'; }
-                    const step = hud.querySelector('.ph-step[data-phase="atlas_feasibility"]');
-                    if (step) {
-                        let mini = step.querySelector('.verdict-mini');
-                        if (!mini) {
-                            mini = document.createElement('span');
-                            mini.className='verdict-mini';
-                            mini.style.cssText='display:inline-block;margin-left:4px;font-weight:600;font-size:11px;';
-                            step.appendChild(mini);
-                        }
-                        mini.textContent = icon;
-                        mini.style.color = color;
-                    }
-                }
-            } catch(_){}
-        }
-        
-        // Add confidence display for other phases
-        if (phase === 'grisha_verdict') {
-            try {
-                const recent = [...this.messages].reverse().find(m => m.phase === 'grisha_verdict');
-                if (recent && recent.metadata && recent.metadata.confidence) {
-                    const conf = recent.metadata.confidence;
-                    const step = hud.querySelector('.ph-step[data-phase="grisha_verdict"]');
-                    if (step) {
-                        let mini = step.querySelector('.confidence-mini');
-                        if (!mini) {
-                            mini = document.createElement('span');
-                            mini.className='confidence-mini';
-                            mini.style.cssText='display:inline-block;margin-left:4px;font-weight:600;font-size:11px;';
-                            step.appendChild(mini);
-                        }
-                        if (mini && conf !== null) {
-                            mini.textContent = conf.toFixed(2);
-                            mini.style.color = conf >= 0.75 ? '#00ffa5' : (conf >= 0.5 ? '#ffd700' : '#ff4d4d');
-                        }
-                    }
-                }
-            } catch(_) {}
-        }
-    }
-    
     addMessage(text, type = 'user', metadata = {}) {
         const messageDiv = document.createElement('div');
         messageDiv.className = `message ${type}`;
@@ -3533,3 +3482,6 @@ AtlasIntelligentChatManager.prototype.getCanonicalAgentName = function(agent) {
     // default assistant/atlas
     return 'atlas';
 };
+
+// Make class available globally
+window.AtlasIntelligentChatManager = AtlasIntelligentChatManager;

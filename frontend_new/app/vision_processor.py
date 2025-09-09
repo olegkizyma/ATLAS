@@ -132,7 +132,7 @@ VISION_FRONTEND_CONFIG = {
 class AtlasVisionSystem:
     """Enhanced ATLAS Vision System with real-time camera integration"""
     
-    def __init__(self, vision_processor: VisionProcessor):
+    def __init__(self, vision_processor: 'VisionProcessor'):
         self.vision_processor = vision_processor
         self.camera_active = False
         self.camera_capture = None
@@ -1079,7 +1079,7 @@ class GooseVisionIntegration:
     async def chat_with_vision(self, message: str) -> str:
         """Чат з Goose з підтримкою vision tools"""
         try:
-            if self.is_web_version:
+            if self._is_web_version():
                 return await self._chat_via_websocket(message)
             else:
                 return await self._chat_via_api(message)

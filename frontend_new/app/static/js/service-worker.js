@@ -8,7 +8,7 @@ const CACHE_URLS = [
     '/',
     '/static/css/main.css',
     '/static/js/app.js',
-    '/static/js/chat-manager.js',
+    '/static/js/intelligent-chat-manager.js',
     '/static/js/logger-manager.js',
     '/static/js/status-manager.js',
     '/static/assets/atlas-icon.svg',
