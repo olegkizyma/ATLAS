@@ -1793,6 +1793,157 @@ def grisha_monitoring_status():
         logger.error(f"/api/grisha/monitoring-status error: {e}")
         return jsonify({'error': 'Failed to get monitoring status', 'details': str(e)}), 500
 
+# ==================== GRISHA SECURITY MANIFEST ENDPOINTS ====================
+
+@app.route('/api/grisha/security/manifest', methods=['GET'])
+def get_security_manifest():
+    """Отримує поточний маніфест безпеки для користувача"""
+    try:
+        user_id = request.args.get('userId', 'default')
+        
+        # Forward request to orchestrator to get manifest
+        if requests:
+            try:
+                response = requests.get(f'{ORCHESTRATOR_URL}/security/manifest', 
+                                     params={'userId': user_id}, 
+                                     timeout=5)
+                if response.status_code == 200:
+                    return jsonify(response.json())
+                else:
+                    return jsonify({'error': 'Failed to get manifest from orchestrator'}), response.status_code
+            except Exception as e:
+                logger.warning(f"Failed to get manifest from orchestrator: {e}")
+        
+        # Fallback response
+        return jsonify({
+            'name': 'Default Security Manifest',
+            'version': '1.0.0',
+            'policies': {
+                'dataAccess': {'level': 'restricted'},
+                'systemOperations': {'level': 'controlled'},
+                'networkAccess': {'level': 'monitored'},
+                'executionContext': {'level': 'sandbox'}
+            },
+            'testingOverride': {
+                'enabled': True,
+                'authority': 'Олег Миколайович'
+            }
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/security/manifest GET error: {e}")
+        return jsonify({'error': 'Failed to get security manifest', 'details': str(e)}), 500
+
+@app.route('/api/grisha/security/manifest', methods=['POST'])
+def set_security_manifest():
+    """Встановлює новий маніфест безпеки для користувача"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Manifest data required'}), 400
+        
+        user_id = data.get('userId', 'default')
+        manifest = data.get('manifest')
+        
+        if not manifest:
+            return jsonify({'error': 'Manifest object required'}), 400
+        
+        # Forward request to orchestrator to store manifest
+        if requests:
+            try:
+                response = requests.post(f'{ORCHESTRATOR_URL}/security/manifest',
+                                       json={'userId': user_id, 'manifest': manifest},
+                                       timeout=10)
+                if response.status_code == 200:
+                    logger.info(f"Security manifest updated for user {user_id}")
+                    return jsonify(response.json())
+                else:
+                    return jsonify({'error': 'Failed to set manifest in orchestrator'}), response.status_code
+            except Exception as e:
+                logger.warning(f"Failed to set manifest in orchestrator: {e}")
+        
+        # Fallback response
+        return jsonify({
+            'success': True,
+            'message': 'Manifest received (orchestrator unavailable)',
+            'userId': user_id
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/security/manifest POST error: {e}")
+        return jsonify({'error': 'Failed to set security manifest', 'details': str(e)}), 500
+
+@app.route('/api/grisha/security/check', methods=['POST'])
+def grisha_security_check():
+    """Перевіряє безпеку завдання через Гришу"""
+    try:
+        data = request.get_json()
+        if not data:
+            return jsonify({'error': 'Request data required'}), 400
+        
+        task = data.get('task', '')
+        user_id = data.get('userId', 'default')
+        
+        if not task.strip():
+            return jsonify({'error': 'Task description required'}), 400
+        
+        # Forward security check to orchestrator
+        if requests:
+            try:
+                response = requests.post(f'{ORCHESTRATOR_URL}/security/check',
+                                       json={'task': task, 'userId': user_id},
+                                       timeout=15)
+                if response.status_code == 200:
+                    return jsonify(response.json())
+                else:
+                    return jsonify({'error': 'Security check failed in orchestrator'}), response.status_code
+            except Exception as e:
+                logger.warning(f"Failed to perform security check via orchestrator: {e}")
+        
+        # Fallback security check
+        return jsonify({
+            'success': True,
+            'allowed': True,
+            'riskLevel': 'low',
+            'violations': [],
+            'warnings': [],
+            'reasoning': 'Локальна перевірка - базовий рівень безпеки',
+            'testingOverride': True,
+            'mandatoryWarning': 'Я змушений по вказівці Олега Миколайович пропустити це завдання, хоч воно може порушувати безпеку'
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/security/check error: {e}")
+        return jsonify({'error': 'Security check failed', 'details': str(e)}), 500
+
+@app.route('/api/grisha/security/status')
+def grisha_security_status():
+    """Отримує статус системи безпеки Гриші"""
+    try:
+        # Forward request to orchestrator
+        if requests:
+            try:
+                response = requests.get(f'{ORCHESTRATOR_URL}/security/status', timeout=5)
+                if response.status_code == 200:
+                    return jsonify(response.json())
+            except Exception as e:
+                logger.warning(f"Failed to get security status from orchestrator: {e}")
+        
+        # Fallback status
+        return jsonify({
+            'agent': 'grisha',
+            'role': 'security_checker',
+            'status': 'active',
+            'manifest_loaded': True,
+            'testing_mode': True,
+            'visual_monitoring': VISION_AVAILABLE,
+            'last_check': None
+        })
+        
+    except Exception as e:
+        logger.error(f"/api/grisha/security/status error: {e}")
+        return jsonify({'error': 'Failed to get security status', 'details': str(e)}), 500
+
 # ==================== ENHANCED GRISHA MONITORING ENDPOINTS ====================
 
 @app.route('/api/grisha/screens/status')

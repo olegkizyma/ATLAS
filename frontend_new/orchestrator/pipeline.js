@@ -4,13 +4,13 @@
 export const PHASE = {
   ATLAS_PLAN: 'atlas_plan',
   ATLAS_REFORMULATION: 'atlas_reformulation',
-  GRISHA_PRECHECK: 'grisha_precheck',
-  GRISHA_VALIDATION: 'grisha_validation',
+  GRISHA_SECURITY_CHECK: 'grisha_security_check',
+  GRISHA_VISUAL_MONITORING: 'grisha_visual_monitoring',
   EXECUTION: 'execution',
-  GRISHA_VERDICT: 'grisha_verdict',
+  GRISHA_TASK_VERIFICATION: 'grisha_task_verification',
   GRISHA_FOLLOWUP: 'grisha_followup',
   TETYANA_PROBE: 'tetyana_probe',
-  GRISHA_PROBE_REVIEW: 'grisha_probe_review',
+  GRISHA_INFORMATION_REQUEST: 'grisha_information_request',
   ATLAS_FEASIBILITY: 'atlas_feasibility'
 };
 
@@ -28,28 +28,28 @@ export function initSession(sessionId, sessions) {
   return session;
 }
 
-export function startActionablePipeline(session, userMessage, atlasPlan, grishaPre) {
+export function startActionablePipeline(session, userMessage, atlasPlan, grishaSecurityCheck) {
   session.pipeline = {
     type: 'actionable',
-    stage: 'prechecked',
+    stage: 'security_approved',
     userMessage,
     atlasPlan,
-    grishaPre,
+    grishaSecurityCheck,
     iter: 0
   };
-  session.nextAction = 'tetyana_execute';
+  session.nextAction = 'grisha_visual_monitoring';
 }
 
-export function startPendingPrecheck(session, userMessage, atlasPlan) {
+export function startPendingSecurityCheck(session, userMessage, atlasPlan) {
   session.pipeline = {
     type: 'actionable',
-    stage: 'pending_precheck',
+    stage: 'pending_security_check',
     userMessage,
     atlasPlan,
-    grishaPre: null,
+    grishaSecurityCheck: null,
     iter: 0
   };
-  session.nextAction = 'grisha_precheck';
+  session.nextAction = 'grisha_security_check';
 }
 
 export function startProbePipeline(session, userMessage, atlasDraft, grishaShortage) {
@@ -67,6 +67,27 @@ export function startProbePipeline(session, userMessage, atlasDraft, grishaShort
 export function clearProbe(session) {
   session.probe = null;
   if (session.nextAction === 'tetyana_probe' || session.nextAction === 'probe_review') session.nextAction = null;
+}
+
+export function startGrishaVisualMonitoring(session) {
+  if (!session.pipeline) return;
+  session.pipeline.stage = 'visual_monitoring';
+  session.nextAction = 'tetyana_execute';
+}
+
+export function startGrishaTaskVerification(session, tetyanaResults) {
+  if (!session.pipeline) return;
+  session.pipeline.stage = 'task_verification';
+  session.pipeline.tetyanaResults = tetyanaResults;
+  session.nextAction = 'grisha_task_verification';
+}
+
+export function markNeedsGrishaInformation(session, informationNeeded, reason) {
+  if (!session.pipeline) return;
+  session.pipeline.stage = 'needs_grisha_info';
+  session.pipeline.informationNeeded = informationNeeded;
+  session.pipeline.reason = reason;
+  session.nextAction = 'grisha_information_request';
 }
 
 export function markNeedsMore(session, need, lastReport) {
