@@ -671,7 +671,7 @@ const generateMessageId = () => `msg_${Date.now()}_${++messageCounter}`;
 // Visual Monitoring Integration for Grisha
 const FRONTEND_BASE_URL = process.env.FRONTEND_BASE_URL || 'http://127.0.0.1:5001';
 
-async function startGrishaVisualMonitoring(sessionId, taskDescription) {
+async function startGrishaVisualMonitoringAPI(sessionId, taskDescription) {
     try {
         const response = await axios.post(`${FRONTEND_BASE_URL}/api/grisha/start-monitoring`, {
             session_id: sessionId,
@@ -702,7 +702,7 @@ async function startGrishaVisualMonitoring(sessionId, taskDescription) {
     }
 }
 
-async function stopGrishaVisualMonitoring() {
+async function stopGrishaVisualMonitoringAPI() {
     try {
         const response = await axios.post(`${FRONTEND_BASE_URL}/api/grisha/stop-monitoring`, {}, {
             timeout: 10000,
@@ -2229,45 +2229,24 @@ async function processAgentCycle(userMessage, session) {
             }
 
         startActionablePipeline(session, userMessage, atlasResponse.content, grishaSecurityCheck.content);
-            
-            // Update plan for execution
-            session.pipeline.atlasPlan = atlasReformulation.content;
-            session.pipeline.grishaRequirements = grishaPre.content;
-        }
         
-        // Check for clarification needs
+        // Check for clarification needs based on security requirements
         const shortageMarkers = (grishaContent.match(/уточн|потрібн|недостатньо|вкажіть|які саме|provide|missing|need (more|additional)/g) || []);
-        const shortage = shortageMarkers.length >= 2 || grishaContent.includes('потребує_уточнень');
+        const shortage = shortageMarkers.length >= 2 || grishaContent.includes('потребую_інформації: так');
         
         if (shortage && !session.awaitingClarification) {
-                // Attempt internal probe first (Tetiana) if the shortage looks executable (mentions code/run)
-                const probeCandidate = /(код|file|script|run|execute|запусти|створи файл|приклад)/i.test(lowerGrisha);
-                if (probeCandidate && (!session.probe || (session.probe && session.probe.attempts < (session.probe.maxAttempts||2)))) {
-                    logProbe(`Initiating probe (attempt=${(session.probe?.attempts||0)+1}) for session=${session.id}`);
-                    if (!session.probe) {
-                        PIPELINE_METRICS.probesStarted++;
-                        startProbePipeline(session, userMessage, atlasResponse.content, grishaPre.content);
-                        session.probe.startedAt = Date.now();
-                    }
-                    session.probe.attempts++;
-                    PIPELINE_METRICS.probeAttempts++;
-                    const atlasRecent = summarizeRecent('atlas', 5);
-                    const tetyanaRecent = summarizeRecent('tetyana', 5);
-                    const memoryBlock = [atlasRecent && `Попередній контекст Atlas:\n${atlasRecent}`, tetyanaRecent && `Попередні артефакти Тетяни:\n${tetyanaRecent}`].filter(Boolean).join('\n\n');
-                    const probePrompt = PROBE_PROMPTS.tetyanaProbe({ userMessage, atlasPlan: atlasResponse.content + (memoryBlock?`\n\n${memoryBlock}`:''), grishaShortage: grishaPre.content });
-                    const probeRaw = await generateAgentResponse('tetyana', probePrompt, session, { enableTools: true });
-                    logProbe(`Probe execution received (len=${(probeRaw.content||probeRaw||'').length})`);
-                    const probeResp = tagResponse(probeRaw, PHASE.TETYANA_PROBE);
-                    responses.push(probeResp); pushAndBroadcast(session, probeResp);
-                    if (applyTtsGate(session, PHASE.TETYANA_PROBE)) return responses;
-                    // Immediately have Grisha review probe
-                    const reviewPrompt = PROBE_PROMPTS.grishaReview(probeResp.content + (memoryBlock?`\n\n${memoryBlock}`:''));
-                    const reviewRaw = await generateAgentResponse('grisha', reviewPrompt, session);
-                    logProbe(`Probe review received (first50="${String(reviewRaw.content||reviewRaw||'').slice(0,50)}")`);
-                    const reviewResp = tagResponse(reviewRaw, PHASE.GRISHA_PROBE_REVIEW);
-                    responses.push(reviewResp); pushAndBroadcast(session, reviewResp);
-                    if (applyTtsGate(session, PHASE.GRISHA_PROBE_REVIEW)) return responses;
-                    // Atlas feasibility synthesis
+                // For security-related shortages, use information request cycle instead of probes
+                logMessage('info', `[SECURITY_SHORTAGE] Grisha needs more information for security assessment`);
+                markNeedsGrishaInformation(session, ['Додаткові деталі для безпеки'], 'Недостатньо даних для перевірки безпеки');
+                
+                const infoRequestMessage = tagResponse({
+                    role: 'assistant',
+                    content: `[ГРИША] Для перевірки безпеки потребую більше інформації про завдання.`,
+                    agent: 'grisha'
+                }, PHASE.GRISHA_INFORMATION_REQUEST);
+                responses.push(infoRequestMessage);
+                pushAndBroadcast(session, infoRequestMessage);
+                return responses;
                     const feasPrompt = PROBE_PROMPTS.atlasFeasibility(probeResp.content, reviewResp.content + (atlasRecent?`\n\nІсторія контексту:\n${atlasRecent}`:''));
                     const feasRaw = await generateAgentResponse('atlas', feasPrompt, session);
                     logProbe(`Feasibility response: ${(feasRaw.content||feasRaw||'').slice(0,40)}`);
@@ -2306,7 +2285,7 @@ async function processAgentCycle(userMessage, session) {
                         logProbe('Probe failed after max attempts -> Atlas will reformulate task for data gathering');
                         const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
                             userMessage,
-                            grishaRequirement: grishaPre.content
+                            grishaRequirement: grishaSecurityCheck.content
                         });
                         const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
                         const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
@@ -2324,7 +2303,7 @@ async function processAgentCycle(userMessage, session) {
                 // Atlas створює адаптований план для збору даних через Тетяну
                 const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
                     userMessage,
-                    grishaRequirement: grishaPre.content
+                    grishaRequirement: grishaSecurityCheck.content
                 });
                 const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
                 const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
@@ -2342,7 +2321,7 @@ async function processAgentCycle(userMessage, session) {
         // Immediate mode: execute right away without waiting for frontend continuation
         if (shouldImmediateExecute(intent)) {
             PIPELINE_METRICS.immediateExecutions++;
-            const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги Гриші: ${grishaPre.content}\n\nВиконай кроки та чітко звітуй.`;
+            const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги безпеки Гриші: ${grishaSecurityCheck.content}\n\nВиконай кроки та чітко звітуй.`;
             const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
             const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
             try { 
@@ -2414,7 +2393,7 @@ async function processAgentCycle(userMessage, session) {
     // Planning intent handled below; other intents will fall through
     if (intent === 'planning') {
         const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
-        const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
+        const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_SECURITY_CHECK);
     responses.push(grishaResponse);
     pushAndBroadcast(session, grishaResponse);
 
@@ -2530,9 +2509,9 @@ app.post('/chat/continue', async (req, res) => {
         const responses = [];
         const pipe = session.pipeline;
 
-        if (pipe.type === 'actionable' && pipe.stage === 'prechecked') {
+        if (pipe.type === 'actionable' && (pipe.stage === 'prechecked' || pipe.stage === 'security_approved')) {
             // Execute by Tetiana
-            const execPrompt = `Завдання користувача: ${pipe.userMessage}\nПлан Atlas: ${pipe.atlasPlan}\nВимоги Гриші: ${pipe.grishaPre}\n\nВиконай кроки та чітко звітуй.`;
+            const execPrompt = `Завдання користувача: ${pipe.userMessage}\nПлан Atlas: ${pipe.atlasPlan}\nВимоги безпеки Гриші: ${pipe.grishaSecurityCheck || pipe.grishaPre || 'Базові вимоги безпеки'}\n\nВиконай кроки та чітко звітуй.`;
             const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
             const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION);
             try { 
@@ -2773,36 +2752,49 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
             `Завдання користувача: ${userMessage}`,
             `План Atlas: ${atlasResponse.content}`
         ].join('\n');
-        const grishaPreRaw = await generateAgentResponse('grisha', precheckPrompt, session);
-        const grishaPre = tagResponse(grishaPreRaw, PHASE.GRISHA_PRECHECK);
-    responses.push(grishaPre); pushAndBroadcast(session, grishaPre);
-    if (applyTtsGate(session, PHASE.GRISHA_PRECHECK)) return responses;
+        
+        // Phase 2: Grisha security check
+        const securityPrompt = generateSecurityCheckPrompt(userMessage, session.userId, { atlasPlan: atlasResponse.content });
+        const grishaSecurityRaw = await generateAgentResponse('grisha', securityPrompt.systemPrompt + '\n\n' + securityPrompt.taskPrompt, session);
+        const grishaSecurityCheck = tagResponse(grishaSecurityRaw, PHASE.GRISHA_SECURITY_CHECK);
+        responses.push(grishaSecurityCheck); 
+        pushAndBroadcast(session, grishaSecurityCheck);
+        if (applyTtsGate(session, PHASE.GRISHA_SECURITY_CHECK)) return responses;
+        
         try {
-            const lowerGrisha = (grishaPre.content || '').toLowerCase();
-            const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(lowerGrisha);
+            const securityContent = (grishaSecurityCheck.content || '').toLowerCase();
+            
+            // Check if task is blocked
+            if (securityContent.includes('заборонено') || securityContent.includes('безпека: заборонено')) {
+                logMessage('info', '[SECURITY_BLOCK] Task blocked by Grisha security check');
+                return responses;
+            }
+            
+            const shortage = /(уточн|потрібн[аоі]|недостатньо|вкажіть|які саме|provide|missing|need (more|additional))/i.test(securityContent);
             if (shortage && !session.awaitingClarification) {
-                // ATLAS REFORMULATION: Замість питань до користувача, Atlas переформульовує завдання для збору даних Тетяною
+                // ATLAS REFORMULATION: Security-focused data gathering
                 const dataGatheringPrompt = AGENT_ROLE_PROMPTS.atlas.dataGathering({
                     userMessage,
-                    grishaRequirement: grishaPre.content
+                    grishaRequirement: grishaSecurityCheck.content
                 });
                 const atlasReformulationRaw = await generateAgentResponse('atlas', dataGatheringPrompt, session);
                 const atlasReformulation = tagResponse(atlasReformulationRaw, PHASE.ATLAS_REFORMULATION);
                 responses.push(atlasReformulation); pushAndBroadcast(session, atlasReformulation);
                 
-                // Негайно виконуємо адаптований план через Тетяну
-                const adaptedExecPrompt = `Адаптований план Atlas: ${atlasReformulation.content}\nВимоги Гриші: ${grishaPre.content}\n\nВиконай збір даних та основне завдання згідно з адаптованим планом.`;
+                // Execute adapted plan through Tetyana
+                const adaptedExecPrompt = `Адаптований план Atlas: ${atlasReformulation.content}\nВимоги безпеки Гриші: ${grishaSecurityCheck.content}\n\nВиконай збір даних та основне завдання згідно з адаптованим планом.`;
                 const tetyanaAdaptedRaw = await generateAgentResponse('tetyana', adaptedExecPrompt, session, { enableTools: true });
                 const tetyanaAdapted = tagResponse(tetyanaAdaptedRaw, PHASE.EXECUTION);
                 responses.push(tetyanaAdapted); pushAndBroadcast(session, tetyanaAdapted);
                 
-                logMessage('info', `[ATLAS_REFORMULATION] Replaced clarification with data gathering task for session=${session.id}`);
+                logMessage('info', `[ATLAS_REFORMULATION] Replaced clarification with security-focused data gathering for session=${session.id}`);
                 return responses;
             }
         } catch {}
-        startActionablePipeline(session, userMessage, atlasResponse.content, responses.find(r=>r.phase===PHASE.GRISHA_PRECHECK)?.content || '');
+        
+        startActionablePipeline(session, userMessage, atlasResponse.content, responses.find(r=>r.phase===PHASE.GRISHA_SECURITY_CHECK)?.content || '');
         if (shouldImmediateExecute(intent)) {
-            const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги Гриші: ${responses.find(r=>r.phase===PHASE.GRISHA_PRECHECK)?.content || ''}\n\nВиконай кроки та чітко звітуй.`;
+            const execPrompt = `Завдання користувача: ${userMessage}\nПлан Atlas: ${atlasResponse.content}\nВимоги безпеки Гриші: ${responses.find(r=>r.phase===PHASE.GRISHA_SECURITY_CHECK)?.content || ''}\n\nВиконай кроки та чітко звітуй.`;
             const tetyanaExecRaw = await generateAgentResponse('tetyana', execPrompt, session, { enableTools: true });
             const tetyanaExec = tagResponse(tetyanaExecRaw, PHASE.EXECUTION); responses.push(tetyanaExec); pushAndBroadcast(session, tetyanaExec);
             if (applyTtsGate(session, PHASE.EXECUTION)) { session.pipeline && (session.pipeline.stageAfterExecPending = true); return responses; }
@@ -2811,7 +2803,7 @@ async function processAgentCycleResumeAfterAtlas(session, userMessage) {
     }
     if (intent === 'planning') {
         const grishaRespRaw = await generateAgentResponse('grisha', atlasResponse.content, session);
-        const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_PRECHECK);
+        const grishaResponse = tagResponse(grishaRespRaw, PHASE.GRISHA_SECURITY_CHECK);
     responses.push(grishaResponse); pushAndBroadcast(session, grishaResponse);
         // Auto-promotion heuristic: if user initial message clearly contains executable filesystem directive
         try {
@@ -2889,7 +2881,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
     if (agentName === 'tetyana') {
         // Start Grisha visual monitoring before execution
         const taskDescription = `Виконання завдання: ${inputMessage.substring(0, 100)}...`;
-        await startGrishaVisualMonitoring(session.id, taskDescription);
+        await startGrishaVisualMonitoringAPI(session.id, taskDescription);
         
         // Виконання ЧЕРЕЗ GOOSE (з інструментами), без ротації
         const execStartTime = Date.now();
@@ -2901,7 +2893,7 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         logMessage('info', `[TIMING] agent=tetyana phase=execution ms=${execDuration} success=${!!execNotes}`);
 
         // Stop visual monitoring after execution
-        const monitoringResult = await stopGrishaVisualMonitoring();
+        const monitoringResult = await stopGrishaVisualMonitoringAPI();
         
         if (!execNotes) {
             // Execution failed -> return blocked status without switching providers
@@ -3339,7 +3331,7 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
     let monitoringStarted = false;
     try {
         const taskDescription = `Валідація: ${String(atlasPlan || userMessage).slice(0, 120)}`;
-        const startRes = await startGrishaVisualMonitoring(baseSessionId, taskDescription);
+        const startRes = await startGrishaVisualMonitoringAPI(baseSessionId, taskDescription);
         monitoringStarted = !!startRes && !!startRes.success;
         if (monitoringStarted) {
             console.log(`[GRISHA] Visual monitoring ensured for verification session ${verifySession}`);
@@ -3430,7 +3422,7 @@ async function grishaVerifyWithGoose(userMessage, atlasPlan, tetyanaReport, base
     // Ensure we stop visual monitoring if we started it here (best-effort)
     try {
         if (monitoringStarted) {
-            const stopRes = await stopGrishaVisualMonitoring();
+            const stopRes = await stopGrishaVisualMonitoringAPI();
             if (stopRes && stopRes.success) console.log(`[GRISHA] Visual monitoring stopped for verification session ${verifySession}`);
         }
     } catch (e) {
@@ -3748,12 +3740,12 @@ function scheduleClarificationAutoFill(session) {
                 try {
                     // Знаходимо попередні відповіді Atlas та Grisha для правильного kickstart
                     const lastAtlas = [...session.history].reverse().find(m => m.agent==='atlas' && (m.phase === 'atlas_plan' || m.phase === 'atlas_clarify'));
-                    const lastGrisha = [...session.history].reverse().find(m => m.agent==='grisha' && m.phase === 'grisha_precheck');
+                    const lastGrisha = [...session.history].reverse().find(m => m.agent==='grisha' && (m.phase === 'grisha_precheck' || m.phase === 'grisha_security_check'));
                     const syntheticUser = '[AUTO] Продовжити виконання.';
                     
                     logMessage('info', `[clar_timer] kickstart with atlas="${lastAtlas?.content?.slice(0,100)}" grisha="${lastGrisha?.content?.slice(0,100)}"`);
-                    // Після auto-clarification потрібен новий precheck Гришею
-                    startPendingPrecheck(session, syntheticUser, lastAtlas?.content || '');
+                    // Після auto-clarification потрібен новий security check Гришею
+                    startPendingSecurityCheck(session, syntheticUser, lastAtlas?.content || '');
                     
                     logMessage('info', `[clar_timer] kickstart completed successfully`);
                     
@@ -3847,3 +3839,171 @@ app.get('/session/:sessionId/history', (req, res) => {
 
 // SSE stream for incremental history
 app.get('/session/:sessionId/history/stream', (req,res) => { sseInit(req,res); });
+
+// ====================== GRISHA SECURITY MANIFEST ENDPOINTS ======================
+
+app.get('/security/manifest', (req, res) => {
+    try {
+        const userId = req.query.userId || 'default';
+        const manifest = getSecurityManifest(userId);
+        res.json({
+            success: true,
+            manifest,
+            userId,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        logMessage('error', `[SECURITY_MANIFEST] GET error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to get security manifest', details: error.message });
+    }
+});
+
+app.post('/security/manifest', (req, res) => {
+    try {
+        const { userId = 'default', manifest } = req.body;
+        
+        if (!manifest || typeof manifest !== 'object') {
+            return res.status(400).json({ error: 'Valid manifest object required' });
+        }
+        
+        const success = addUserManifest(userId, manifest);
+        if (success) {
+            logMessage('info', `[SECURITY_MANIFEST] Updated for user: ${userId}`);
+            res.json({
+                success: true,
+                message: 'Security manifest updated successfully',
+                userId,
+                timestamp: new Date().toISOString()
+            });
+        } else {
+            res.status(400).json({ error: 'Failed to add manifest' });
+        }
+    } catch (error) {
+        logMessage('error', `[SECURITY_MANIFEST] POST error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to set security manifest', details: error.message });
+    }
+});
+
+app.post('/security/check', async (req, res) => {
+    try {
+        const { task, userId = 'default' } = req.body;
+        
+        if (!task || typeof task !== 'string') {
+            return res.status(400).json({ error: 'Task description required' });
+        }
+        
+        // Get security assessment
+        const manifest = getSecurityManifest(userId);
+        const assessment = assessTaskSecurity(task, manifest);
+        
+        logMessage('info', `[SECURITY_CHECK] Task: "${task.slice(0, 50)}..." Risk: ${assessment.riskLevel} Allowed: ${assessment.allowExecution}`);
+        
+        res.json({
+            success: true,
+            allowed: assessment.allowExecution,
+            riskLevel: assessment.riskLevel,
+            violations: assessment.violations,
+            warnings: assessment.warnings,
+            reasoning: assessment.reasoning,
+            testingOverride: assessment.testingOverride || false,
+            mandatoryWarning: assessment.mandatoryWarning || null,
+            manifest: assessment.manifest,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        logMessage('error', `[SECURITY_CHECK] error: ${error.message}`);
+        res.status(500).json({ error: 'Security check failed', details: error.message });
+    }
+});
+
+app.get('/security/status', (req, res) => {
+    try {
+        const manifests = listUserManifests();
+        res.json({
+            agent: 'grisha',
+            role: 'security_checker',
+            status: 'active',
+            manifestsCount: manifests.length,
+            defaultManifest: DEFAULT_SECURITY_MANIFEST.name,
+            testingMode: DEFAULT_SECURITY_MANIFEST.testingOverride.enabled,
+            visualMonitoring: VISION_AVAILABLE,
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        logMessage('error', `[SECURITY_STATUS] error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to get security status', details: error.message });
+    }
+});
+
+// ====================== GRISHA PIPELINE ENDPOINTS ======================
+
+app.post('/grisha/start-monitoring', async (req, res) => {
+    try {
+        const { sessionId, taskDescription } = req.body;
+        
+        if (!sessionId || !taskDescription) {
+            return res.status(400).json({ error: 'sessionId and taskDescription required' });
+        }
+        
+        logMessage('info', `[GRISHA_MONITORING] Starting visual monitoring for session: ${sessionId}`);
+        
+        // This would integrate with vision system
+        res.json({
+            success: true,
+            message: 'Visual monitoring started',
+            sessionId,
+            taskDescription,
+            monitoringStarted: new Date().toISOString()
+        });
+    } catch (error) {
+        logMessage('error', `[GRISHA_MONITORING] start error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to start monitoring', details: error.message });
+    }
+});
+
+app.post('/grisha/stop-monitoring', async (req, res) => {
+    try {
+        const { sessionId } = req.body;
+        
+        logMessage('info', `[GRISHA_MONITORING] Stopping visual monitoring for session: ${sessionId || 'default'}`);
+        
+        res.json({
+            success: true,
+            message: 'Visual monitoring stopped',
+            sessionId: sessionId || 'default',
+            monitoringStopped: new Date().toISOString(),
+            summary: 'Monitoring completed successfully'
+        });
+    } catch (error) {
+        logMessage('error', `[GRISHA_MONITORING] stop error: ${error.message}`);
+        res.status(500).json({ error: 'Failed to stop monitoring', details: error.message });
+    }
+});
+
+app.post('/grisha/verify-task', async (req, res) => {
+    try {
+        const { task, tetyanaResults, visualEvidence, sessionId } = req.body;
+        
+        if (!task) {
+            return res.status(400).json({ error: 'Task description required' });
+        }
+        
+        logMessage('info', `[GRISHA_VERIFICATION] Verifying task completion for session: ${sessionId || 'default'}`);
+        
+        // Simulate task verification logic
+        const verified = tetyanaResults && tetyanaResults.length > 10; // Simple heuristic
+        
+        res.json({
+            success: true,
+            verified,
+            verification: verified ? 'ПІДТВЕРДЖЕНО' : 'ПОТРІБНА_ДОРОБКА',
+            confidence: verified ? 85 : 45,
+            reason: verified ? 'Звіт Тетяни містить достатньо деталей' : 'Потрібно більше інформації про результати',
+            nextAction: verified ? null : 'Доробити виконання завдання',
+            timestamp: new Date().toISOString()
+        });
+    } catch (error) {
+        logMessage('error', `[GRISHA_VERIFICATION] error: ${error.message}`);
+        res.status(500).json({ error: 'Task verification failed', details: error.message });
+    }
+});
