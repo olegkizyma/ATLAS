@@ -117,26 +117,6 @@ class GooseVisionClient:
                         }
                     },
                 },
-            },
-            {
-                "name": "calculator",
-                "description": "Perform basic arithmetic calculations",
-                "inputSchema": {
-                    "type": "object",
-                    "required": ["operation", "numbers"],
-                    "properties": {
-                        "operation": {
-                            "type": "string",
-                            "enum": ["add", "subtract", "multiply", "divide"],
-                            "description": "The arithmetic operation to perform",
-                        },
-                        "numbers": {
-                            "type": "array",
-                            "items": {"type": "number"},
-                            "description": "List of numbers to operate on in order",
-                        },
-                    },
-                },
             }
         ]
 
@@ -178,7 +158,7 @@ class GooseVisionClient:
             print(f"❌ Failed to setup Goose agent: {e}")
             return False
 
-    def execute_vision_analysis(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def execute_vision_analysis(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Виконує аналіз зображення"""
         try:
             # Імпортуємо vision_processor тут, щоб уникнути циклічних залежностей
@@ -245,10 +225,10 @@ class GooseVisionClient:
                 "annotations": None,
             }]
 
-    def execute_screenshot_monitor(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
+    async def execute_screenshot_monitor(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
         """Виконує screenshot monitoring"""
         try:
-            action = args["action"]
+            action = args.get("action", "capture")
             
             if action == "capture":
                 try:
@@ -256,69 +236,56 @@ class GooseVisionClient:
                     from datetime import datetime
                     import tempfile
                     from pathlib import Path
+                    import base64
                     
                     timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
                     temp_dir = Path(tempfile.gettempdir()) / "atlas_vision"
                     temp_dir.mkdir(exist_ok=True)
                     screenshot_path = temp_dir / f"screenshot_{timestamp}.png"
                     
+                    # Take screenshot
                     screenshot = pyautogui.screenshot()
                     screenshot.save(screenshot_path)
                     
+                    # Also provide base64 for potential analysis
+                    import io
+                    buffer = io.BytesIO()
+                    screenshot.save(buffer, format='PNG')
+                    img_base64 = base64.b64encode(buffer.getvalue()).decode()
+                    
                     return [{
                         "type": "text",
-                        "text": f"Скріншот збережено: {screenshot_path}",
-                        "annotations": None,
+                        "text": f"📸 Скріншот збережено: {screenshot_path}\n\nРозмір: {screenshot.size[0]}x{screenshot.size[1]} пікселів\nЧас: {datetime.now().strftime('%H:%M:%S')}\n\nМожу проаналізувати зображення, якщо потрібно!",
+                        "annotations": {
+                            "screenshot_path": str(screenshot_path),
+                            "image_base64": f"data:image/png;base64,{img_base64}",
+                            "timestamp": timestamp,
+                            "dimensions": screenshot.size
+                        },
                     }]
                 except ImportError:
                     return [{
                         "type": "text",
-                        "text": "PyAutoGUI не доступний для створення скріншотів. Встановіть: pip install pyautogui",
+                        "text": "❌ PyAutoGUI не доступний для створення скріншотів.\n\nВстановіть: pip install pyautogui\n\nТакож переконайтеся, що надали дозволи на доступ до екрану в системних налаштуваннях.",
+                        "annotations": None,
+                    }]
+                except Exception as e:
+                    return [{
+                        "type": "text",
+                        "text": f"❌ Помилка при створенні скріншоту: {str(e)}\n\nПереконайтеся, що:\n1. PyAutoGUI встановлено\n2. Надано дозволи на доступ до екрану\n3. Не запущено в headless режимі",
                         "annotations": None,
                     }]
             else:
                 return [{
                     "type": "text",
-                    "text": f"Дія '{action}' виконана успішно",
+                    "text": f"✅ Дія '{action}' виконана успішно",
                     "annotations": None,
                 }]
                 
         except Exception as e:
             return [{
                 "type": "text",
-                "text": f"Помилка моніторингу: {str(e)}",
-                "annotations": None,
-            }]
-
-    def execute_calculator(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
-        """Виконує математичні обчислення"""
-        try:
-            operation = args["operation"]
-            numbers = args["numbers"]
-
-            result = None
-            if operation == "add":
-                result = sum(numbers)
-            elif operation == "subtract":
-                result = numbers[0] - sum(numbers[1:])
-            elif operation == "multiply":
-                result = 1
-                for n in numbers:
-                    result *= n
-            elif operation == "divide":
-                result = numbers[0]
-                for n in numbers[1:]:
-                    result /= n
-
-            return [{
-                "type": "text",
-                "text": str(result),
-                "annotations": None,
-            }]
-        except Exception as e:
-            return [{
-                "type": "text",
-                "text": f"Помилка обчислення: {str(e)}",
+                "text": f"❌ Помилка моніторингу: {str(e)}",
                 "annotations": None,
             }]
 
@@ -453,8 +420,6 @@ class GooseVisionClient:
                                     result = self.execute_vision_analysis(tool_args)
                                 elif tool_name == "screenshot_monitor":
                                     result = self.execute_screenshot_monitor(tool_args)
-                                elif tool_name == "calculator":
-                                    result = self.execute_calculator(tool_args)
                                 else:
                                     result = [{
                                         "type": "text",
@@ -469,11 +434,54 @@ class GooseVisionClient:
                 
             except Exception as e:
                 return {"success": False, "error": str(e), "response": ""}
+    
+    async def analyze_current_screen(self) -> dict:
+        """Швидкий аналіз поточного екрану"""
+        try:
+            result = await self.execute_screenshot_monitor({"action": "capture"})
+            if result and len(result) > 0:
+                return {
+                    "success": True,
+                    "analysis": result[0]["text"],
+                    "timestamp": result[0].get("timestamp", ""),
+                    "image_path": result[0].get("image_path", "")
+                }
+            else:
+                return {
+                    "success": False,
+                    "error": "Не вдалося захопити скріншот"
+                }
+        except Exception as e:
+            return {
+                "success": False,
+                "error": f"Помилка аналізу: {str(e)}"
+            }
+
+    async def chat_with_vision(self, message: str) -> str:
+        """Чат з Goose з підтримкою vision tools"""
+        try:
+            # Check for special commands
+            if message.lower() in ['screenshot', 'скріншот', 'екран']:
+                # Take screenshot and describe it
+                result = await self.execute_screenshot_monitor({"action": "capture"})
+                if result and len(result) > 0:
+                    return result[0]["text"]
+                else:
+                    return "❌ Не вдалося зробити скріншот"
+            
+            # Regular chat
+            result = await self.send_message(message)
+            if result["success"]:
+                return result["response"]
+            else:
+                return f"Помилка: {result.get('error', 'Unknown error')}"
+        except Exception as e:
+            return f"Помилка чату: {str(e)}"
 
     async def chat_interactive(self):
         """Інтерактивний чат з Goose"""
         print("🚀 ATLAS Goose Vision Client")
-        print("🔧 Доступні команди: vision_analysis, screenshot_monitor, calculator")
+        print("🔧 Доступні команди: vision_analysis, screenshot_monitor")
         print("💬 Введіть 'exit' для виходу\n")
         
         # Setup agent
