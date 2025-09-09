@@ -495,14 +495,53 @@ class AtlasIntelligentChatManager {
     }
 
     setupTTSEventBridges() {
-        // Приклад інтеграції з кроками виконання програми (слухачі подій)
+        // Enhanced integration with execution steps (listeners for events)
         window.addEventListener('atlas-tts-started', (e) => {
             // e.detail: { agent, text }
-            // TODO: тут можна поставити «крок: відтворення голосу почалося»
+            const { agent, text } = e.detail || {};
+            logEventOnce('tts_started', { agent, textLength: text?.length || 0 });
+            
+            // Notify 3D model interface if present
+            if (window.atlasUI && window.atlasUI.onTTSStart) {
+                try {
+                    window.atlasUI.onTTSStart(agent, text);
+                } catch (err) {
+                    this.log(`[TTS] 3D UI notification error: ${err.message}`);
+                }
+            }
         });
+        
         window.addEventListener('atlas-tts-ended', (e) => {
             // e.detail: { agent, text }
-            // TODO: тут можна перейти до наступного кроку після завершення озвучування
+            const { agent, text } = e.detail || {};
+            logEventOnce('tts_ended', { agent, textLength: text?.length || 0 });
+            
+            // Notify 3D model interface if present
+            if (window.atlasUI && window.atlasUI.onTTSEnd) {
+                try {
+                    window.atlasUI.onTTSEnd(agent, text);
+                } catch (err) {
+                    this.log(`[TTS] 3D UI notification error: ${err.message}`);
+                }
+            }
+        });
+        
+        window.addEventListener('atlas-tts-queue-complete', (e) => {
+            // e.detail: { timestamp, queueWasEmpty, audioIdle }
+            const { timestamp, queueWasEmpty, audioIdle } = e.detail || {};
+            this.log(`[TTS] Queue complete event - queueEmpty=${queueWasEmpty}, audioIdle=${audioIdle}`);
+            
+            // Notify 3D model interface about completion
+            if (window.atlasUI && window.atlasUI.onTTSQueueComplete) {
+                try {
+                    window.atlasUI.onTTSQueueComplete({ timestamp, queueWasEmpty, audioIdle });
+                } catch (err) {
+                    this.log(`[TTS] 3D UI queue complete notification error: ${err.message}`);
+                }
+            }
+            
+            // Check if we should unlock chat input
+            this.checkAndUnlockInput();
         });
     }
     
@@ -1304,9 +1343,22 @@ class AtlasIntelligentChatManager {
             this.voiceSystem.isProcessingTTS = false;
             this.log('[TTS] TTS queue processing completed');
             
-            // Notify that TTS processing is done
+            // Notify that TTS processing is done with enhanced event data
             if (this.ttsSync.dispatchEvents) {
-                window.dispatchEvent(new CustomEvent('atlas-tts-queue-complete'));
+                window.dispatchEvent(new CustomEvent('atlas-tts-queue-complete', {
+                    detail: {
+                        timestamp: Date.now(),
+                        queueWasEmpty: this.voiceSystem.ttsQueue.length === 0,
+                        audioIdle: !this.voiceSystem.currentAudio || this.voiceSystem.currentAudio.paused || this.voiceSystem.currentAudio.ended
+                    }
+                }));
+            }
+            
+            // Execute TTS completion hooks
+            try {
+                this.ttsSync.onTTSEnd();
+            } catch (hookError) {
+                this.log(`[TTS] TTS end hook error: ${hookError.message}`);
             }
         }
     }

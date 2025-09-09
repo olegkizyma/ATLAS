@@ -3179,6 +3179,58 @@ function createAgentCoordinator() {
 const agentCoordinator = createAgentCoordinator();
 
 // ------------------------------------------------------------
+// Common Operations Handler - Prevents code duplication
+// ------------------------------------------------------------
+function createCommonOperationsHandler() {
+    return {
+        handleDiskSpace: async (spaceGB, context = {}) => {
+            // Centralized disk space logic to prevent duplication
+            logEventOnce('disk_space_check', { spaceGB, context });
+            
+            if (spaceGB < 50) {
+                logEventOnce('disk_low_space_action', { spaceGB, action: 'calendar_event' });
+                return {
+                    action: 'create_calendar_event',
+                    title: 'Очистити диск',
+                    description: `Дисковий простір менше 50GB (${spaceGB}GB). Потрібно очищення.`,
+                    priority: 'high'
+                };
+            } else {
+                logEventOnce('disk_ok_space_action', { spaceGB, action: 'create_file' });
+                return {
+                    action: 'create_file',
+                    filename: 'disk_ok.txt',
+                    content: `Дисковий простір достатній: ${spaceGB}GB`,
+                    priority: 'low'
+                };
+            }
+        },
+        
+        preventDuplicateExecution: (actionType, actionId) => {
+            const key = `${actionType}_${actionId}`;
+            return !logEventOnce(key, { actionType, actionId }, 10000); // 10 second suppression
+        },
+        
+        validateAgentAction: (agent, action, context) => {
+            // Ensure agents don't duplicate each other's work
+            const responsible = agentCoordinator.getResponsibleAgent(action);
+            if (responsible !== agent) {
+                logEventOnce('agent_role_mismatch', { 
+                    agent, 
+                    action, 
+                    responsible, 
+                    context: context.slice?.(0, 100) || context 
+                });
+                return false;
+            }
+            return agentCoordinator.preventRoleOverlap(agent, action);
+        }
+    };
+}
+
+const commonOps = createCommonOperationsHandler();
+
+// ------------------------------------------------------------
 // Clarification Auto-Fill (post-export to avoid hoist confusion)
 // ------------------------------------------------------------
 // When a clarification is requested and the user stays silent for 30s,
