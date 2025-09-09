@@ -3038,62 +3038,150 @@ class AtlasIntelligentChatManager {
         // Use existing microphone button instead of creating new one
         const microphoneBtn = document.getElementById('microphone-btn');
         if (microphoneBtn) {
-            // Один/подвійний клік: одиночний — одноразовий запис; подвійний — перехід у режим «Атлас»
-            microphoneBtn.onclick = (e) => this._handleMicClick(e);
-            microphoneBtn.ondblclick = (e) => this._handleMicDoubleClick(e);
-            microphoneBtn.title = '🎤 Один клік — разовий запис; Подвійний — режим "Атлас" (гаряче слово)';
-            // Update button state immediately after attaching event
+            // Видаляємо старі event listeners шляхом клонування
+            const newMicBtn = microphoneBtn.cloneNode(true);
+            microphoneBtn.parentNode.replaceChild(newMicBtn, microphoneBtn);
+            
+            // Додаємо нову логіку: короткий клік та довге натискання
+            this._addMicrophoneInteractions(newMicBtn);
+            
+            newMicBtn.title = '🎤 Короткий клік — запис через Whisper; Довге натискання (1.5с) — режим Atlas + Vision';
             this.updateSpeechButton();
-            this.log('[STT] Speech controls initialized with existing microphone button');
+            this.log('[STT] Speech controls initialized with press/hold logic');
         } else {
             this.log('[STT] Warning: microphone button not found');
         }
     }
 
-    _handleMicClick(e) {
-        // Детектор одинарного кліку з невеликою затримкою, щоб відрізнити від doubleclick
-        if (this.speechSystem._micClickTimer) return;
-        this.speechSystem._micClickTimer = setTimeout(() => {
-            this.speechSystem._micClickTimer = null;
-            this._performSingleClickAction();
-        }, 250);
-    }
-
-    _handleMicDoubleClick(e) {
-        // Подвійний клік: скасовуємо відкладений single та вмикаємо/вимикаємо wake-режим + активуємо Atlas Vision
-        if (this.speechSystem._micClickTimer) {
-            clearTimeout(this.speechSystem._micClickTimer);
-            this.speechSystem._micClickTimer = null;
-        }
-        this._toggleWakeMode();
+    _addMicrophoneInteractions(micBtn) {
+        let pressTimer = null;
+        let isLongPress = false;
+        let pressStartTime = 0;
         
-        // Активуємо Atlas Vision (очі для Atlas)
-        this._activateAtlasVision();
+        // Функція початку натискання (універсальна)
+        const startPress = (e) => {
+            e.preventDefault();
+            pressStartTime = Date.now();
+            isLongPress = false;
+            
+            // Візуальний індикатор початку натискання
+            micBtn.style.transform = 'scale(0.95)';
+            
+            pressTimer = setTimeout(() => {
+                isLongPress = true;
+                this._handleLongPress();
+                // Візуальний індикатор довгого натискання
+                micBtn.style.background = 'rgba(255, 200, 0, 0.6)';
+            }, 1500); // 1.5 секунди для довгого натискання
+        };
+
+        // Функція кінця натискання (універсальна)
+        const endPress = (e) => {
+            e.preventDefault();
+            clearTimeout(pressTimer);
+            
+            // Повертаємо візуальний стан
+            micBtn.style.transform = 'scale(1)';
+            
+            if (!isLongPress) {
+                const pressDuration = Date.now() - pressStartTime;
+                if (pressDuration < 1500) {
+                    this._handleShortPress();
+                }
+            }
+        };
+
+        // Функція скасування натискання
+        const cancelPress = (e) => {
+            clearTimeout(pressTimer);
+            micBtn.style.transform = 'scale(1)';
+            this.updateSpeechButton(); // Повертаємо нормальний колір
+        };
+
+        // Мобільні події (touch)
+        micBtn.addEventListener('touchstart', startPress, { passive: false });
+        micBtn.addEventListener('touchend', endPress, { passive: false });
+        micBtn.addEventListener('touchcancel', cancelPress, { passive: false });
+
+        // Десктопні події (mouse)
+        micBtn.addEventListener('mousedown', startPress);
+        micBtn.addEventListener('mouseup', endPress);
+        micBtn.addEventListener('mouseleave', cancelPress);
+
+        // Заборона контекстного меню та інших подій
+        micBtn.addEventListener('contextmenu', (e) => e.preventDefault());
+        micBtn.addEventListener('click', (e) => e.preventDefault()); // Заборона click після touch
     }
 
-    _performSingleClickAction() {
-        // Якщо активний wake-режим — одноклік вимикає його
-        if (this.speechSystem.wakeModeActive) {
+    _handleShortPress() {
+        // Короткий клік: запис через Whisper Large 3
+        this.log('[MIC] Short press - starting Whisper recording');
+        
+        if (this.speechSystem.isRecording) {
+            // Якщо вже записуємо - зупиняємо
+            this.stopWhisperRecording();
+        } else if (this.speechSystem.wakeModeActive) {
+            // Якщо активний wake-режим - вимикаємо його
             this.disableWakeMode(true);
-            return;
-        }
-        // Інакше — запускаємо одноразовий запис через Whisper з оптимальним beam size
-        this.speechSystem.currentBeamSize = this.getOptimalBeamSize('standard');
-        if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
-            this.startWhisperRecording();
+            this._deactivateAtlasVision();
         } else {
-            // Fallback — звичайне розпізнавання (старт/стоп як один раз)
-            if (this.speechSystem.isEnabled) this.stopSpeechRecognition();
-            this.startSpeechRecognition();
+            // Звичайний запис через Whisper
+            this._startSingleRecording();
         }
     }
 
-    _toggleWakeMode() {
-        if (this.speechSystem.wakeModeActive) {
+    _handleLongPress() {
+        // Довге натискання (1.5 сек): режим прослуховування + камера
+        this.log('[MIC] Long press - activating Atlas listening mode with vision');
+        
+        // Тактильний відгук для мобільних
+        if (navigator.vibrate) {
+            navigator.vibrate(200);
+        }
+        
+        // Перевіряємо чи активний режим зору
+        const visionActive = this.visionSystem && this.visionSystem.active;
+        
+        if (this.speechSystem.wakeModeActive || visionActive) {
+            // Якщо вже в режимі прослуховування або зір активний - вимикаємо все
             this.disableWakeMode(true);
+            this._deactivateAtlasVision();
+            this.log('[MIC] Atlas listening mode + vision deactivated');
         } else {
+            // Активуємо режим прослуховування + камеру
             this.enableWakeMode();
+            this._activateAtlasVision();
+            this.log('[MIC] Atlas listening mode + vision activated');
         }
+    }
+
+    async _startSingleRecording() {
+        // Запускаємо одноразовий запис через Whisper Large 3
+        try {
+            this.speechSystem.currentBeamSize = this.getOptimalBeamSize('standard');
+            
+            if (this.speechSystem.whisperAvailable && this.speechSystem.preferWhisper) {
+                const success = this.startWhisperRecording();
+                if (success) {
+                    this.log('[STT] Single recording started via Whisper Large 3');
+                } else {
+                    this.log('[STT] Failed to start Whisper recording, falling back to Web Speech');
+                    this._fallbackToWebSpeech();
+                }
+            } else {
+                this._fallbackToWebSpeech();
+            }
+        } catch (error) {
+            this.log(`[STT] Error starting single recording: ${error.message}`);
+            this._fallbackToWebSpeech();
+        }
+    }
+
+    _fallbackToWebSpeech() {
+        if (this.speechSystem.isEnabled) {
+            this.stopSpeechRecognition();
+        }
+        this.startSpeechRecognition();
     }
 
     async enableWakeMode() {
@@ -3230,27 +3318,35 @@ class AtlasIntelligentChatManager {
             const isRecording = this.speechSystem.isRecording || this.speechSystem.isListening;
             const isEnabled = this.speechSystem.isEnabled || this.speechSystem.whisperAvailable;
             const isWake = this.speechSystem.wakeModeActive;
+            const isVisionActive = this.visionSystem?.active || false;
             
-            if (isWake) {
-                micBtnText.textContent = '👂 Атлас';
+            if (isWake && isVisionActive) {
+                micBtnText.textContent = '�️ Атлас+';
+                microphoneBtn.style.background = 'rgba(255, 150, 0, 0.5)';
+                microphoneBtn.title = 'Режим «Атлас + Зір»: слухаю та бачу';
+                microphoneBtn.classList.add('listening', 'vision-active');
+            } else if (isWake) {
+                micBtnText.textContent = '� Атлас';
                 microphoneBtn.style.background = 'rgba(255, 200, 0, 0.35)';
                 microphoneBtn.title = 'Режим «Атлас»: слухаю гаряче слово';
                 microphoneBtn.classList.add('listening');
+                microphoneBtn.classList.remove('vision-active');
             } else if (isRecording) {
-                micBtnText.textContent = '🔴 Слухаю'; // Red dot indicates active listening
+                micBtnText.textContent = '🔴 Записую';
                 microphoneBtn.style.background = 'rgba(255, 0, 0, 0.4)';
-                microphoneBtn.title = 'Прослуховуємо... (натисніть для зупинки)';
+                microphoneBtn.title = 'Записую через Whisper... (клікніть для зупинки)';
                 microphoneBtn.classList.add('listening');
-            } else if (isEnabled && this.speechSystem.enabled) {
-                micBtnText.textContent = '🟢 Мікрофон'; // Green dot indicates ready
-                microphoneBtn.style.background = 'rgba(0, 255, 0, 0.4)';
-                microphoneBtn.title = 'Речевий ввід готовий (натисніть для запису)';
-                microphoneBtn.classList.remove('listening');
-            } else {
-                micBtnText.textContent = '🎤 Мікрофон';
+                microphoneBtn.classList.remove('vision-active');
+            } else if (isEnabled) {
+                micBtnText.textContent = '🎤 Готовий';
                 microphoneBtn.style.background = 'rgba(0, 20, 10, 0.6)';
-                microphoneBtn.title = 'Речевий ввід недоступний або вимкнений';
-                microphoneBtn.classList.remove('listening');
+                microphoneBtn.title = 'Клік — запис; Утримання 1.5с — Атлас+Зір';
+                microphoneBtn.classList.remove('listening', 'vision-active');
+            } else {
+                micBtnText.textContent = '🎤 Недоступний';
+                microphoneBtn.style.background = 'rgba(60, 60, 60, 0.6)';
+                microphoneBtn.title = 'Речевий ввід недоступний';
+                microphoneBtn.classList.remove('listening', 'vision-active');
             }
         }
     }
@@ -3458,6 +3554,122 @@ class AtlasIntelligentChatManager {
         } catch (error) {
             this.log(`[ATLAS VISION] Vision analysis error: ${error.message}`);
             throw error;
+        }
+    }
+
+    _deactivateAtlasVision() {
+        try {
+            this.log('[ATLAS VISION] Deactivating Atlas Eyes - stopping camera and monitoring');
+            
+            // Зупиняємо камеру
+            if (this.visionStream) {
+                this.visionStream.getTracks().forEach(track => track.stop());
+                this.visionStream = null;
+            }
+            
+            // Видаляємо відео елемент
+            if (this.visionVideo) {
+                this.visionVideo.remove();
+                this.visionVideo = null;
+            }
+            
+            // Видаляємо canvas
+            if (this.visionCanvas) {
+                this.visionCanvas.remove();
+                this.visionCanvas = null;
+            }
+            
+            // Зупиняємо моніторинг екрану
+            this._stopGrishaScreenMonitoring();
+            
+            // Оновлюємо стан
+            this._updateVisionStatus(false);
+            this.updateSpeechButton();
+            
+        } catch (error) {
+            this.log(`[ATLAS VISION] Error deactivating vision: ${error.message}`);
+        }
+    }
+
+    _updateVisionStatus(active) {
+        // Ініціалізуємо visionSystem якщо потрібно
+        if (!this.visionSystem) {
+            this.visionSystem = { active: false };
+        }
+        
+        this.visionSystem.active = active;
+        
+        const microphoneBtn = document.getElementById('microphone-btn');
+        if (microphoneBtn) {
+            if (active) {
+                microphoneBtn.classList.add('vision-active');
+                
+                // Додаємо візуальний індикатор зору
+                let visionIndicator = microphoneBtn.querySelector('.vision-indicator');
+                if (!visionIndicator) {
+                    visionIndicator = document.createElement('div');
+                    visionIndicator.className = 'vision-indicator';
+                    visionIndicator.style.cssText = `
+                        position: absolute;
+                        top: -3px;
+                        right: -3px;
+                        width: 12px;
+                        height: 12px;
+                        background: linear-gradient(45deg, #ff6b35, #f7931e);
+                        border-radius: 50%;
+                        animation: visionPulse 2s infinite;
+                        box-shadow: 0 0 8px rgba(255, 107, 53, 0.6);
+                    `;
+                    microphoneBtn.style.position = 'relative';
+                    microphoneBtn.appendChild(visionIndicator);
+                }
+            } else {
+                microphoneBtn.classList.remove('vision-active');
+                
+                // Видаляємо індикатор зору
+                const visionIndicator = microphoneBtn.querySelector('.vision-indicator');
+                if (visionIndicator) {
+                    visionIndicator.remove();
+                }
+            }
+        }
+        
+        this.updateSpeechButton();
+    }
+
+    async _startGrishaScreenMonitoring() {
+        try {
+            const response = await fetch(`${this.frontendBase}/api/vision/start_monitoring`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    session_id: `atlas_${Date.now()}`,
+                    task_description: 'Atlas Vision Integration - Screen Monitoring'
+                })
+            });
+            
+            if (response.ok) {
+                const result = await response.json();
+                this.log('[ATLAS VISION] Grisha screen monitoring started');
+                return result;
+            }
+        } catch (error) {
+            this.log(`[ATLAS VISION] Failed to start screen monitoring: ${error.message}`);
+        }
+    }
+
+    async _stopGrishaScreenMonitoring() {
+        try {
+            const response = await fetch(`${this.frontendBase}/api/vision/stop_monitoring`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' }
+            });
+            
+            if (response.ok) {
+                this.log('[ATLAS VISION] Grisha screen monitoring stopped');
+            }
+        } catch (error) {
+            this.log(`[ATLAS VISION] Failed to stop screen monitoring: ${error.message}`);
         }
     }
 }
