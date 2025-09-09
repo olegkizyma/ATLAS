@@ -64,3 +64,15 @@ cd ..
 echo "ATLAS production startup completed."
 echo "Health check logging suppressed for cleaner logs."
 echo "View logs: tail -f logs/*.log"
+
+# Optionally start Goose web UI if goose binary is available (helps Goose-based execution)
+if command -v goose >/dev/null 2>&1; then
+    echo "🪿 Starting Goose web interface on port 3000..."
+    cd goose
+    goose web --port 3000 > ../logs/goose.log 2>&1 &
+    echo $! > ../logs/goose.pid
+    cd ..
+else
+    echo "⚠️  Goose binary not found. Skipping Goose startup."
+    echo "   Install with: cd goose && ./download_cli.sh"
+fi

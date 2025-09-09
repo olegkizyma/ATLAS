@@ -1263,15 +1263,15 @@ app.post('/agent/tetyana', async (req, res) => {
 
         logMessage('info', `Direct Tetyana request: ${message.substring(0, 100)}...`);
 
-        // 1) Виконання: Тетяна працює через model rotation з planning intent
+        // 1) Виконання: Тетяна працює ЧЕРЕЗ GOOSE з інструментами
         const sys = tetianaSystemInstruction({ enableTools: true });
-    // Use our model rotation system instead of Goose fallback
-    const execResult = await executeWithModelRotation('tetyana', message, sessionId, { 
-        intentHint: 'execution',
-        systemInstruction: sys 
-    });
+        const execResult = await runExecution(message, sessionId, {
+            enableTools: true,
+            systemInstruction: sys
+        });
         if (!execResult) {
-            return res.status(502).json({ error: 'Model rotation unavailable for Tetyana' });
+            logMessage('error', '[TETYANA] Goose execution returned null (no output). Check Goose web/server and secret key.');
+            return res.status(502).json({ error: 'Goose execution unavailable for Tetyana' });
         }
 
         // 2) Короткий звіт: формуємо через model rotation замість Goose
@@ -2410,10 +2410,10 @@ async function generateAgentResponse(agentName, inputMessage, session, options =
         const taskDescription = `Виконання завдання: ${inputMessage.substring(0, 100)}...`;
         await startGrishaVisualMonitoring(session.id, taskDescription);
         
-        // Execution via model rotation instead of Goose only
+        // Виконання ЧЕРЕЗ GOOSE (з інструментами), без ротації
         const execStartTime = Date.now();
-        const execNotes = await executeWithModelRotation('tetyana', prompt, session.id, {
-            intentHint: 'execution',
+        const execNotes = await runExecution(prompt, session.id, {
+            enableTools: options.enableTools === true,
             systemInstruction: tetianaSystemInstruction({ enableTools: options.enableTools === true })
         });
         const execDuration = Date.now() - execStartTime;

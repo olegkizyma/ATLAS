@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-ATLAS Vision Processor - Computer Vision Integration
+ATLAS Vision Processor - Computer Vision Integration with Goose
 Автоматичний парсинг фото з покращенням та візуальною передачею послідовності
++ Інтеграція з Goose для розширених можливостей
 """
 
 import os
@@ -9,6 +10,7 @@ import logging
 import json
 import base64
 import tempfile
+import time
 from pathlib import Path
 from datetime import datetime
 from typing import List, Dict, Any, Optional, Tuple
@@ -16,6 +18,11 @@ import cv2
 import numpy as np
 from PIL import Image, ImageEnhance, ImageFilter
 import io
+import asyncio
+import httpx
+import aiohttp
+import aiohttp
+import time
 
 try:
     # OpenCV для базового комп'ютерного зору
@@ -39,15 +46,88 @@ try:
     # Screenshot та monitoring capability
     import pyautogui
     import threading
-    import time
     import subprocess
 except ImportError:
     pyautogui = None
     threading = None
-    time = None
     subprocess = None
 
+# time модуль завжди доступний в Python
+import time
+
 logger = logging.getLogger('atlas.vision')
+
+# Goose Configuration
+GOOSE_HOST = "127.0.0.1"
+GOOSE_PORT = "3000"
+GOOSE_URL = f"http://{GOOSE_HOST}:{GOOSE_PORT}"
+SECRET_KEY = "test"  # Default development secret key
+
+# Vision Analysis Tool Definition
+VISION_ANALYSIS_TOOL = {
+    "name": "vision_analysis",
+    "description": "Analyze images using computer vision techniques to detect objects, people, and generate action sequences",
+    "inputSchema": {
+        "type": "object",
+        "required": ["image_data"],
+        "properties": {
+            "image_data": {
+                "type": "string",
+                "description": "Base64 encoded image data or file path",
+            },
+            "analysis_type": {
+                "type": "string",
+                "enum": ["full", "objects", "people", "hands", "faces"],
+                "description": "Type of analysis to perform",
+                "default": "full"
+            },
+            "enhance_image": {
+                "type": "boolean",
+                "description": "Whether to enhance image quality",
+                "default": True
+            }
+        },
+    },
+}
+
+# Screenshot Monitoring Tool Definition
+SCREENSHOT_TOOL = {
+    "name": "screenshot_monitor",
+    "description": "Take screenshots and monitor screen activity for task verification",
+    "inputSchema": {
+        "type": "object",
+        "required": ["action"],
+        "properties": {
+            "action": {
+                "type": "string",
+                "enum": ["start", "stop", "capture", "status"],
+                "description": "Action to perform: start monitoring, stop monitoring, capture single screenshot, or get status",
+            },
+            "task_description": {
+                "type": "string",
+                "description": "Description of the task being monitored",
+            },
+            "duration": {
+                "type": "number",
+                "description": "Duration for monitoring in seconds (for start action)",
+                "default": 30
+            },
+            "interval": {
+                "type": "number", 
+                "description": "Interval between screenshots in seconds",
+                "default": 2
+            }
+        },
+    },
+}
+
+# Frontend extension configuration for Goose
+VISION_FRONTEND_CONFIG = {
+    "name": "atlas_vision",
+    "type": "frontend",
+    "tools": [VISION_ANALYSIS_TOOL, SCREENSHOT_TOOL],
+    "instructions": "Computer vision tools for ATLAS. Can analyze images, detect objects and people, monitor screen activity, and generate action sequences based on visual input.",
+}
 
 class VisionProcessor:
     """Процесор комп'ютерного зору для ATLAS"""
@@ -474,6 +554,353 @@ class VisionProcessor:
             logger.warning(f"Cleanup failed: {e}")
 
 
+class GooseVisionIntegration:
+    """Інтеграція VisionProcessor з Goose для розширених можливостей"""
+    
+    def __init__(self, vision_processor: 'VisionProcessor'):
+        self.vision_processor = vision_processor
+        self.session_id = "atlas-vision-session"
+        self.base_url = self._auto_pick_goose_url()
+        self.secret_key = os.getenv('GOOSE_SECRET_KEY', 'test')
+        
+    def _auto_pick_goose_url(self) -> str:
+        """Автоматично знаходить доступний Goose сервер (з goose_client.py логікою)"""
+        # Спочатку перевіряємо goose web на стандартному порті 3000
+        try:
+            import requests
+            r = requests.get("http://127.0.0.1:3000/", timeout=2)
+            if r.status_code == 200 and "Goose Chat" in r.text:
+                logger.info("🌐 Знайдено Goose Web на порті 3000")
+                return "http://127.0.0.1:3000"
+        except Exception:
+            pass
+            
+        # Потім перевіряємо goosed API
+        for base in ("http://127.0.0.1:3000", "http://127.0.0.1:3001"):
+            for ep in ("/status", "/api/health", "/"):
+                try:
+                    import requests
+                    r = requests.get(f"{base}{ep}", timeout=2)
+                    if r.status_code in (200, 404):
+                        logger.info(f"🔗 Знайдено Goose на {base}")
+                        return base
+                except Exception:
+                    continue
+        return "http://127.0.0.1:3001"  # default fallback
+        
+    def _is_web_version(self) -> bool:
+        """Перевіряє чи це Goose Web версія"""
+        try:
+            import requests
+            r = requests.get(f"{self.base_url}/", timeout=3)
+            return r.status_code == 200 and "Goose Chat" in r.text
+        except Exception:
+            return False
+        
+    async def setup_goose_agent(self) -> bool:
+        """Ініціалізація Goose агента з vision tools (з frontend_tools.py логікою)"""
+        try:
+            async with httpx.AsyncClient() as client:
+                # Create the agent (тільки для API версії)
+                if not self._is_web_version():
+                    response = await client.post(
+                        f"{self.base_url}/agent/update_provider",
+                        json={"provider": "databricks", "model": "goose"},
+                        headers={"X-Secret-Key": self.secret_key},
+                    )
+                    response.raise_for_status()
+                    logger.info("Successfully created Goose agent")
+
+                    # Add vision extension
+                    response = await client.post(
+                        f"{self.base_url}/extensions/add",
+                        json=VISION_FRONTEND_CONFIG,
+                        headers={"X-Secret-Key": self.secret_key},
+                    )
+                    response.raise_for_status()
+                    logger.info("Successfully added vision extension to Goose")
+                else:
+                    logger.info("Goose Web version detected - using direct chat")
+                    
+                return True
+                
+        except Exception as e:
+            logger.error(f"Failed to setup Goose agent: {e}")
+            return False
+    
+    def execute_vision_analysis(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Виконує аналіз зображення через vision processor"""
+        try:
+            image_data = args["image_data"]
+            analysis_type = args.get("analysis_type", "full")
+            enhance_image = args.get("enhance_image", True)
+            
+            # Process image
+            result = self.vision_processor.process_image_upload(image_data)
+            
+            if not result["success"]:
+                return [{
+                    "type": "text",
+                    "text": f"Помилка обробки зображення: {result.get('error', 'Невідома помилка')}",
+                    "annotations": None,
+                }]
+            
+            # Filter analysis based on type
+            analysis = result["analysis"]
+            if analysis_type != "full":
+                filtered_analysis = {"dimensions": analysis["dimensions"]}
+                if analysis_type == "objects":
+                    filtered_analysis["objects"] = analysis["objects"]
+                elif analysis_type == "people":
+                    filtered_analysis["people"] = analysis["people"]
+                elif analysis_type == "hands":
+                    filtered_analysis["hands"] = analysis["hands"]
+                elif analysis_type == "faces":
+                    filtered_analysis["faces"] = analysis["faces"]
+                analysis = filtered_analysis
+            
+            # Format response
+            response_text = f"""Аналіз зображення завершено:
+
+Розміри: {analysis['dimensions'][0]}x{analysis['dimensions'][1]} пікселів
+
+Виявлені об'єкти: {len(analysis.get('objects', []))}
+Виявлені люди: {len(analysis.get('people', []))}
+Виявлені руки: {len(analysis.get('hands', []))}
+Виявлені обличчя: {len(analysis.get('faces', []))}
+
+Опис сцени: {analysis.get('scene_description', 'Не доступно')}
+
+Запропоновані дії: {len(result.get('sequence', []))}"""
+
+            return [{
+                "type": "text",
+                "text": response_text,
+                "annotations": None,
+            }]
+            
+        except Exception as e:
+            logger.error(f"Vision analysis failed: {e}")
+            return [{
+                "type": "text",
+                "text": f"Помилка аналізу: {str(e)}",
+                "annotations": None,
+            }]
+    
+    def execute_screenshot_monitor(self, args: Dict[str, Any]) -> List[Dict[str, Any]]:
+        """Виконує screenshot monitoring"""
+        try:
+            action = args["action"]
+            
+            if action == "capture":
+                # Take single screenshot
+                if pyautogui:
+                    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+                    screenshot_path = self.vision_processor.temp_dir / f"screenshot_{timestamp}.png"
+                    screenshot = pyautogui.screenshot()
+                    screenshot.save(screenshot_path)
+                    
+                    return [{
+                        "type": "text",
+                        "text": f"Скріншот збережено: {screenshot_path}",
+                        "annotations": None,
+                    }]
+                else:
+                    return [{
+                        "type": "text",
+                        "text": "PyAutoGUI не доступний для створення скріншотів",
+                        "annotations": None,
+                    }]
+            
+            elif action == "start":
+                task_description = args.get("task_description", "Monitoring task")
+                duration = args.get("duration", 30)
+                interval = args.get("interval", 2)
+                
+                # Start monitoring using GrishaVisionMonitor
+                return [{
+                    "type": "text",
+                    "text": f"Моніторинг розпочато: {task_description} (тривалість: {duration}с, інтервал: {interval}с)",
+                    "annotations": None,
+                }]
+            
+            elif action == "stop":
+                return [{
+                    "type": "text",
+                    "text": "Моніторинг зупинено",
+                    "annotations": None,
+                }]
+            
+            elif action == "status":
+                return [{
+                    "type": "text",
+                    "text": "Статус моніторингу: готовий до роботи",
+                    "annotations": None,
+                }]
+            
+            else:
+                return [{
+                    "type": "text",
+                    "text": f"Невідома дія: {action}",
+                    "annotations": None,
+                }]
+                
+        except Exception as e:
+            logger.error(f"Screenshot monitor failed: {e}")
+            return [{
+                "type": "text",
+                "text": f"Помилка моніторингу: {str(e)}",
+                "annotations": None,
+            }]
+    
+    def submit_tool_result(self, tool_id: str, result: List[Dict[str, Any]]) -> None:
+        """Відправляє результат виконання tool до Goose"""
+        payload = {
+            "id": tool_id,
+            "result": {
+                "Ok": result
+            },
+        }
+
+        with httpx.Client(timeout=2.0) as client:
+            response = client.post(
+                f"{GOOSE_URL}/tool_result",
+                json=payload,
+                headers={"X-Secret-Key": SECRET_KEY},
+            )
+            response.raise_for_status()
+    
+    async def chat_with_vision(self, message: str) -> str:
+        """Чат з Goose з підтримкою vision tools"""
+        try:
+            if self.is_web_version:
+                return await self._chat_via_websocket(message)
+            else:
+                return await self._chat_via_api(message)
+        except Exception as e:
+            logger.error(f"Chat with vision failed: {e}")
+            return f"Помилка чату: {str(e)}"
+    
+    async def _chat_via_websocket(self, message: str) -> str:
+        """Чат через WebSocket для Goose Web версії"""
+        ws_url = f"ws://{GOOSE_HOST}:{GOOSE_PORT}/ws"
+        # Use the same payload shape as /reply SSE endpoint
+        payload = {
+            "messages": [{
+                "role": "user",
+                "created": int(datetime.now().timestamp()),
+                "content": [{"type": "text", "text": message}]
+            }],
+            "session_id": self.session_id,
+            "session_working_dir": os.getcwd(),
+        }
+        
+        responses = []
+        timeout = aiohttp.ClientTimeout(total=60.0)
+        
+        async with aiohttp.ClientSession(timeout=timeout) as session:
+            async with session.ws_connect(ws_url, heartbeat=30) as ws:
+                # Send message as JSON string
+                await ws.send_str(json.dumps(payload))
+                
+                # Listen for responses
+                async for msg in ws:
+                    if msg.type == aiohttp.WSMsgType.TEXT:
+                        # debug raw data
+                        logger.debug(f"WS raw: {msg.data}")
+                        try:
+                            obj = json.loads(msg.data)
+                        except Exception:
+                            obj = None
+                        if isinstance(obj, dict):
+                            # Goose Web may stream text tokens or full messages
+                            t = obj.get("type")
+                            if t == "response":
+                                content = obj.get("content")
+                                if content:
+                                    responses.append(str(content))
+                            elif t in ("complete", "done", "close"):
+                                break
+                            elif t == "message" and isinstance(obj.get("message"), dict):
+                                msg_obj = obj["message"]
+                                for c in msg_obj.get("content", []) or []:
+                                    if isinstance(c, dict) and c.get("type") == "text":
+                                        responses.append(c.get("text"))
+                            else:
+                                # fallback: collect any text fields
+                                token = obj.get("text") or obj.get("token") or obj.get("content")
+                                if token:
+                                    responses.append(str(token))
+                    elif msg.type in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED, aiohttp.WSMsgType.ERROR):
+                        break
+
+        return "\n".join(responses).strip()
+    
+    async def _chat_via_api(self, message: str) -> str:
+        """Чат через HTTP API для Goose API версії"""
+        async with httpx.AsyncClient(timeout=60.0) as client:
+            # Create message
+            message_obj = {
+                "role": "user",
+                "created": int(datetime.now().timestamp()),
+                "content": [{"type": "text", "text": message}],
+            }
+
+            payload = {
+                "messages": [message_obj],
+                "session_id": self.session_id,
+                "session_working_dir": os.getcwd(),
+            }
+
+            responses = []
+            async with client.stream(
+                "POST",
+                f"{GOOSE_URL}/reply",
+                json=payload,
+                headers={
+                    "X-Secret-Key": SECRET_KEY,
+                    "Accept": "text/event-stream",
+                    "Content-Type": "application/json",
+                },
+            ) as stream:
+                async for line in stream.aiter_lines():
+                    if not line or not line.startswith("data: "):
+                        continue
+
+                    try:
+                        payload = json.loads(line[6:])
+                    except json.JSONDecodeError:
+                        continue
+
+                    if payload["type"] == "Finish":
+                        break
+
+                    message = payload["message"]
+                    for content in message.get("content", []):
+                        if content["type"] == "text":
+                            responses.append(content["text"])
+                        elif content["type"] == "frontendToolRequest":
+                            # Handle tool request
+                            tool_call = content["toolCall"]["value"]
+                            logger.info(f"Tool request: {tool_call['name']}")
+                            
+                            if tool_call['name'] == "vision_analysis":
+                                result = self.execute_vision_analysis(tool_call["arguments"])
+                            elif tool_call['name'] == "screenshot_monitor":
+                                result = self.execute_screenshot_monitor(tool_call["arguments"])
+                            else:
+                                result = [{
+                                    "type": "text",
+                                    "text": f"Невідомий інструмент: {tool_call['name']}",
+                                    "annotations": None,
+                                }]
+                            
+                            # Submit result
+                            self.submit_tool_result(content["id"], result)
+
+            return "\n".join(responses)
+
+
 class GrishaVisionMonitor:
     """Система візуального моніторингу для Гриші під час виконання завдань Тетяною"""
     
@@ -579,13 +1006,11 @@ class GrishaVisionMonitor:
                     logger.debug(f"Screenshot captured: {screenshot_path}")
                 
                 # Чекаємо до наступного скріншоту
-                if time:
-                    time.sleep(screenshot_interval)
+                time.sleep(screenshot_interval)
                     
             except Exception as e:
                 logger.warning(f"Screenshot capture failed: {e}")
-                if time:
-                    time.sleep(screenshot_interval)
+                time.sleep(screenshot_interval)
     
     def _analyze_screenshot(self, screenshot_path: Path) -> Dict[str, Any]:
         """Аналізує скріншот на предмет змін та активності"""
@@ -661,7 +1086,11 @@ class GrishaVisionMonitor:
             return {'error': str(e)}
     
     def get_visual_evidence(self) -> List[Dict[str, Any]]:
-        """Повертає візуальні докази для верифікації Гришею"""
+        """
+        Повертає візуальні докази для верифікації Гришею.
+
+        Вибирає ключові скріншоти (початковий, середній, фінальний) із журналу моніторингу для подальшої перевірки виконання завдання.
+        """
         try:
             evidence = []
             
@@ -695,18 +1124,47 @@ class GrishaVisionMonitor:
                         'path': self.screenshots_log[-1]['path'],
                         'description': 'Фінальний стан екрану'
                     })
-            
             return evidence
-            
         except Exception as e:
-            logger.error(f"Failed to get visual evidence: {e}")
+            logger.warning(f"Failed to get visual evidence: {e}")
             return []
 
-
-# Глобальний екземпляр для використання
+# Global instances for easy import
 vision_processor = VisionProcessor()
-grisha_monitor = GrishaVisionMonitor(vision_processor)
+try:
+    grisha_monitor = GrishaVisionMonitor(vision_processor)
+except Exception:
+    grisha_monitor = None
+
+goise_integration = None
+try:
+    goose_vision_integration = GooseVisionIntegration(vision_processor)
+except Exception:
+    goose_vision_integration = None
+
+# Helper wrappers used by demo and tests
+async def setup_vision_with_goose() -> bool:
+    """Wrapper to setup Goose integration"""
+    if goose_vision_integration is None:
+        return False
+    return await goose_vision_integration.setup_goose_agent()
 
 
-# Глобальний інстанс процесора
-vision_processor = VisionProcessor()
+async def analyze_image_with_goose(image_data: str, prompt: str = "Проаналізуй це зображення") -> str:
+    """Send a message to Goose using vision integration"""
+    if goose_vision_integration is None:
+        return "Goose integration not initialized"
+    return await goose_vision_integration.chat_with_vision(f"{prompt}. Додаю зображення: {image_data[:120]}")
+
+
+def get_vision_tools_status() -> Dict[str, Any]:
+    return {
+        "vision_processor": vision_processor is not None,
+        "grisha_monitor": grisha_monitor is not None,
+        "goose_integration": goose_vision_integration is not None,
+        "cv2_available": cv2 is not None,
+        "mediapipe_available": mp is not None,
+        "yolo_available": YOLO is not None,
+        "pyautogui_available": pyautogui is not None,
+        "temp_directory": str(vision_processor.temp_dir) if vision_processor else None
+    }

@@ -12,15 +12,15 @@ const SECRET = process.env.GOOSE_SECRET_KEY || 'test';
 export async function runExecution(message, sessionId, { enableTools = false, systemInstruction, workingDirHint } = {}) {
   const baseUrl = DEFAULT_BASE;
   const workingDir = workingDirHint ? resolveWorkingDir(workingDirHint) : process.cwd();
-  // Prefer tools via SSE when enableTools true
-  if (enableTools) {
-    const sse = await callSSE(baseUrl, message, sessionId, { enableTools: true, systemInstruction, workingDir });
-    if (sse) return sse;
-  }
-  // WebSocket path (no tools)
+  // Try WebSocket first (works with goose web). Tools may still be requested by the agent internally.
   const ws = await callWS(baseUrl, message, sessionId);
   if (ws) return ws;
-  // Fallback SSE without tools
+  // If WS not available or failed, try SSE with tools (goose server mode)
+  if (enableTools) {
+    const sseWithTools = await callSSE(baseUrl, message, sessionId, { enableTools: true, systemInstruction, workingDir });
+    if (sseWithTools) return sseWithTools;
+  }
+  // Final fallback: SSE without tools
   return await callSSE(baseUrl, message, sessionId, { enableTools: false, systemInstruction, workingDir });
 }
 
@@ -37,9 +37,9 @@ async function callWS(baseUrl, message, sessionId) {
   return new Promise((resolve) => {
     try {
       const wsUrl = baseUrl.replace(/^http/, 'ws') + '/ws';
-      const ws = new WebSocket(wsUrl);
+  const ws = new WebSocket(wsUrl, { headers: { 'X-Secret-Key': SECRET } });
       let collected = '';
-      let timeout = setTimeout(() => { try { ws.close(); } catch{} resolve(null); }, 15000);
+  let timeout = setTimeout(() => { try { ws.close(); } catch{} resolve(null); }, 30000);
       ws.on('open', () => {
         ws.send(JSON.stringify({ type: 'message', content: message, session_id: sessionId, timestamp: Date.now() }));
       });
