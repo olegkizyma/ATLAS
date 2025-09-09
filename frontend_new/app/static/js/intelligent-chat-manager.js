@@ -31,8 +31,8 @@ class AtlasIntelligentChatManager {
                     voice: 'tetiana',
                     pitch: 1.05, 
                     rate: 1.0,
-                    priority: 2,
-                    noFallback: true // без фолбеку для Тетяни
+                    priority: 2
+                    // noFallback removed to ensure Tetyana's voice works reliably
                 },
                 grisha: { 
                     signature: '[ГРИША]', 
@@ -495,14 +495,53 @@ class AtlasIntelligentChatManager {
     }
 
     setupTTSEventBridges() {
-        // Приклад інтеграції з кроками виконання програми (слухачі подій)
+        // Enhanced integration with execution steps (listeners for events)
         window.addEventListener('atlas-tts-started', (e) => {
             // e.detail: { agent, text }
-            // TODO: тут можна поставити «крок: відтворення голосу почалося»
+            const { agent, text } = e.detail || {};
+            logEventOnce('tts_started', { agent, textLength: text?.length || 0 });
+            
+            // Notify 3D model interface if present
+            if (window.atlasUI && window.atlasUI.onTTSStart) {
+                try {
+                    window.atlasUI.onTTSStart(agent, text);
+                } catch (err) {
+                    this.log(`[TTS] 3D UI notification error: ${err.message}`);
+                }
+            }
         });
+        
         window.addEventListener('atlas-tts-ended', (e) => {
             // e.detail: { agent, text }
-            // TODO: тут можна перейти до наступного кроку після завершення озвучування
+            const { agent, text } = e.detail || {};
+            logEventOnce('tts_ended', { agent, textLength: text?.length || 0 });
+            
+            // Notify 3D model interface if present
+            if (window.atlasUI && window.atlasUI.onTTSEnd) {
+                try {
+                    window.atlasUI.onTTSEnd(agent, text);
+                } catch (err) {
+                    this.log(`[TTS] 3D UI notification error: ${err.message}`);
+                }
+            }
+        });
+        
+        window.addEventListener('atlas-tts-queue-complete', (e) => {
+            // e.detail: { timestamp, queueWasEmpty, audioIdle }
+            const { timestamp, queueWasEmpty, audioIdle } = e.detail || {};
+            this.log(`[TTS] Queue complete event - queueEmpty=${queueWasEmpty}, audioIdle=${audioIdle}`);
+            
+            // Notify 3D model interface about completion
+            if (window.atlasUI && window.atlasUI.onTTSQueueComplete) {
+                try {
+                    window.atlasUI.onTTSQueueComplete({ timestamp, queueWasEmpty, audioIdle });
+                } catch (err) {
+                    this.log(`[TTS] 3D UI queue complete notification error: ${err.message}`);
+                }
+            }
+            
+            // Check if we should unlock chat input
+            this.checkAndUnlockInput();
         });
     }
     
@@ -697,13 +736,15 @@ class AtlasIntelligentChatManager {
                               this.voiceSystem.ttsQueue.length === 0 &&
                               !this.voiceSystem.isProcessingTTS;
             if (fastIdle) {
-                // Fast path: полностью просто
-                return false; // не ждали
+                this.log('[TTS] Already idle, no waiting needed');
+                return true; // Already idle
             }
             this.log(`[TTS] Waiting for TTS idle (timeout: ${timeoutMs}ms)`);
             
-            await new Promise(resolve => {
+            const result = await new Promise(resolve => {
+                let checkCount = 0;
                 const check = () => {
+                    checkCount++;
                     const isCurrentAudioIdle = !this.voiceSystem.currentAudio || 
                                                this.voiceSystem.currentAudio.paused || 
                                                this.voiceSystem.currentAudio.ended;
@@ -712,28 +753,60 @@ class AtlasIntelligentChatManager {
                     
                     const idle = isCurrentAudioIdle && isQueueEmpty && isNotProcessing;
                     
+                    // Log every 10 checks to avoid spam
+                    if (checkCount % 10 === 1) {
+                        this.log(`[TTS] Wait check #${checkCount}: idle=${idle}, audio=${isCurrentAudioIdle}, queue=${isQueueEmpty}, processing=${isNotProcessing}`);
+                    }
+                    
                     if (idle) {
-                        this.log('[TTS] -> idle');
-                        return resolve(true);
+                        const elapsed = Date.now() - start;
+                        this.log(`[TTS] TTS idle achieved after ${elapsed}ms (${checkCount} checks)`);
+                        resolve(true);
+                        return;
                     }
                     
                     if (Date.now() - start > timeoutMs) {
-                        this.log(`[TTS] wait timeout after ${timeoutMs}ms (continue)`);
-                        return resolve(false);
+                        const elapsed = Date.now() - start;
+                        this.log(`[TTS] TTS wait timeout after ${elapsed}ms (${checkCount} checks, forced completion)`);
+                        resolve(false);
+                        return;
                     }
                     
-                    setTimeout(check, 200);
+                    setTimeout(check, 150); // Slightly faster checking
                 };
+                
+                // Set up event listeners for immediate completion detection
+                const onTTSComplete = () => {
+                    this.log('[TTS] TTS completion event detected');
+                    setTimeout(check, 50); // Small delay to ensure state is updated
+                };
+                
+                if (this.ttsSync.dispatchEvents) {
+                    window.addEventListener('atlas-tts-queue-complete', onTTSComplete, { once: true });
+                }
+                
+                // Start checking immediately
                 check();
+                
+                // Cleanup on timeout
+                setTimeout(() => {
+                    if (this.ttsSync.dispatchEvents) {
+                        window.removeEventListener('atlas-tts-queue-complete', onTTSComplete);
+                    }
+                }, timeoutMs);
             });
             
-            // Додаткова пауза для стабільності
-            if (this.ttsSync.strictAgentOrder) {
+            // Enhanced stability pause with proper event emission
+            if (this.ttsSync.strictAgentOrder && result) {
                 await new Promise(resolve => setTimeout(resolve, 300));
+                this.log('[TTS] Stability pause completed');
             }
+            
+            return result;
             
         } catch (error) {
             this.log(`[TTS] Wait for idle error: ${error.message}`);
+            return false;
         }
     }
     
@@ -1270,9 +1343,22 @@ class AtlasIntelligentChatManager {
             this.voiceSystem.isProcessingTTS = false;
             this.log('[TTS] TTS queue processing completed');
             
-            // Notify that TTS processing is done
+            // Notify that TTS processing is done with enhanced event data
             if (this.ttsSync.dispatchEvents) {
-                window.dispatchEvent(new CustomEvent('atlas-tts-queue-complete'));
+                window.dispatchEvent(new CustomEvent('atlas-tts-queue-complete', {
+                    detail: {
+                        timestamp: Date.now(),
+                        queueWasEmpty: this.voiceSystem.ttsQueue.length === 0,
+                        audioIdle: !this.voiceSystem.currentAudio || this.voiceSystem.currentAudio.paused || this.voiceSystem.currentAudio.ended
+                    }
+                }));
+            }
+            
+            // Execute TTS completion hooks
+            try {
+                this.ttsSync.onTTSEnd();
+            } catch (hookError) {
+                this.log(`[TTS] TTS end hook error: ${hookError.message}`);
             }
         }
     }
@@ -1385,6 +1471,11 @@ class AtlasIntelligentChatManager {
             }
             
             this.log(`[VOICE] Synthesizing ${agent} voice with ${voice} (attempt ${retryCount + 1})`);
+            
+            // Special logging for Tetyana to debug voice issues
+            if (agent === 'tetyana' || agent.includes('tet')) {
+                this.log(`[TETYANA] Voice synthesis: "${speechText.substring(0, 100)}..." with voice="${voice}"`);
+            }
             
             // Збільшуємо таймаут з 15 до 30 секунд для довгих текстів
             const controller = new AbortController();

@@ -163,6 +163,21 @@ const AGENT_ROLE_PROMPTS = {
             `- Необхідні інструменти`,
             `- Можливі ризики`,
             `Надай короткий аналіз для подальшого планування.`
+        ].join('\n'),
+        
+        conversationAnalysis: (userMessage) => [
+            `Ти — Atlas. Проаналізуй повідомлення користувача та визнач його тип:`,
+            `Повідомлення: "${userMessage}"`,
+            ``,
+            `Визнач ТИП взаємодії:`,
+            `1. ЗАДАЧА - користувач просить щось виконати, створити, знайти, аналізувати`,
+            `2. РОЗМОВА - користувач ставить питання, обговорює, просто спілкується`,
+            `3. ІНФОРМАЦІЯ - користувач хоче дізнатися інформацію або пояснення`,
+            ``,
+            `Відповідай одним словом: ЗАДАЧА або РОЗМОВА або ІНФОРМАЦІЯ`,
+            ``,
+            `Якщо ЗАДАЧА - потрібно передати Тетяні для виконання.`,
+            `Якщо РОЗМОВА або ІНФОРМАЦІЯ - відповідаю сам через діалог.`
         ].join('\n')
     },
     
@@ -189,7 +204,7 @@ const AGENT_ROLE_PROMPTS = {
     
     grisha: {
         validation: (context) => [
-            `Ти — Гриша, валідатор та контролер системи ATLAS.`,
+            `Ти — Гриша, валідатор та контролер системи ATLAS з можливістю візії.`,
             `Завдання користувача: ${context.userMessage}`,
             `План Atlas: ${context.atlasPlan}`,
             context.tetyanaReport ? `Звіт Тетяни: ${context.tetyanaReport}` : '',
@@ -198,11 +213,12 @@ const AGENT_ROLE_PROMPTS = {
             `- Чи є всі необхідні дані?`,
             `- Які ризики та як їх мінімізувати?`,
             `- Рекомендації для покращення`,
+            `- Використовуй візію для перевірки інтерфейсу, якщо потрібно`,
             `Дай чіткий висновок: ЗАТВЕРДЖУЮ / ПОТРЕБУЄ_УТОЧНЕНЬ / ВІДХИЛЯЮ`
         ].filter(Boolean).join('\n'),
         
         finalVerification: (context) => [
-            `Ти — Гриша. Перевір результати виконання:`,
+            `Ти — Гриша з можливістю візії. Перевір результати виконання:`,
             `Оригінальне завдання: ${context.userMessage}`,
             `План: ${context.atlasPlan}`,
             `Результати Тетяни: ${context.tetyanaResults}`,
@@ -211,7 +227,20 @@ const AGENT_ROLE_PROMPTS = {
             `- Чи результати відповідають очікуванням?`,
             `- Рівень довіри (0-100%)`,
             `- Потрібні додаткові перевірки?`,
+            `- Використовуй візію для підтвердження інтерфейсу, якщо необхідно`,
             `Дай фінальну оцінку та рекомендації.`
+        ].filter(Boolean).join('\n'),
+        
+        visionAnalysis: (context) => [
+            `Ти — Гриша з візією. Проаналізуй скріншот/інтерфейс:`,
+            `Контекст: ${context.description || 'Візуальна перевірка'}`,
+            context.tetyanaAction ? `Дія Тетяни: ${context.tetyanaAction}` : '',
+            `Що ти бачиш на екрані:`,
+            `- Опиши ключові елементи`,
+            `- Чи відповідає очікуваннями?`,
+            `- Чи є помилки або проблеми?`,
+            `- Рекомендації для Тетяни`,
+            `Надай короткий звіт про візуальну перевірку.`
         ].filter(Boolean).join('\n')
     }
 };
@@ -230,6 +259,43 @@ async function intelligentTaskAnalysis(userMessage, session) {
     } catch (error) {
         logMessage('warn', `Intelligent task analysis failed: ${error.message}`);
         return null;
+    }
+}
+
+async function intelligentConversationClassification(userMessage, session) {
+    // Use Atlas to classify conversation vs task without hardcoded patterns
+    const classificationPrompt = AGENT_ROLE_PROMPTS.atlas.conversationAnalysis(userMessage);
+    try {
+        const classification = await generateAgentResponse('atlas', classificationPrompt, session);
+        const content = classification.content.trim().toUpperCase();
+        
+        let type = 'РОЗМОВА'; // Default to conversation
+        if (content.includes('ЗАДАЧА')) {
+            type = 'ЗАДАЧА';
+        } else if (content.includes('ІНФОРМАЦІЯ')) {
+            type = 'ІНФОРМАЦІЯ';
+        }
+        
+        logMessage('info', `[CONVERSATION_CLASSIFICATION] "${userMessage}" classified as: ${type}`);
+        
+        return {
+            type: type,
+            isTask: type === 'ЗАДАЧА',
+            content: classification.content,
+            agent: 'atlas',
+            provider: classification.provider || 'conversation_classifier',
+            model: classification.model || 'prompt_driven'
+        };
+    } catch (error) {
+        logMessage('warn', `Conversation classification failed: ${error.message}, defaulting to conversation`);
+        return {
+            type: 'РОЗМОВА',
+            isTask: false,
+            content: 'Класифікація невдала - за замовчуванням як розмова',
+            agent: 'atlas',
+            provider: 'fallback_classifier',
+            model: 'error_fallback'
+        };
     }
 }
 
@@ -3046,6 +3112,123 @@ function enforceTetianaStructure(raw) {
         return `[ТЕТЯНА] РЕЗЮМЕ: (internal struct error: ${e.message})\nСТАТУС: Blocked`;
     }
 }
+
+// ------------------------------------------------------------
+// Event Deduplication System - Prevents duplicate events in logs
+// ------------------------------------------------------------
+const eventHistory = new Map(); // event_type -> { timestamp, count, lastData }
+
+function logEventOnce(eventType, data = {}, suppressTimeMs = 5000) {
+    const now = Date.now();
+    const existing = eventHistory.get(eventType);
+    
+    // If same event occurred recently, increment counter but don't log again
+    if (existing && (now - existing.timestamp) < suppressTimeMs) {
+        existing.count++;
+        existing.lastData = data;
+        return false; // Event suppressed
+    }
+    
+    // Log the event and record it
+    eventHistory.set(eventType, {
+        timestamp: now,
+        count: existing ? existing.count + 1 : 1,
+        lastData: data
+    });
+    
+    const countSuffix = existing && existing.count > 0 ? ` (occurred ${existing.count + 1} times)` : '';
+    logMessage('info', `[EVENT] ${eventType}${countSuffix}`, data);
+    return true; // Event logged
+}
+
+// ------------------------------------------------------------
+// Centralized Agent Role Coordinator - Clearer responsibility separation
+// ------------------------------------------------------------
+function createAgentCoordinator() {
+    return {
+        atlas: {
+            shouldHandle: (messageType) => ['planning', 'analysis', 'conversation', 'coordination'].includes(messageType),
+            responsibilities: ['Стратегічне планування', 'Аналіз завдань', 'Координація агентів', 'Спілкування з користувачем']
+        },
+        tetyana: {
+            shouldHandle: (messageType) => ['execution', 'task_performance', 'system_operations'].includes(messageType),
+            responsibilities: ['Виконання завдань', 'Системні операції', 'Звітування про результати', 'Технічна реалізація']
+        },
+        grisha: {
+            shouldHandle: (messageType) => ['validation', 'verification', 'security_check', 'vision_analysis'].includes(messageType),
+            responsibilities: ['Валідація результатів', 'Перевірка безпеки', 'Аналіз через візію', 'Контроль якості']
+        },
+        
+        getResponsibleAgent: (taskType) => {
+            if (taskType.includes('execute') || taskType.includes('task')) return 'tetyana';
+            if (taskType.includes('verify') || taskType.includes('check') || taskType.includes('vision')) return 'grisha';
+            return 'atlas'; // Default coordinator
+        },
+        
+        preventRoleOverlap: (agent, action) => {
+            const agentData = this[agent];
+            if (!agentData) return false;
+            
+            // Log role clarity
+            logEventOnce(`${agent}_role_action`, { agent, action, responsibilities: agentData.responsibilities });
+            return true;
+        }
+    };
+}
+
+const agentCoordinator = createAgentCoordinator();
+
+// ------------------------------------------------------------
+// Common Operations Handler - Prevents code duplication
+// ------------------------------------------------------------
+function createCommonOperationsHandler() {
+    return {
+        handleDiskSpace: async (spaceGB, context = {}) => {
+            // Centralized disk space logic to prevent duplication
+            logEventOnce('disk_space_check', { spaceGB, context });
+            
+            if (spaceGB < 50) {
+                logEventOnce('disk_low_space_action', { spaceGB, action: 'calendar_event' });
+                return {
+                    action: 'create_calendar_event',
+                    title: 'Очистити диск',
+                    description: `Дисковий простір менше 50GB (${spaceGB}GB). Потрібно очищення.`,
+                    priority: 'high'
+                };
+            } else {
+                logEventOnce('disk_ok_space_action', { spaceGB, action: 'create_file' });
+                return {
+                    action: 'create_file',
+                    filename: 'disk_ok.txt',
+                    content: `Дисковий простір достатній: ${spaceGB}GB`,
+                    priority: 'low'
+                };
+            }
+        },
+        
+        preventDuplicateExecution: (actionType, actionId) => {
+            const key = `${actionType}_${actionId}`;
+            return !logEventOnce(key, { actionType, actionId }, 10000); // 10 second suppression
+        },
+        
+        validateAgentAction: (agent, action, context) => {
+            // Ensure agents don't duplicate each other's work
+            const responsible = agentCoordinator.getResponsibleAgent(action);
+            if (responsible !== agent) {
+                logEventOnce('agent_role_mismatch', { 
+                    agent, 
+                    action, 
+                    responsible, 
+                    context: context.slice?.(0, 100) || context 
+                });
+                return false;
+            }
+            return agentCoordinator.preventRoleOverlap(agent, action);
+        }
+    };
+}
+
+const commonOps = createCommonOperationsHandler();
 
 // ------------------------------------------------------------
 // Clarification Auto-Fill (post-export to avoid hoist confusion)
