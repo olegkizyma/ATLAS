@@ -10,13 +10,14 @@ let clientInstance = null;
 
 function getClient() {
     if (!clientInstance) {
+        const proxyURL = (process.env.GITHUB_MODELS_PROXY_URL || 'http://localhost:3010/v1').replace(/\/$/, '');
         clientInstance = new GitHubModelsClient({
-            proxyURL: 'http://localhost:3010/v1',  // GitHub Models прокси
+            proxyURL,  // GitHub Models прокси
             maxRetries: 3,
             retryDelay: 1000,
             maxDelay: 60000
         });
-        console.log('[ATLAS_CLIENT] Initialized GitHub Models client with proxy http://localhost:3010/v1');
+        console.log(`[ATLAS_CLIENT] Initialized GitHub Models client with proxy ${proxyURL}`);
     }
     return clientInstance;
 }

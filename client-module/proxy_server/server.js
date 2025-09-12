@@ -7,10 +7,21 @@
 import express from 'express';
 import axios from 'axios';
 import cors from 'cors';
+import dotenv from 'dotenv';
+
+// Load env
+dotenv.config();
 
 const app = express();
-const PORT = 3010;
-const ATLAS_ORCHESTRATOR_URL = 'http://localhost:5101';
+const PORT = parseInt(process.env.PROXY_PORT || process.env.PORT || '3010', 10);
+// Target OpenAI-compatible API (58 models) running locally but outside this repo
+// e.g., http://localhost:4000/v1
+const TARGET_API_BASE = (
+    process.env.TARGET_API_BASE ||
+    (process.env.PROXY_UPSTREAM ? `${process.env.PROXY_UPSTREAM.replace(/\/$/, '')}/v1` : '') ||
+    process.env.GITHUB_MODELS_BASE_URL ||
+    'http://localhost:4000/v1'
+).replace(/\/$/, '');
 
 // Middleware
 app.use(cors());
@@ -18,99 +29,39 @@ app.use(express.json());
 
 // Логування всіх запитів
 app.use((req, res, next) => {
-    console.log(`[PROXY] ${req.method} ${req.path} - ${JSON.stringify(req.body, null, 2)}`);
+    // Avoid logging huge bodies
+    const preview = (() => {
+        try {
+            const s = JSON.stringify(req.body);
+            return s && s.length > 1000 ? s.slice(0, 1000) + '…' : s;
+        } catch (_) { return ''; }
+    })();
+    console.log(`[PROXY] ${req.method} ${req.path} body=${preview || 'n/a'}`);
     next();
 });
 
 /**
  * OpenAI-сумісний endpoint для chat completions
- * Переадресовує до ATLAS /test/model_rotation
+ * Переадресовує безпосередньо до локального API (порт 4000)
  */
 app.post('/v1/chat/completions', async (req, res) => {
     try {
-        const { model, messages, max_tokens, temperature, ...otherParams } = req.body;
-        
-        console.log(`[PROXY] Запит до моделі: ${model}`);
-        console.log(`[PROXY] Повідомлення:`, messages);
-        
-        // Витягуємо користувацьке повідомлення (останнє user message)
-        const userMessage = messages
-            .filter(msg => msg.role === 'user')
-            .pop()?.content || '';
-        
-        if (!userMessage) {
-            return res.status(400).json({
-                error: {
-                    message: 'No user message found',
-                    type: 'invalid_request_error'
-                }
-            });
-        }
-        
-        // Формуємо запит до ATLAS
-        const atlasRequest = {
-            agent: 'atlas',
-            message: userMessage,
-            model: model // Передаємо модель, яку запросив клієнт
+        // Pass-through to upstream OpenAI-compatible API
+        const url = `${TARGET_API_BASE}/chat/completions`;
+        const headers = {
+            'Content-Type': 'application/json',
+            // Pass through Authorization if provided; else use env
+            ...(req.headers['authorization'] ? { Authorization: req.headers['authorization'] } : {}),
+            ...(process.env.TARGET_API_KEY ? { Authorization: `Bearer ${process.env.TARGET_API_KEY}` } : {})
         };
-        
-        console.log(`[PROXY] Відправляємо до ATLAS:`, atlasRequest);
-        
-        // Викликаємо ATLAS
-        const atlasResponse = await axios.post(
-            `${ATLAS_ORCHESTRATOR_URL}/test/model_rotation`,
-            atlasRequest,
-            {
-                timeout: 30000,
-                headers: {
-                    'Content-Type': 'application/json'
-                }
-            }
-        );
-        
-        console.log(`[PROXY] Відповідь від ATLAS:`, atlasResponse.data);
-        
-        // Перетворюємо відповідь ATLAS в OpenAI формат
-        const openaiResponse = {
-            id: `chatcmpl-${Date.now()}`,
-            object: 'chat.completion',
-            created: Math.floor(Date.now() / 1000),
-            model: model,
-            choices: [
-                {
-                    index: 0,
-                    message: {
-                        role: 'assistant',
-                        content: atlasResponse.data.response || atlasResponse.data.message || 'Немає відповіді'
-                    },
-                    finish_reason: 'stop'
-                }
-            ],
-            usage: {
-                prompt_tokens: Math.ceil(userMessage.length / 4),
-                completion_tokens: Math.ceil((atlasResponse.data.response || '').length / 4),
-                total_tokens: Math.ceil((userMessage + (atlasResponse.data.response || '')).length / 4)
-            }
-        };
-        
-        console.log(`[PROXY] Відправляємо клієнту:`, openaiResponse);
-        res.json(openaiResponse);
-        
+
+        const upstream = await axios.post(url, req.body, { timeout: 60000, headers });
+        res.status(upstream.status).json(upstream.data);
     } catch (error) {
-        console.error(`[PROXY] Помилка:`, error.message);
-        
-        // Детальна інформація про помилку
-        if (error.response) {
-            console.error(`[PROXY] Статус:`, error.response.status);
-            console.error(`[PROXY] Дані:`, error.response.data);
-        }
-        
-        res.status(500).json({
-            error: {
-                message: error.message,
-                type: 'internal_server_error'
-            }
-        });
+        const status = error.response?.status || 500;
+        const data = error.response?.data || { message: error.message };
+        console.error(`[PROXY] /v1/chat/completions error status=${status}:`, data);
+        res.status(status).json({ error: { message: data.message || 'Upstream error', type: 'upstream_error', data } });
     }
 });
 
@@ -121,7 +72,7 @@ app.get('/health', (req, res) => {
     res.json({ 
         status: 'ok', 
         proxy: 'GitHub Models Proxy',
-        atlas_target: ATLAS_ORCHESTRATOR_URL,
+        target: TARGET_API_BASE,
         timestamp: new Date().toISOString()
     });
 });
@@ -131,39 +82,21 @@ app.get('/health', (req, res) => {
  */
 app.get('/v1/models', async (req, res) => {
     try {
-        // Можемо отримати список моделей від ATLAS або повернути статичний
-        const models = [
-            {
-                id: 'microsoft/phi-3-mini-4k-instruct',
-                object: 'model',
-                created: 1692901427,
-                owned_by: 'microsoft'
-            },
-            {
-                id: 'mistral-ai/mistral-small-2503',
-                object: 'model',
-                created: 1692901427,
-                owned_by: 'mistral-ai'
-            },
-            {
-                id: 'openai/gpt-4o-mini',
-                object: 'model',
-                created: 1692901427,
-                owned_by: 'openai'
-            }
-        ];
-        
+        // Try upstream first
+        const url = `${TARGET_API_BASE}/models`;
+        const headers = {
+            ...(req.headers['authorization'] ? { Authorization: req.headers['authorization'] } : {}),
+            ...(process.env.TARGET_API_KEY ? { Authorization: `Bearer ${process.env.TARGET_API_KEY}` } : {})
+        };
+        const upstream = await axios.get(url, { timeout: 10000, headers });
+        res.status(upstream.status).json(upstream.data);
+    } catch (error) {
+        console.warn(`[PROXY] Upstream models failed, returning minimal static list: ${error.message}`);
         res.json({
             object: 'list',
-            data: models
-        });
-    } catch (error) {
-        console.error(`[PROXY] Помилка отримання моделей:`, error.message);
-        res.status(500).json({
-            error: {
-                message: error.message,
-                type: 'internal_server_error'
-            }
+            data: [
+                { id: 'openai/gpt-4o-mini', object: 'model', created: 1692901427, owned_by: 'openai' }
+            ]
         });
     }
 });
@@ -171,7 +104,7 @@ app.get('/v1/models', async (req, res) => {
 // Запуск сервера
 app.listen(PORT, () => {
     console.log(`🚀 GitHub Models Proxy запущено на порту ${PORT}`);
-    console.log(`🎯 Переадресовує до ATLAS: ${ATLAS_ORCHESTRATOR_URL}`);
+    console.log(`🎯 Переадресовує до API: ${TARGET_API_BASE}`);
     console.log(`🔗 Health check: http://localhost:${PORT}/health`);
     console.log(`📋 Models: http://localhost:${PORT}/v1/models`);
     console.log(`💬 Chat: POST http://localhost:${PORT}/v1/chat/completions`);

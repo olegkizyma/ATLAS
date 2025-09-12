@@ -1,0 +1,43 @@
+# ATLAS unified Python dependencies (Apple Silicon friendly)
+# Python 3.10-3.11 recommended on macOS (Apple Silicon)
+
+# Web server
+Flask==2.3.3
+Flask-CORS==4.0.0
+requests==2.31.0
+python-dotenv>=1.0.0
+
+# Async clients
+aiohttp==3.9.5
+websockets==12.0
+
+# OpenAI-compatible client (Python)
+openai>=1.30.0,<2
+
+# STT (Whisper via faster-whisper / CTranslate2)
+faster-whisper==1.0.3
+SpeechRecognition==3.10.4
+psutil>=5.9.8
+
+# Computer Vision / ML
+# For Apple Silicon, these wheels are available prebuilt; ensure pip >= 23
+opencv-python==4.10.0.84
+Pillow==10.0.1
+numpy==1.26.4
+mediapipe==0.10.7
+ultralytics==8.0.196
+
+# Torch (Apple Silicon MPS)
+# Matching torchvision version for torch 2.1.x
+torch==2.1.2
+torchvision==0.16.2
+matplotlib==3.7.2
+
+# TTS (Ukrainian)
+soundfile>=0.12.1
+librosa>=0.10.1
+stanza>=1.10.0
+scipy>=1.11.0
+
+# Production WSGI server
+gunicorn==21.2.0

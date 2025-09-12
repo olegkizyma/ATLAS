@@ -20,6 +20,7 @@ lsof -ti:5101 | xargs kill -9 2>/dev/null || true
 lsof -ti:5102 | xargs kill -9 2>/dev/null || true
 lsof -ti:3001 | xargs kill -9 2>/dev/null || true
 lsof -ti:3000 | xargs kill -9 2>/dev/null || true
+lsof -ti:3010 | xargs kill -9 2>/dev/null || true
 
 echo "⏳ Waiting for services to stop completely..."
 sleep 5
@@ -37,7 +38,9 @@ else
     # Start TTS server first
     echo "🎵 Starting TTS server on port 3001..."
     cd ukrainian-tts
-    if [ -d ".venv" ]; then
+    if [ -d "../.venv" ]; then
+        source ../.venv/bin/activate && python tts_server.py > ../logs/tts_server.log 2>&1 &
+    elif [ -d ".venv" ]; then
         source .venv/bin/activate && python tts_server.py > ../logs/tts_server.log 2>&1 &
     else
         python3 tts_server.py > ../logs/tts_server.log 2>&1 &
@@ -48,7 +51,9 @@ else
     # Start frontend server
     echo "🌐 Starting Frontend server on port 5001..."
     cd frontend_new
-    if [ -d "venv" ]; then
+    if [ -d "../.venv" ]; then
+        source ../.venv/bin/activate && python app/atlas_server.py > ../logs/frontend.log 2>&1 &
+    elif [ -d "venv" ]; then
         source venv/bin/activate && python app/atlas_server.py > ../logs/frontend.log 2>&1 &
     else
         python3 app/atlas_server.py > ../logs/frontend.log 2>&1 &
@@ -62,12 +67,21 @@ else
     npm start > ../../logs/orchestrator.log 2>&1 &
     echo $! > ../../logs/orchestrator.pid
     cd ../..
+
+    # Start OpenAI-compatible proxy (port 3010) -> upstream API at port 4000
+    echo "🔀 Starting OpenAI-compatible Proxy on port 3010 (-> 4000)..."
+    cd client-module/proxy_server
+    npm start > ../../logs/proxy.log 2>&1 &
+    echo $! > ../../logs/proxy.pid
+    cd ../..
     
     # Start recovery bridge if available
     if [ -f "frontend_new/config/recovery_bridge.py" ]; then
         echo "🔄 Starting Recovery Bridge on port 5102..."
         cd frontend_new/config
-        if [ -d "../venv" ]; then
+        if [ -d "../../.venv" ]; then
+            source ../../.venv/bin/activate && python recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
+        elif [ -d "../venv" ]; then
             source ../venv/bin/activate && python recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
         else
             python3 recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
@@ -104,6 +118,8 @@ echo "   Port 5101 (Orchestrator): $(curl -s http://localhost:5101/health >/dev/
 echo "   Port 5102 (Recovery): $(lsof -ti:5102 >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
 echo "   Port 3001 (TTS): $(curl -s http://localhost:3001/health >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
 echo "   Port 3000 (Goose): $(curl -s http://localhost:3000/ >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+echo "   Port 3010 (OpenAI Proxy): $(curl -s http://localhost:3010/health >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+echo "   Port 4000 (Upstream API): $(curl -s http://localhost:4000/v1/models >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
 
 echo ""
 echo "🌐 Services should be available on:"
@@ -111,7 +127,9 @@ echo "   - Frontend: http://localhost:5001"
 echo "   - Orchestrator: http://localhost:5101" 
 echo "   - TTS Server: http://localhost:3001"
 echo "   - Goose Web: http://localhost:3000"
+echo "   - OpenAI-compatible Proxy: http://localhost:3010 (-> ${TARGET_API_BASE:-http://localhost:4000/v1})"
 echo "   - Recovery Bridge: ws://localhost:5102"
 echo ""
 echo "📄 View logs: tail -f logs/*.log"
 echo "Usage: ./restart_simple.sh [production]"
+
