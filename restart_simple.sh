@@ -23,6 +23,32 @@ pkill -f "python.*tts_server" 2>/dev/null || true
 pkill -f "node.*server" 2>/dev/null || true
 pkill -f "recovery_bridge" 2>/dev/null || true
 
+# Inline graceful stop for Goose and TTS by PID files
+if [ -d logs ]; then
+  if [ -f "logs/goose.pid" ]; then
+    GOOSE_PID=$(cat logs/goose.pid 2>/dev/null || true)
+    if [ -n "$GOOSE_PID" ] && kill -0 "$GOOSE_PID" 2>/dev/null; then
+      echo "[stop] Stopping Goose (PID $GOOSE_PID)"
+      kill -TERM "$GOOSE_PID" 2>/dev/null || true
+      sleep 2
+      kill -0 "$GOOSE_PID" 2>/dev/null && kill -KILL "$GOOSE_PID" 2>/dev/null || true
+      echo "[stop] Goose stopped"
+    fi
+    rm -f logs/goose.pid
+  fi
+  if [ -f "logs/tts.pid" ]; then
+    TTS_PID=$(cat logs/tts.pid 2>/dev/null || true)
+    if [ -n "$TTS_PID" ] && kill -0 "$TTS_PID" 2>/dev/null; then
+      echo "[stop] Stopping Ukrainian TTS (PID $TTS_PID)"
+      kill -TERM "$TTS_PID" 2>/dev/null || true
+      sleep 2
+      kill -0 "$TTS_PID" 2>/dev/null && kill -KILL "$TTS_PID" 2>/dev/null || true
+      echo "[stop] Ukrainian TTS stopped"
+    fi
+    rm -f logs/tts.pid
+  fi
+fi
+
 # Force kill processes on key ports if needed
 lsof -ti:5001 | xargs kill -9 2>/dev/null || true
 lsof -ti:5101 | xargs kill -9 2>/dev/null || true
@@ -58,7 +84,8 @@ else
         echo $! > ../logs/tts.pid
         started_tts=true
     else
-        echo "⚠️  Skipping TTS: module 'ukrainian_tts' not found. Install Ukrainian TTS from releases (wheel) or add to venv." | tee -a ../logs/tts_server.log
+        echo "⚠️  Skipping TTS: module 'ukrainian_tts' not found. Install it into the root venv, e.g.:" | tee -a ../logs/tts_server.log
+        echo "   source .venv/bin/activate && pip install git+https://github.com/robinhad/ukrainian-tts.git" | tee -a ../logs/tts_server.log
     fi
     cd ..
     
@@ -154,6 +181,7 @@ if curl -s http://localhost:5001/api/health >/dev/null 2>&1; then
   else
     curl -s http://localhost:5001/api/vision/status || echo "Unavailable"
   fi
+fi
 echo ""
 echo "🌐 Services should be available on:"
 echo "   - Frontend: http://localhost:5001"

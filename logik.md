@@ -51,3 +51,11 @@ curl -s http://localhost:3010/v1/models
 curl -s http://localhost:5001/api/health
 curl -s http://localhost:5101/health
 curl -s http://localhost:3001/health
+
+
+python3 -m venv .venv
+source .venv/bin/activate
+pip install --upgrade pip setuptools wheel
+pip install -r requirements.txt
+pip install git+https://github.com/robinhad/ukrainian-tts.git
+npm install

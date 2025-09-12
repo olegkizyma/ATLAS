@@ -280,11 +280,38 @@ show_post_shutdown_info() {
         fi
     fi
 
-    # Also attempt to stop Goose and Ukrainian TTS via helper script if present
-    if [ -x "scripts/stop_tts_and_goose.sh" ]; then
-        log_info "🔧 Running scripts/stop_tts_and_goose.sh to stop Goose/TTS"
-        scripts/stop_tts_and_goose.sh || log_warn "scripts/stop_tts_and_goose.sh returned non-zero"
+    # Inline stop logic for Goose and Ukrainian TTS (independent from helper script)
+    # Stop by PID files if present
+    if [ -f "logs/goose.pid" ]; then
+        gpid=$(cat logs/goose.pid 2>/dev/null || true)
+        if [ -n "$gpid" ] && kill -0 "$gpid" 2>/dev/null; then
+            graceful_stop "$gpid" "Goose" 5 || true
+        else
+            log_debug "Goose pid file exists but process not running"
+        fi
+        rm -f logs/goose.pid
     fi
+    if [ -f "logs/tts.pid" ]; then
+        tpid=$(cat logs/tts.pid 2>/dev/null || true)
+        if [ -n "$tpid" ] && kill -0 "$tpid" 2>/dev/null; then
+            graceful_stop "$tpid" "Ukrainian TTS" 5 || true
+        else
+            log_debug "TTS pid file exists but process not running"
+        fi
+        rm -f logs/tts.pid
+    fi
+
+    # Ensure ports 3000/3001 are free as a fallback
+    log_info "🔧 Ensuring ports 3000/3001 are free"
+    for p in 3000 3001; do
+        f=$(lsof -tiTCP:$p -sTCP:LISTEN 2>/dev/null || true)
+        if [ -n "$f" ]; then
+            log_warn "Killing processes on port $p: $f"
+            for pid in $f; do
+                graceful_stop "$pid" "Process on port $p" 5 || true
+            done
+        fi
+    done
 
     # Stop Recovery Bridge if canonical file exists
     if [ -f "frontend_new/config/recovery_bridge.py" ]; then
