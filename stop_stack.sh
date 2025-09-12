@@ -150,6 +150,15 @@ stop_atlas_system() {
             graceful_stop "$pid" "Process on port 5101" 5 || true
         done
     fi
+
+    # Зупинка OpenAI-compatible Proxy (порт 3010)
+    local port_3010=$(lsof -ti:3010 2>/dev/null || true)
+    if [ -n "$port_3010" ]; then
+        log_info "🔍 Found processes on port 3010 (Proxy): $port_3010"
+        for pid in $port_3010; do
+            graceful_stop "$pid" "OpenAI Proxy (port 3010)" 5 || true
+        done
+    fi
 }
 
 # Очищення ресурсів
@@ -244,6 +253,31 @@ show_post_shutdown_info() {
         log_info "✅ Ukrainian TTS (port 3001) - Still running"
     else
         log_info "❌ Ukrainian TTS (port 3001) - Not running"
+    fi
+
+    echo ""
+    log_info "Ports summary (post-stop):"
+    echo "   Port 5001 (Frontend): $(curl -s http://localhost:5001/api/health >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+    echo "   Port 5101 (Orchestrator): $(curl -s http://localhost:5101/health >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+    echo "   Port 5102 (Recovery): $(lsof -ti:5102 >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+    echo "   Port 3001 (TTS): $(curl -s http://localhost:3001/health >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+    echo "   Port 3000 (Goose): $(curl -s http://localhost:3000/ >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+    echo "   Port 3010 (OpenAI Proxy): $(curl -s http://localhost:3010/health >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+    echo "   Port 4000 (Upstream API): $(curl -s http://localhost:4000/v1/models >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+    echo "   (Note: Upstream API on 4000 is external and not managed by this script)"
+
+    # Optional component status via Frontend
+    if curl -s http://localhost:5001/api/health >/dev/null 2>&1; then
+        echo ""
+        log_info "Component Status (via Frontend):"
+        printf "   STT: "
+        curl -s http://localhost:5001/api/stt/status | jq -r '.whisper_available as $w | "Whisper="+($w|tostring)+", device="+(.device // "n/a")' 2>/dev/null || echo "Unavailable"
+        printf "   Vision: "
+        if command -v jq >/dev/null 2>&1; then
+          curl -s http://localhost:5001/api/vision/status | jq -r '"opencv="+(.modules.opencv|tostring)+", mediapipe="+(.modules.mediapipe|tostring)+", yolo="+(.modules.yolo|tostring)'
+        else
+          curl -s http://localhost:5001/api/vision/status || echo "Unavailable"
+        fi
     fi
 
     # Also attempt to stop Goose and Ukrainian TTS via helper script if present

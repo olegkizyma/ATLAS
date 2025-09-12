@@ -3,6 +3,15 @@
 
 echo "🔄 Restarting complete ATLAS stack..."
 
+# Load environment variables from .env if present (exports like PYTHONPATH)
+if [ -f .env ]; then
+  echo "📦 Loading environment from .env"
+  set -a
+  # shellcheck disable=SC1091
+  source .env
+  set +a
+fi
+
 # Stop all ATLAS services
 echo "🛑 Stopping ATLAS stack..."
 ./stop_stack.sh
@@ -35,30 +44,38 @@ else
     # Create logs directory
     mkdir -p logs
     
-    # Start TTS server first
+    # Start TTS server first (if dependencies present)
     echo "🎵 Starting TTS server on port 3001..."
     cd ukrainian-tts
+    started_tts=false
     if [ -d "../.venv" ]; then
-        source ../.venv/bin/activate && python tts_server.py > ../logs/tts_server.log 2>&1 &
+        source ../.venv/bin/activate
     elif [ -d ".venv" ]; then
-        source .venv/bin/activate && python tts_server.py > ../logs/tts_server.log 2>&1 &
-    else
-        python3 tts_server.py > ../logs/tts_server.log 2>&1 &
+        source .venv/bin/activate
     fi
-    echo $! > ../logs/tts.pid
+    if python -c "import ukrainian_tts.tts" >/dev/null 2>&1; then
+        python tts_server.py > ../logs/tts_server.log 2>&1 &
+        echo $! > ../logs/tts.pid
+        started_tts=true
+    else
+        echo "⚠️  Skipping TTS: module 'ukrainian_tts' not found. Install Ukrainian TTS from releases (wheel) or add to venv." | tee -a ../logs/tts_server.log
+    fi
     cd ..
     
-    # Start frontend server
+    # Start frontend server (if dependencies present)
     echo "🌐 Starting Frontend server on port 5001..."
     cd frontend_new
     if [ -d "../.venv" ]; then
-        source ../.venv/bin/activate && python app/atlas_server.py > ../logs/frontend.log 2>&1 &
+        source ../.venv/bin/activate
     elif [ -d "venv" ]; then
-        source venv/bin/activate && python app/atlas_server.py > ../logs/frontend.log 2>&1 &
-    else
-        python3 app/atlas_server.py > ../logs/frontend.log 2>&1 &
+        source venv/bin/activate
     fi
-    echo $! > ../logs/frontend.pid
+    if python -c "import aiohttp" >/dev/null 2>&1; then
+        python app/atlas_server.py > ../logs/frontend.log 2>&1 &
+        echo $! > ../logs/frontend.pid
+    else
+        echo "⚠️  Skipping Frontend: 'aiohttp' not installed. Run: source .venv/bin/activate && pip install -r requirements.txt" | tee -a ../logs/frontend.log
+    fi
     cd ..
     
     # Start orchestrator
@@ -75,18 +92,21 @@ else
     echo $! > ../../logs/proxy.pid
     cd ../..
     
-    # Start recovery bridge if available
+    # Start recovery bridge if available and deps present
     if [ -f "frontend_new/config/recovery_bridge.py" ]; then
         echo "🔄 Starting Recovery Bridge on port 5102..."
         cd frontend_new/config
         if [ -d "../../.venv" ]; then
-            source ../../.venv/bin/activate && python recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
+            source ../../.venv/bin/activate
         elif [ -d "../venv" ]; then
-            source ../venv/bin/activate && python recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
-        else
-            python3 recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
+            source ../venv/bin/activate
         fi
-        echo $! > ../../logs/recovery_bridge.pid
+        if python -c "import websockets" >/dev/null 2>&1; then
+            python recovery_bridge.py > ../../logs/recovery_bridge.log 2>&1 &
+            echo $! > ../../logs/recovery_bridge.pid
+        else
+            echo "⚠️  Skipping Recovery Bridge: 'websockets' not installed. Run: source .venv/bin/activate && pip install -r requirements.txt" | tee -a ../../logs/recovery_bridge.log
+        fi
         cd ../..
     fi
     
@@ -120,7 +140,20 @@ echo "   Port 3001 (TTS): $(curl -s http://localhost:3001/health >/dev/null 2>&1
 echo "   Port 3000 (Goose): $(curl -s http://localhost:3000/ >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
 echo "   Port 3010 (OpenAI Proxy): $(curl -s http://localhost:3010/health >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
 echo "   Port 4000 (Upstream API): $(curl -s http://localhost:4000/v1/models >/dev/null 2>&1 && echo "✅ Active" || echo "❌ Down")"
+echo "   (Note: Upstream API on 4000 is external and not managed by this script)"
 
+# Optional component status (via Frontend if available)
+if curl -s http://localhost:5001/api/health >/dev/null 2>&1; then
+  echo ""
+  echo "🧩 Component Status (via Frontend):"
+  echo -n "   STT: "
+  curl -s http://localhost:5001/api/stt/status | jq -r '.whisper_available as $w | "Whisper="+($w|tostring)+", device="+(.device // "n/a")' 2>/dev/null || echo "Unavailable"
+  echo -n "   Vision: "
+  if command -v jq >/dev/null 2>&1; then
+    curl -s http://localhost:5001/api/vision/status | jq -r '"opencv="+(.modules.opencv|tostring)+", mediapipe="+(.modules.mediapipe|tostring)+", yolo="+(.modules.yolo|tostring)'
+  else
+    curl -s http://localhost:5001/api/vision/status || echo "Unavailable"
+  fi
 echo ""
 echo "🌐 Services should be available on:"
 echo "   - Frontend: http://localhost:5001"

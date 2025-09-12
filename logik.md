@@ -32,3 +32,22 @@
 	•	Користувач може задати: “пропускай все до X години” → рішення передається Грішi.
 	•	Система має самонавчатися та допрограмовувати себе для беззбійного виконання.
 
+
+
+
+--------------------------------
+
+Proposed commands to run
+
+Install Node deps:
+npm install
+Create Python venv and install deps:
+python3 -m venv .venv && source .venv/bin/activate && pip install --upgrade pip setuptools wheel && pip install -r requirements.txt
+Start the stack:
+./restart_simple.sh
+Quick sanity checks:
+curl -s http://localhost:3010/health
+curl -s http://localhost:3010/v1/models
+curl -s http://localhost:5001/api/health
+curl -s http://localhost:5101/health
+curl -s http://localhost:3001/health
